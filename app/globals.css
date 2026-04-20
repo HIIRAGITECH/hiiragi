@@ -24,3 +24,41 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ===== 印刷用スタイル ===== */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  /* 画面用クロームを非表示 */
+  .no-print {
+    display: none !important;
+  }
+
+  /* ダッシュボードのレイアウト余白を解除して紙面いっぱいに */
+  body,
+  html {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* 帳票本体の改ページ整形 */
+  .printable {
+    box-shadow: none !important;
+    page-break-inside: auto;
+  }
+  .printable table {
+    page-break-inside: auto;
+  }
+  .printable tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+}
