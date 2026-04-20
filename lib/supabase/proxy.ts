@@ -30,17 +30,22 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isAuthRoute = path === "/login";
+  // 未認証でアクセス可能なルート
+  const authEntryRoutes = ["/login", "/signup", "/reset-password"];
+  const isAuthEntry = authEntryRoutes.includes(path);
+  const isAuthCallback = path.startsWith("/auth/callback");
   const isPublicAsset =
     path.startsWith("/_next") || path.startsWith("/favicon");
 
-  if (!user && !isAuthRoute && !isPublicAsset) {
+  if (!user && !isAuthEntry && !isAuthCallback && !isPublicAsset) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthRoute) {
+  // ログイン済みでサインイン系画面に来た場合はダッシュボードへ
+  // ※ /update-password と /auth/callback はログイン済みでも通す
+  if (user && isAuthEntry) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);
