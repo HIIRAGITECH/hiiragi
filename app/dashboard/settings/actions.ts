@@ -8,6 +8,32 @@ export type SettingsFormState =
   | { success: true }
   | undefined;
 
+export type AssetUpdateResult = { success: true } | { error: string };
+
+export async function updateShopAsset({
+  kind,
+  path,
+}: {
+  kind: "logo" | "stamp";
+  path: string | null;
+}): Promise<AssetUpdateResult> {
+  if (kind !== "logo" && kind !== "stamp") {
+    return { error: "不正な種別です。" };
+  }
+
+  const supabase = await createClient();
+  const key = kind === "logo" ? "logo_path" : "stamp_path";
+  const { error } = await supabase.auth.updateUser({
+    data: { [key]: path },
+  });
+  if (error) {
+    return { error: `保存に失敗しました: ${error.message}` };
+  }
+
+  revalidatePath("/dashboard/settings");
+  return { success: true };
+}
+
 export async function updateShopInfo(
   _prev: SettingsFormState,
   formData: FormData,

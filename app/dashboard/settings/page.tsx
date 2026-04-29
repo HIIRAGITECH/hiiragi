@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { createClient } from "@/lib/supabase/server";
 import { getShopInfo } from "@/lib/shop";
 import SettingsForm from "./settings-form";
 
@@ -7,6 +8,11 @@ export const metadata: Metadata = {
 };
 
 export default async function SettingsPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const shop = await getShopInfo();
 
   return (
@@ -19,7 +25,7 @@ export default async function SettingsPage() {
       </p>
 
       <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <SettingsForm initial={shop} />
+        <SettingsForm initial={shop} userId={user!.id} />
       </div>
     </>
   );

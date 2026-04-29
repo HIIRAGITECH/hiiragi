@@ -41,23 +41,25 @@ export default async function OrderDetailPage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
-  const [{ data: customerData }, { data: vehicleData }] = await Promise.all([
+  const [{ data: customerData }, vehicleResult] = await Promise.all([
     supabase
       .from("customers")
       .select("*")
       .eq("id", order.customer_id)
       .eq("user_id", user!.id)
       .maybeSingle(),
-    supabase
-      .from("vehicles")
-      .select("*")
-      .eq("id", order.vehicle_id)
-      .eq("user_id", user!.id)
-      .maybeSingle(),
+    order.vehicle_id
+      ? supabase
+          .from("vehicles")
+          .select("*")
+          .eq("id", order.vehicle_id)
+          .eq("user_id", user!.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const customer = customerData as Customer | null;
-  const vehicle = vehicleData as Vehicle | null;
+  const vehicle = vehicleResult.data as Vehicle | null;
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
@@ -148,7 +150,11 @@ export default async function OrderDetailPage(
               <Field label="車台番号" value={vehicle.vin ?? "—"} />
             </dl>
           ) : (
-            <p className="text-sm text-zinc-500">車両情報が取得できません。</p>
+            <p className="text-sm text-zinc-500">
+              {order.vehicle_id
+                ? "車両情報が取得できません。"
+                : "車両は未選択です。"}
+            </p>
           )}
         </div>
       </section>

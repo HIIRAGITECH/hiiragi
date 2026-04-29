@@ -1,4 +1,10 @@
-import type { Customer, Order, ShopInfo, Vehicle } from "@/lib/types";
+import type {
+  Customer,
+  Order,
+  OrderItem,
+  ShopInfo,
+  Vehicle,
+} from "@/lib/types";
 import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
 import { formatDate, formatYen } from "@/lib/format";
 
@@ -8,6 +14,8 @@ type Props = {
   customer: Customer | null;
   vehicle: Vehicle | null;
   shop: ShopInfo;
+  logoUrl: string | null;
+  stampUrl: string | null;
 };
 
 export default function PrintableDocument({
@@ -16,11 +24,21 @@ export default function PrintableDocument({
   customer,
   vehicle,
   shop,
+  logoUrl,
+  stampUrl,
 }: Props) {
+  const allItems = order.items ?? [];
   const totals = calculateTotals(
-    order.items ?? [],
+    allItems,
     order.discount_amount,
     order.deposit_amount,
+  );
+  const normalItems = allItems.filter((i) => i.type !== "shaken");
+  const shakenTaxableItems = allItems.filter(
+    (i) => i.type === "shaken" && !i.tax_free,
+  );
+  const shakenTaxFreeItems = allItems.filter(
+    (i) => i.type === "shaken" && i.tax_free === true,
   );
   const title = type === "estimate" ? "見積書" : "請求書";
   const today = new Date().toISOString().slice(0, 10);
@@ -44,6 +62,14 @@ export default function PrintableDocument({
               ? "下記の通りお見積申し上げます。"
               : "下記の通りご請求申し上げます。"}
           </p>
+          {logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl}
+              alt={shop.shop_name || "店舗ロゴ"}
+              className="mt-6 h-12 w-auto object-contain"
+            />
+          )}
         </div>
         <div className="text-right">
           <dl className="mb-3 inline-block text-left text-xs">
@@ -52,9 +78,21 @@ export default function PrintableDocument({
             <Row label="受付日" value={formatDate(order.reception_date)} />
           </dl>
           <div className="mt-3 border-t border-black pt-2 text-xs">
-            <p className="text-base font-semibold">
-              {shop.shop_name || "（店舗名 未設定）"}
-            </p>
+            <div className="relative inline-block">
+              {/* 印鑑は背景に配置: DOM上で先に置き、会社名側に position:relative を付与することで会社名が前面に来る */}
+              {stampUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={stampUrl}
+                  alt=""
+                  aria-hidden
+                  className="pointer-events-none absolute right-0 top-1/2 h-16 w-16 -translate-y-1/2 translate-x-6 select-none"
+                />
+              )}
+              <p className="relative text-base font-semibold">
+                {shop.shop_name || "（店舗名 未設定）"}
+              </p>
+            </div>
             {shop.address && <p>{shop.address}</p>}
             {shop.phone && <p>TEL: {shop.phone}</p>}
             {shop.registration_no && (
@@ -83,55 +121,68 @@ export default function PrintableDocument({
         </div>
       </section>
 
-      {/* 明細 */}
-      <table className="mb-6 w-full border-collapse text-xs">
-        <thead>
-          <tr className="border-y-2 border-black">
-            <th className="px-2 py-1.5 text-left">品名</th>
-            <th className="w-20 px-2 py-1.5 text-right">数量</th>
-            <th className="w-28 px-2 py-1.5 text-right">単価</th>
-            <th className="w-32 px-2 py-1.5 text-right">小計</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(order.items ?? []).length === 0 ? (
-            <tr>
-              <td
-                colSpan={4}
-                className="px-2 py-6 text-center text-zinc-500"
-              >
-                明細がありません。
-              </td>
-            </tr>
-          ) : (
-            (order.items ?? []).map((it, i) => (
-              <tr key={i} className="border-b border-zinc-300">
-                <td className="px-2 py-1.5">{it.name}</td>
-                <td className="px-2 py-1.5 text-right">{it.quantity}</td>
-                <td className="px-2 py-1.5 text-right">
-                  {formatYen(it.unit_price)}
-                </td>
-                <td className="px-2 py-1.5 text-right">
-                  {formatYen(rowSubtotal(it))}
-                </td>
-              </tr>
-            ))
+      {/* 明細（セクション別）*/}
+      {allItems.length === 0 ? (
+        <div className="mb-6 border-y-2 border-black px-2 py-6 text-center text-xs text-zinc-500">
+          明細がありません。
+        </div>
+      ) : (
+        <>
+          {normalItems.length > 0 && (
+            <ItemsSection
+              title="整備費用"
+              items={normalItems}
+              showBreakdown
+            />
           )}
-        </tbody>
-      </table>
+          {shakenTaxableItems.length > 0 && (
+            <ItemsSection
+              title="車検費用（課税）"
+              items={shakenTaxableItems}
+              showBreakdown
+            />
+          )}
+          {shakenTaxFreeItems.length > 0 && (
+            <ItemsSection
+              title="車検費用（非課税）"
+              items={shakenTaxFreeItems}
+              showBreakdown={false}
+            />
+          )}
+        </>
+      )}
 
       {/* 合計 */}
       <div className="mb-6 ml-auto w-72 text-xs">
-        <TotalsRow label="小計" value={formatYen(totals.subtotal)} />
+        {totals.sections.normal.subtotal > 0 && (
+          <TotalsRow
+            label="整備小計"
+            value={formatYen(totals.sections.normal.subtotal)}
+          />
+        )}
+        {totals.sections.shakenTaxable.subtotal > 0 && (
+          <TotalsRow
+            label="車検課税小計"
+            value={formatYen(totals.sections.shakenTaxable.subtotal)}
+          />
+        )}
+        {totals.sections.shakenTaxFree.subtotal > 0 && (
+          <TotalsRow
+            label="車検非課税小計"
+            value={formatYen(totals.sections.shakenTaxFree.subtotal)}
+          />
+        )}
         {totals.discount > 0 && (
           <TotalsRow
             label="値引き"
             value={`− ${formatYen(totals.discount)}`}
+            divider
           />
         )}
         <TotalsRow
           label="課税対象額"
           value={formatYen(totals.taxableAmount)}
+          divider
         />
         <TotalsRow label="消費税(10%)" value={formatYen(totals.tax)} />
         <TotalsRow
@@ -139,7 +190,7 @@ export default function PrintableDocument({
           value={formatYen(totals.total)}
           emphasize
         />
-        {(type === "invoice" || totals.deposit > 0) && totals.deposit > 0 && (
+        {totals.deposit > 0 && (
           <>
             <TotalsRow
               label="預かり金"
@@ -181,19 +232,88 @@ function Row({
   );
 }
 
+function ItemsSection({
+  title,
+  items,
+  showBreakdown,
+}: {
+  title: string;
+  items: OrderItem[];
+  showBreakdown: boolean;
+}) {
+  return (
+    <section className="mb-5">
+      <h2 className="mb-1 break-after-avoid border-b border-black pb-0.5 text-xs font-bold tracking-wide">
+        【{title}】
+      </h2>
+      <table className="w-full border-collapse text-xs">
+        <thead>
+          <tr className="border-b-2 border-black">
+            <th className="px-2 py-1.5 text-left">品名</th>
+            <th className="w-14 px-2 py-1.5 text-right">数量</th>
+            {showBreakdown ? (
+              <>
+                <th className="w-24 px-2 py-1.5 text-right">工賃</th>
+                <th className="w-24 px-2 py-1.5 text-right">部品代</th>
+              </>
+            ) : (
+              <th className="w-28 px-2 py-1.5 text-right">単価</th>
+            )}
+            <th className="w-28 px-2 py-1.5 text-right">小計</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr key={i} className="border-b border-zinc-300">
+              <td className="px-2 py-1.5">{it.name}</td>
+              <td className="px-2 py-1.5 text-right">{it.quantity}</td>
+              {showBreakdown ? (
+                <>
+                  <td className="px-2 py-1.5 text-right">
+                    {it.labor_cost !== undefined
+                      ? formatYen(it.labor_cost)
+                      : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    {it.parts_cost !== undefined
+                      ? formatYen(it.parts_cost)
+                      : "—"}
+                  </td>
+                </>
+              ) : (
+                <td className="px-2 py-1.5 text-right">
+                  {formatYen(it.unit_price)}
+                </td>
+              )}
+              <td className="px-2 py-1.5 text-right">
+                {formatYen(rowSubtotal(it))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function TotalsRow({
   label,
   value,
   emphasize,
+  divider,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
+  divider?: boolean;
 }) {
+  const className = emphasize
+    ? "border-y-2 border-black text-base font-bold"
+    : divider
+      ? "border-t border-black"
+      : "";
   return (
-    <div
-      className={`flex justify-between border-b border-zinc-300 px-1 py-1 ${emphasize ? "border-y-2 border-black text-base font-bold" : ""}`}
-    >
+    <div className={`flex justify-between px-1 py-1 ${className}`}>
       <span>{label}</span>
       <span>{value}</span>
     </div>

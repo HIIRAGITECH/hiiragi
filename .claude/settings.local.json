@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "mcp__supabase-hiiragi-dev__apply_migration",
+      "mcp__supabase-hiiragi-dev__execute_sql",
+      "Bash(npx tsc *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(npx eslint *)",
+      "mcp__supabase-hiiragi-dev__list_tables",
+      "Bash(echo \"tsc_exit=$?\")",
+      "Bash(echo \"eslint_exit=$?\")"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "supabase-hiiragi-dev"
+  ]
 }

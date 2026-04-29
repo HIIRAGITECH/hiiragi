@@ -104,6 +104,62 @@ export async function deleteCustomer(formData: FormData) {
   redirect("/dashboard/customers");
 }
 
+// 受注フォームのモーダルから呼ばれる。redirectしない＆登録した車両のid/labelを返す。
+export type VehicleQuickAddInput = {
+  plate_number: string | null;
+  maker: string | null;
+  model: string | null;
+  model_year: number | null;
+  color: string | null;
+  vin: string | null;
+  notes: string | null;
+};
+
+export type VehicleQuickAddResult =
+  | { error: string }
+  | { success: true; vehicle: { id: string; label: string } };
+
+export async function createVehicleInline(
+  customerId: string,
+  input: VehicleQuickAddInput,
+): Promise<VehicleQuickAddResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
+  // 自分の顧客かどうか確認（RLSでも弾かれるが、明示的にチェック）
+  const { data: customer } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("id", customerId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!customer) {
+    return { error: "対象の顧客が見つかりません。" };
+  }
+
+  const { data: inserted, error } = await supabase
+    .from("vehicles")
+    .insert({ ...input, customer_id: customerId, user_id: user.id })
+    .select("id, plate_number, maker, model")
+    .single();
+  if (error || !inserted) {
+    return { error: `登録に失敗しました: ${error?.message ?? "不明なエラー"}` };
+  }
+
+  const label =
+    [inserted.plate_number, inserted.maker, inserted.model]
+      .filter(Boolean)
+      .join(" / ") || inserted.id;
+
+  revalidatePath(`/dashboard/customers/${customerId}`);
+  return { success: true, vehicle: { id: inserted.id, label } };
+}
+
 export async function createVehicle(
   customerId: string,
   _prev: FormState,

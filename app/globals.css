@@ -53,6 +53,12 @@ body {
   .printable {
     box-shadow: none !important;
     page-break-inside: auto;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .printable img {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .printable table {
     page-break-inside: auto;

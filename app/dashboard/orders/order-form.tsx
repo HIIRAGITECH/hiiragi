@@ -8,6 +8,7 @@ import {
   type Order,
 } from "@/lib/types";
 import type { FormState } from "./actions";
+import VehicleQuickAddModal from "./vehicle-quick-add-modal";
 
 export type CustomerOption = {
   id: string;
@@ -44,21 +45,33 @@ export default function OrderForm({
   );
 
   const initialCustomerId = initial?.customer_id ?? customers[0]?.id ?? "";
-  const initialVehicleId =
-    initial?.vehicle_id ??
-    customers.find((c) => c.id === initialCustomerId)?.vehicles[0]?.id ??
-    "";
+  const initialVehicleId = initial?.vehicle_id ?? "";
 
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
+  // モーダルから追加された車両をローカルで保持（顧客ID毎）
+  const [extraVehicles, setExtraVehicles] = useState<
+    Record<string, { id: string; label: string }[]>
+  >({});
+  const [modalOpen, setModalOpen] = useState(false);
 
   const selectedCustomer = customers.find((c) => c.id === customerId);
-  const vehicles = selectedCustomer?.vehicles ?? [];
+  const baseVehicles = selectedCustomer?.vehicles ?? [];
+  const extra = extraVehicles[customerId] ?? [];
+  const vehicles = [...baseVehicles, ...extra];
 
   function handleCustomerChange(newId: string) {
     setCustomerId(newId);
-    const newCustomer = customers.find((c) => c.id === newId);
-    setVehicleId(newCustomer?.vehicles[0]?.id ?? "");
+    // 顧客が変わったら車両選択はリセット（以前の車両は別顧客所属なので）
+    setVehicleId("");
+  }
+
+  function handleVehicleAdded(v: { id: string; label: string }) {
+    setExtraVehicles((prev) => ({
+      ...prev,
+      [customerId]: [...(prev[customerId] ?? []), v],
+    }));
+    setVehicleId(v.id);
   }
 
   return (
@@ -86,27 +99,39 @@ export default function OrderForm({
 
         <div>
           <label htmlFor="vehicle_id" className={labelClass}>
-            車両 <span className="text-red-600">*</span>
+            車両
           </label>
-          <select
-            id="vehicle_id"
-            name="vehicle_id"
-            required
-            value={vehicleId}
-            onChange={(e) => setVehicleId(e.target.value)}
-            disabled={vehicles.length === 0}
-            className={inputClass}
-          >
-            {vehicles.length === 0 ? (
-              <option value="">この顧客には車両が登録されていません</option>
-            ) : (
-              vehicles.map((v) => (
+          <div className="flex gap-2">
+            <select
+              id="vehicle_id"
+              name="vehicle_id"
+              value={vehicleId}
+              onChange={(e) => setVehicleId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">
+                {vehicles.length === 0
+                  ? "（この顧客には車両が登録されていません）"
+                  : "（未選択）"}
+              </option>
+              {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
                   {v.label}
                 </option>
-              ))
-            )}
-          </select>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              disabled={!customerId}
+              title={
+                customerId ? "この顧客に車両を新規登録" : "先に顧客を選択してください"
+              }
+              className="shrink-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              ＋ 新規
+            </button>
+          </div>
         </div>
 
         <div>
@@ -193,12 +218,21 @@ export default function OrderForm({
         </Link>
         <button
           type="submit"
-          disabled={pending || vehicles.length === 0}
+          disabled={pending}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
           {pending ? "保存中..." : submitLabel}
         </button>
       </div>
+
+      {modalOpen && (
+        <VehicleQuickAddModal
+          customerId={customerId}
+          customerName={selectedCustomer?.name ?? ""}
+          onClose={() => setModalOpen(false)}
+          onAdded={handleVehicleAdded}
+        />
+      )}
     </form>
   );
 }

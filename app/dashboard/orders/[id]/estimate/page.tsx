@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getShopInfo } from "@/lib/shop";
+import { getShopAssetSignedUrl, getShopInfo } from "@/lib/shop";
 import type { Customer, Order, Vehicle } from "@/lib/types";
 import PrintableDocument from "../printable-document";
 import PrintButton from "../print-button";
@@ -30,20 +30,28 @@ export default async function EstimatePage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
-  const [{ data: customerData }, { data: vehicleData }, shop] = await Promise.all([
+  const [{ data: customerData }, vehicleResult, shop] = await Promise.all([
     supabase
       .from("customers")
       .select("*")
       .eq("id", order.customer_id)
       .eq("user_id", user!.id)
       .maybeSingle(),
-    supabase
-      .from("vehicles")
-      .select("*")
-      .eq("id", order.vehicle_id)
-      .eq("user_id", user!.id)
-      .maybeSingle(),
+    order.vehicle_id
+      ? supabase
+          .from("vehicles")
+          .select("*")
+          .eq("id", order.vehicle_id)
+          .eq("user_id", user!.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
     getShopInfo(),
+  ]);
+  const vehicleData = vehicleResult.data;
+
+  const [logoUrl, stampUrl] = await Promise.all([
+    getShopAssetSignedUrl(shop.logo_path),
+    getShopAssetSignedUrl(shop.stamp_path),
   ]);
 
   return (
@@ -64,6 +72,8 @@ export default async function EstimatePage(
         customer={customerData as Customer | null}
         vehicle={vehicleData as Vehicle | null}
         shop={shop}
+        logoUrl={logoUrl}
+        stampUrl={stampUrl}
       />
     </>
   );

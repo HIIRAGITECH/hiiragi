@@ -29,7 +29,7 @@ function isEstimateStatus(v: string | null): v is EstimateStatus {
 
 type OrderPayload = {
   customer_id: string;
-  vehicle_id: string;
+  vehicle_id: string | null;
   reception_date: string;
   work_status: WorkStatus;
   estimate_status: EstimateStatus;
@@ -44,7 +44,6 @@ function readPayload(formData: FormData): OrderPayload | { error: string } {
   const estimate_status = pickString(formData, "estimate_status");
 
   if (!customer_id) return { error: "顧客を選択してください。" };
-  if (!vehicle_id) return { error: "車両を選択してください。" };
   if (!reception_date) return { error: "受付日を入力してください。" };
   if (!isWorkStatus(work_status)) return { error: "作業ステータスが不正です。" };
   if (!isEstimateStatus(estimate_status)) {
@@ -128,7 +127,26 @@ function parseItems(json: string): OrderItem[] | null {
       if (!name) continue; // 品名空の行はスキップ
       if (!Number.isFinite(quantity) || quantity < 0) return null;
       if (!Number.isFinite(unit_price) || unit_price < 0) return null;
-      items.push({ name, quantity, unit_price: Math.round(unit_price) });
+      const item: OrderItem = {
+        name,
+        quantity,
+        unit_price: Math.round(unit_price),
+      };
+      if (r?.type === "shaken") item.type = "shaken";
+      if (r?.tax_free === true) item.tax_free = true;
+      // labor_cost / parts_cost: 値が存在し有効な数値なら保存。両方未指定なら
+      // 単価のみの既存データと同じ扱いでこれらのプロパティは出力しない。
+      if (r?.labor_cost !== undefined && r?.labor_cost !== null) {
+        const n = Number(r.labor_cost);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.labor_cost = Math.round(n);
+      }
+      if (r?.parts_cost !== undefined && r?.parts_cost !== null) {
+        const n = Number(r.parts_cost);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.parts_cost = Math.round(n);
+      }
+      items.push(item);
     }
     return items;
   } catch {
