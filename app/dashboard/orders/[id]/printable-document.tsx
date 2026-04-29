@@ -1,4 +1,5 @@
 import type {
+  BankInfo,
   Customer,
   Order,
   OrderItem,
@@ -7,6 +8,13 @@ import type {
 } from "@/lib/types";
 import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
 import { formatDate, formatYen } from "@/lib/format";
+
+function hasBankInfo(b: BankInfo | undefined): b is BankInfo {
+  if (!b) return false;
+  return [b.bank_name, b.branch_name, b.account_number, b.account_holder].some(
+    (v) => v.trim() !== "",
+  );
+}
 
 type Props = {
   type: "estimate" | "invoice";
@@ -205,13 +213,60 @@ export default function PrintableDocument({
         )}
       </div>
 
+      {type === "invoice" && hasBankInfo(shop.bank_info) && (
+        <section
+          className="mb-6 rounded border border-zinc-300 p-3 text-xs"
+          style={{ pageBreakInside: "avoid" }}
+        >
+          <h2 className="mb-2 text-[11px] font-semibold tracking-widest text-zinc-600">
+            お振込先
+          </h2>
+          <BankInfoRows bank={shop.bank_info} />
+        </section>
+      )}
+
       {order.notes && (
-        <section className="mt-8 border-t border-zinc-300 pt-3 text-xs">
+        <section
+          className="mt-8 border-t border-zinc-300 pt-3 text-xs"
+          style={{ pageBreakInside: "avoid" }}
+        >
           <h2 className="mb-1 font-semibold">備考</h2>
           <p className="whitespace-pre-wrap">{order.notes}</p>
         </section>
       )}
     </article>
+  );
+}
+
+function BankInfoRows({ bank }: { bank: BankInfo }) {
+  const bankAndBranch = [bank.bank_name, bank.branch_name]
+    .filter((s) => s.trim() !== "")
+    .join(" ");
+  const accountLine = [bank.account_type, bank.account_number]
+    .filter((s) => s.trim() !== "")
+    .join(" ");
+
+  return (
+    <dl className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-1">
+      {bankAndBranch && (
+        <>
+          <dt className="text-zinc-600">銀行・支店</dt>
+          <dd>{bankAndBranch}</dd>
+        </>
+      )}
+      {accountLine && (
+        <>
+          <dt className="text-zinc-600">種別 / 番号</dt>
+          <dd className="font-mono">{accountLine}</dd>
+        </>
+      )}
+      {bank.account_holder.trim() !== "" && (
+        <>
+          <dt className="text-zinc-600">名義</dt>
+          <dd>{bank.account_holder}</dd>
+        </>
+      )}
+    </dl>
   );
 }
 

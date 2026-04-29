@@ -2,6 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import {
+  BANK_ACCOUNT_TYPES,
+  type BankAccountType,
+  type BankInfo,
+} from "@/lib/types";
 
 export type SettingsFormState =
   | { error: string }
@@ -34,6 +39,13 @@ export async function updateShopAsset({
   return { success: true };
 }
 
+function pickAccountType(v: FormDataEntryValue | null): BankAccountType {
+  const s = typeof v === "string" ? v : "";
+  return (BANK_ACCOUNT_TYPES as readonly string[]).includes(s)
+    ? (s as BankAccountType)
+    : "普通";
+}
+
 export async function updateShopInfo(
   _prev: SettingsFormState,
   formData: FormData,
@@ -43,6 +55,14 @@ export async function updateShopInfo(
     return { error: "店舗名は必須です。" };
   }
 
+  const bank_info: BankInfo = {
+    bank_name: String(formData.get("bank_name") ?? "").trim(),
+    branch_name: String(formData.get("branch_name") ?? "").trim(),
+    account_type: pickAccountType(formData.get("account_type")),
+    account_number: String(formData.get("account_number") ?? "").trim(),
+    account_holder: String(formData.get("account_holder") ?? "").trim(),
+  };
+
   const supabase = await createClient();
   const { error } = await supabase.auth.updateUser({
     data: {
@@ -50,6 +70,7 @@ export async function updateShopInfo(
       address: String(formData.get("address") ?? "").trim(),
       phone: String(formData.get("phone") ?? "").trim(),
       registration_no: String(formData.get("registration_no") ?? "").trim(),
+      bank_info,
     },
   });
 

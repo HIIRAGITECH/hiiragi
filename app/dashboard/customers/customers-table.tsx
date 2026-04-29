@@ -152,7 +152,7 @@ function NotesCell({
           onClick={onToggle}
           aria-expanded={expanded}
           aria-label={expanded ? "メモを閉じる" : "メモを開く"}
-          className="block w-full min-h-11 cursor-pointer text-left"
+          className="block w-full cursor-pointer text-left"
         >
           <span className="block truncate">{notes}</span>
         </button>

@@ -76,8 +76,21 @@ export type Order = {
   updated_at: string;
 };
 
+export const BANK_ACCOUNT_TYPES = ["普通", "当座"] as const;
+export type BankAccountType = (typeof BANK_ACCOUNT_TYPES)[number];
+
+// 振込先（請求書のフッタに表示）。すべて未入力時は表示しない。
+export type BankInfo = {
+  bank_name: string;
+  branch_name: string;
+  account_type: BankAccountType;
+  account_number: string;
+  account_holder: string;
+};
+
 // 設定画面で auth.users.user_metadata に保存
 // logo_path / stamp_path は Supabase Storage の shop-assets バケット内の path（署名URLは表示時に生成）
+// bank_info は optional のネストオブジェクト（既存ユーザーは undefined のまま）
 export type ShopInfo = {
   shop_name: string;
   address: string;
@@ -85,6 +98,7 @@ export type ShopInfo = {
   registration_no: string; // インボイス制度の登録番号
   logo_path: string | null;
   stamp_path: string | null;
+  bank_info?: BankInfo;
 };
 
 export type OrderInput = Omit<

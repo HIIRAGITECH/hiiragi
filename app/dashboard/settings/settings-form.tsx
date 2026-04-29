@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import type { ShopInfo } from "@/lib/types";
+import { BANK_ACCOUNT_TYPES, type ShopInfo } from "@/lib/types";
 import { updateShopInfo, type SettingsFormState } from "./actions";
 import ImageUpload from "./image-upload";
 
@@ -80,6 +80,88 @@ export default function SettingsForm({
             className={inputClass}
           />
         </div>
+
+        <fieldset className="border-t border-zinc-200 pt-6 dark:border-zinc-800">
+          <legend className="mb-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            振込先情報
+          </legend>
+          <p className="mb-4 text-xs text-zinc-500 dark:text-zinc-400">
+            請求書のフッタに表示されます。すべて未入力の場合は表示されません。
+          </p>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="bank_name" className={labelClass}>
+                銀行名
+              </label>
+              <input
+                id="bank_name"
+                name="bank_name"
+                defaultValue={initial.bank_info?.bank_name ?? ""}
+                placeholder="例: 千葉銀行"
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="branch_name" className={labelClass}>
+                支店名
+              </label>
+              <input
+                id="branch_name"
+                name="branch_name"
+                defaultValue={initial.bank_info?.branch_name ?? ""}
+                placeholder="例: 佐倉支店"
+                className={inputClass}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="account_type" className={labelClass}>
+                口座種別
+              </label>
+              <select
+                id="account_type"
+                name="account_type"
+                defaultValue={initial.bank_info?.account_type ?? "普通"}
+                className={inputClass}
+              >
+                {BANK_ACCOUNT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="account_number" className={labelClass}>
+                口座番号
+              </label>
+              <input
+                id="account_number"
+                name="account_number"
+                inputMode="numeric"
+                defaultValue={initial.bank_info?.account_number ?? ""}
+                placeholder="1234567"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="sm:col-span-2">
+              <label htmlFor="account_holder" className={labelClass}>
+                口座名義
+              </label>
+              <input
+                id="account_holder"
+                name="account_holder"
+                defaultValue={initial.bank_info?.account_holder ?? ""}
+                placeholder="例: ヒイラギジドウシヤセイビコウジヨウ"
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </fieldset>
 
         {error && (
           <p
