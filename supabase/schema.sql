@@ -1,13 +1,48 @@
--- HIIRAGI 顧客・車両管理スキーマ参照（実行はユーザ環境で完了済み想定）
+-- HIIRAGI 顧客・車両・受注 管理スキーマ参照（実行はユーザ環境で完了済み想定）
 -- アプリは以下の列を参照する。実DBがこのスキーマと一致することを前提とする。
+-- 新規環境はこのファイルを上から順に流せば再現可能。
 
--- ID 採番用シーケンス
-CREATE SEQUENCE IF NOT EXISTS customer_id_seq START 1;
-CREATE SEQUENCE IF NOT EXISTS vehicle_id_seq START 1;
+-- ============================================================
+-- 採番カウンタ（ユーザ別）
+-- customers/vehicles/orders の id はユーザごとに 1 から採番する。
+-- last_seq は INSERT...ON CONFLICT でアトミックに更新。
+-- ============================================================
 
--- customers
+CREATE TABLE IF NOT EXISTS customer_seq (
+  user_id   uuid    NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  last_seq  integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS vehicle_seq (
+  user_id   uuid    NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  last_seq  integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id)
+);
+
+ALTER TABLE customer_seq ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vehicle_seq  ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS customer_seq_owner ON customer_seq;
+CREATE POLICY customer_seq_owner ON customer_seq
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+DROP POLICY IF EXISTS vehicle_seq_owner ON vehicle_seq;
+CREATE POLICY vehicle_seq_owner ON vehicle_seq
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- ============================================================
+-- customers / vehicles
+-- 複合 PK (user_id, id) によりユーザ別の id 採番（CU0001 等）が衝突しない。
+-- 子の FK も (user_id, parent_id) で複合参照する。
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS customers (
-  id           text PRIMARY KEY,
+  id           text NOT NULL,
   user_id      uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   name         text NOT NULL,
   name_kana    text,
@@ -17,14 +52,14 @@ CREATE TABLE IF NOT EXISTS customers (
   address      text,
   notes        text,
   created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now()
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, id)
 );
 
--- vehicles（顧客削除時に紐づく車両もカスケード削除）
 CREATE TABLE IF NOT EXISTS vehicles (
-  id            text PRIMARY KEY,
+  id            text NOT NULL,
   user_id       uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  customer_id   text NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  customer_id   text NOT NULL,
   plate_number  text,
   maker         text,
   model         text,
@@ -33,27 +68,45 @@ CREATE TABLE IF NOT EXISTS vehicles (
   vin           text,
   notes         text,
   created_at    timestamptz NOT NULL DEFAULT now(),
-  updated_at    timestamptz NOT NULL DEFAULT now()
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, id),
+  FOREIGN KEY (user_id, customer_id) REFERENCES customers(user_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS customers_user_id_idx ON customers(user_id);
+CREATE INDEX IF NOT EXISTS customers_user_id_idx    ON customers(user_id);
 CREATE INDEX IF NOT EXISTS vehicles_customer_id_idx ON vehicles(customer_id);
-CREATE INDEX IF NOT EXISTS vehicles_user_id_idx ON vehicles(user_id);
+CREATE INDEX IF NOT EXISTS vehicles_user_id_idx     ON vehicles(user_id);
 
 -- ID 自動採番トリガ（CU0001 / VH0001 形式、4桁未満はゼロ埋め、5桁以上はそのまま伸長）
 CREATE OR REPLACE FUNCTION assign_customer_id() RETURNS trigger AS $$
+DECLARE
+  v_seq integer;
 BEGIN
   IF NEW.id IS NULL OR NEW.id = '' THEN
-    NEW.id := 'CU' || LPAD(nextval('customer_id_seq')::text, 4, '0');
+    INSERT INTO customer_seq (user_id, last_seq)
+    VALUES (NEW.user_id, 1)
+    ON CONFLICT (user_id) DO UPDATE
+      SET last_seq = customer_seq.last_seq + 1
+    RETURNING last_seq INTO v_seq;
+
+    NEW.id := 'CU' || LPAD(v_seq::text, 4, '0');
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION assign_vehicle_id() RETURNS trigger AS $$
+DECLARE
+  v_seq integer;
 BEGIN
   IF NEW.id IS NULL OR NEW.id = '' THEN
-    NEW.id := 'VH' || LPAD(nextval('vehicle_id_seq')::text, 4, '0');
+    INSERT INTO vehicle_seq (user_id, last_seq)
+    VALUES (NEW.user_id, 1)
+    ON CONFLICT (user_id) DO UPDATE
+      SET last_seq = vehicle_seq.last_seq + 1
+    RETURNING last_seq INTO v_seq;
+
+    NEW.id := 'VH' || LPAD(v_seq::text, 4, '0');
   END IF;
   RETURN NEW;
 END;
@@ -126,8 +179,11 @@ CREATE POLICY vehicles_owner_delete ON vehicles
   FOR DELETE TO authenticated USING (user_id = auth.uid());
 
 -- ============================================================
--- 受注（フェーズ4）
+-- 受注（フェーズ4 + フェーズ5/6 拡張）
 -- 管理番号: YY + "MB-" + 4桁連番。ユーザ毎・年毎にカウンタ別管理。
+-- 明細 items は jsonb 配列。割引・預かり金は整数（円）。
+-- 写真フォルダURLは Google Drive 等の外部ストレージ URL。
+-- vehicle_id は NULL 許容（車両未登録の段階で受注を立てるケース対応）。
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS order_seq (
@@ -146,18 +202,25 @@ CREATE POLICY order_seq_owner ON order_seq
   WITH CHECK (user_id = auth.uid());
 
 CREATE TABLE IF NOT EXISTS orders (
-  id               text PRIMARY KEY,
-  user_id          uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  customer_id      text NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-  vehicle_id       text NOT NULL REFERENCES vehicles(id)  ON DELETE CASCADE,
-  reception_date   date NOT NULL DEFAULT current_date,
-  work_status      text NOT NULL DEFAULT '受付'
+  id                text NOT NULL,
+  user_id           uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  customer_id       text NOT NULL,
+  vehicle_id        text,
+  reception_date    date NOT NULL DEFAULT current_date,
+  work_status       text NOT NULL DEFAULT '受付'
     CHECK (work_status IN ('受付','作業中','完了','請求済')),
-  estimate_status  text NOT NULL DEFAULT '未作成'
+  estimate_status   text NOT NULL DEFAULT '未作成'
     CHECK (estimate_status IN ('未作成','見積済')),
-  notes            text,
-  created_at       timestamptz NOT NULL DEFAULT now(),
-  updated_at       timestamptz NOT NULL DEFAULT now()
+  notes             text,
+  items             jsonb   NOT NULL DEFAULT '[]'::jsonb,
+  discount_amount   integer NOT NULL DEFAULT 0,
+  deposit_amount    integer NOT NULL DEFAULT 0,
+  photo_folder_url  text,
+  created_at        timestamptz NOT NULL DEFAULT now(),
+  updated_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, id),
+  FOREIGN KEY (user_id, customer_id) REFERENCES customers(user_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id, vehicle_id)  REFERENCES vehicles(user_id, id)  ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS orders_user_id_idx     ON orders(user_id);
@@ -212,21 +275,3 @@ CREATE POLICY orders_owner_update ON orders
                               WITH CHECK (user_id = auth.uid());
 CREATE POLICY orders_owner_delete ON orders
   FOR DELETE TO authenticated USING (user_id = auth.uid());
-
--- ============================================================
--- 見積/請求 拡張（フェーズ5）
--- 明細は items jsonb（配列）。割引・預かり金は整数（円）。
--- ============================================================
-
-ALTER TABLE orders
-  ADD COLUMN IF NOT EXISTS items           jsonb   NOT NULL DEFAULT '[]'::jsonb,
-  ADD COLUMN IF NOT EXISTS discount_amount integer NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS deposit_amount  integer NOT NULL DEFAULT 0;
-
--- ============================================================
--- 写真フォルダURL（フェーズ6）
--- 整備写真を Google Drive 等の外部ストレージで管理する想定。
--- ============================================================
-
-ALTER TABLE orders
-  ADD COLUMN IF NOT EXISTS photo_folder_url text;

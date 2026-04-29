@@ -81,7 +81,10 @@ export default async function OrderDetailPage(
                 {order.id}
               </h2>
               <WorkStatusBadge value={order.work_status} />
-              <EstimateStatusBadge value={order.estimate_status} />
+              <EstimateStatusBadge
+                value={order.estimate_status}
+                orderId={order.id}
+              />
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               受付日: {formatDate(order.reception_date)}

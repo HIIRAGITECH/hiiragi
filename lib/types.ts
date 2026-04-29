@@ -92,11 +92,11 @@ export type OrderInput = Omit<
   "id" | "user_id" | "created_at" | "updated_at"
 >;
 
-// 一覧用: 顧客名・車種を join 表示
+// 一覧用: 顧客名・車種を join 表示。一覧の検索対象になる列も含む。
 export type OrderListRow = Pick<
   Order,
-  "id" | "reception_date" | "work_status" | "estimate_status"
+  "id" | "reception_date" | "work_status" | "estimate_status" | "notes"
 > & {
-  customer: Pick<Customer, "id" | "name"> | null;
-  vehicle: Pick<Vehicle, "id" | "model" | "plate_number"> | null;
+  customer: Pick<Customer, "id" | "name" | "name_kana"> | null;
+  vehicle: Pick<Vehicle, "id" | "maker" | "model" | "plate_number"> | null;
 };

@@ -95,7 +95,18 @@ export async function updateOrder(
   if ("error" in result) return result;
 
   const supabase = await createClient();
-  const { error } = await supabase.from("orders").update(result).eq("id", id);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update(result)
+    .eq("id", id)
+    .eq("user_id", user.id);
   if (error) {
     return { error: `更新に失敗しました: ${error.message}` };
   }
@@ -109,7 +120,16 @@ export async function deleteOrder(formData: FormData) {
   if (!id) return;
 
   const supabase = await createClient();
-  await supabase.from("orders").delete().eq("id", id);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await supabase
+    .from("orders")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   revalidatePath("/dashboard/orders");
 }
@@ -173,10 +193,18 @@ export async function updateOrderItems(
   const deposit_amount = parseInt0(formData.get("deposit_amount"));
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
   const { error } = await supabase
     .from("orders")
     .update({ items, discount_amount, deposit_amount })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) {
     return { error: `保存に失敗しました: ${error.message}` };
@@ -201,10 +229,18 @@ export async function updatePhotoFolderUrl(
   }
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
   const { error } = await supabase
     .from("orders")
     .update({ photo_folder_url: value })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) {
     return { error: `保存に失敗しました: ${error.message}` };
@@ -217,10 +253,16 @@ export async function updatePhotoFolderUrl(
 // 見積書を開く際に呼ぶ。estimate_status を「見積済」に更新してから印刷ページへ遷移する。
 export async function openEstimate(id: string) {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
   await supabase
     .from("orders")
     .update({ estimate_status: "見積済" satisfies EstimateStatus })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath("/dashboard/orders");

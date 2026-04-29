@@ -83,7 +83,18 @@ export async function updateCustomer(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from("customers").update(payload).eq("id", id);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
+  const { error } = await supabase
+    .from("customers")
+    .update(payload)
+    .eq("id", id)
+    .eq("user_id", user.id);
   if (error) {
     return { error: `更新に失敗しました: ${error.message}` };
   }
@@ -98,7 +109,16 @@ export async function deleteCustomer(formData: FormData) {
   if (!id) return;
 
   const supabase = await createClient();
-  await supabase.from("customers").delete().eq("id", id);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await supabase
+    .from("customers")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   revalidatePath("/dashboard/customers");
   redirect("/dashboard/customers");
@@ -195,10 +215,18 @@ export async function updateVehicle(
   const payload = vehiclePayload(formData);
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
   const { error } = await supabase
     .from("vehicles")
     .update(payload)
-    .eq("id", vehicleId);
+    .eq("id", vehicleId)
+    .eq("user_id", user.id);
   if (error) {
     return { error: `更新に失敗しました: ${error.message}` };
   }
@@ -213,7 +241,16 @@ export async function deleteVehicle(formData: FormData) {
   if (!customerId || !vehicleId) return;
 
   const supabase = await createClient();
-  await supabase.from("vehicles").delete().eq("id", vehicleId);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  await supabase
+    .from("vehicles")
+    .delete()
+    .eq("id", vehicleId)
+    .eq("user_id", user.id);
 
   revalidatePath(`/dashboard/customers/${customerId}`);
 }

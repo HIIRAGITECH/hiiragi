@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { EstimateStatus, WorkStatus } from "@/lib/types";
 
 const workClass: Record<WorkStatus, string> = {
@@ -22,12 +23,27 @@ export function WorkStatusBadge({ value }: { value: WorkStatus }) {
   );
 }
 
-export function EstimateStatusBadge({ value }: { value: EstimateStatus }) {
-  return (
-    <span
-      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${estimateClass[value]}`}
-    >
-      {value}
-    </span>
-  );
+// orderId を渡すと「見積済」のとき見積書ページへの Link としてレンダリングする。
+// 未指定 or 値が「未作成」のときは従来通り span（クリック不可）。
+type EstimateBadgeProps = {
+  value: EstimateStatus;
+  orderId?: string;
+};
+
+export function EstimateStatusBadge({ value, orderId }: EstimateBadgeProps) {
+  const baseClass = `inline-block rounded-full px-2 py-0.5 text-xs font-medium ${estimateClass[value]}`;
+
+  if (value === "見積済" && orderId) {
+    return (
+      <Link
+        href={`/dashboard/orders/${orderId}/estimate`}
+        aria-label={`見積書を開く: ${orderId}`}
+        className={`${baseClass} cursor-pointer hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 dark:focus-visible:outline-emerald-400`}
+      >
+        {value}
+      </Link>
+    );
+  }
+
+  return <span className={baseClass}>{value}</span>;
 }

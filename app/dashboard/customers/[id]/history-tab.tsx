@@ -120,7 +120,10 @@ export default async function HistoryTab({
                       <WorkStatusBadge value={o.work_status} />
                     </td>
                     <td className="px-4 py-3">
-                      <EstimateStatusBadge value={o.estimate_status} />
+                      <EstimateStatusBadge
+                        value={o.estimate_status}
+                        orderId={o.id}
+                      />
                     </td>
                   </tr>
                 );
