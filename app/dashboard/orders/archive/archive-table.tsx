@@ -4,22 +4,17 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
 import SearchInput from "@/lib/components/search-input";
-import StatusDropdown from "@/lib/components/status-dropdown";
 import Tooltip from "@/lib/components/tooltip";
-import {
-  ESTIMATE_STATUSES,
-  INVOICE_STATUSES,
-  WORK_STATUSES,
-  type OrderListRow,
-} from "@/lib/types";
+import type { OrderListRow } from "@/lib/types";
 import {
   deleteOrder,
-  updateArchived,
-  updateEstimateStatus,
-  updateInvoiceStatus,
-  updateWorkStatus,
-} from "./actions";
-import { estimateClass, invoiceClass, workClass } from "./status-badge";
+  restoreOrderFormAction,
+} from "../actions";
+import {
+  EstimateStatusBadge,
+  InvoiceStatusBadge,
+  WorkStatusBadge,
+} from "../status-badge";
 
 function normalize(s: string): string {
   return s.toLowerCase().normalize("NFKC");
@@ -49,7 +44,7 @@ type Props = {
   rows: OrderListRow[];
 };
 
-export default function OrdersTable({ rows }: Props) {
+export default function ArchiveTable({ rows }: Props) {
   const [query, setQuery] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -77,12 +72,12 @@ export default function OrdersTable({ rows }: Props) {
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           {isSearching
             ? `${rows.length} 件中 ${filtered.length} 件表示`
-            : `登録件数: ${rows.length} 件`}
+            : `アーカイブ件数: ${rows.length} 件`}
         </p>
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="受注を検索（管理番号・顧客名・車種・メモ等）"
+          placeholder="アーカイブを検索（管理番号・顧客名・車種・メモ等）"
           className="w-full sm:w-96"
         />
       </div>
@@ -91,8 +86,8 @@ export default function OrdersTable({ rows }: Props) {
         {filtered.length === 0 ? (
           <div className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
             {isSearching
-              ? "該当する受注が見つかりません。"
-              : "受注が登録されていません。"}
+              ? "該当するアーカイブが見つかりません。"
+              : "アーカイブされた受注はありません。"}
           </div>
         ) : (
           <table className="w-full text-sm">
@@ -144,43 +139,14 @@ export default function OrdersTable({ rows }: Props) {
                     </td>
                     <td className="px-4 py-3 align-top">
                       <div className="flex flex-col items-start gap-1">
-                        <StatusDropdown
-                          value={o.work_status}
-                          options={WORK_STATUSES}
-                          classMap={workClass}
-                          onSelect={(next) => updateWorkStatus(o.id, next)}
-                          ariaLabel="作業ステータスを変更"
-                        />
-                        <StatusDropdown
+                        <WorkStatusBadge value={o.work_status} />
+                        <EstimateStatusBadge
                           value={o.estimate_status}
-                          options={ESTIMATE_STATUSES}
-                          classMap={estimateClass}
-                          onSelect={(next) => updateEstimateStatus(o.id, next)}
-                          ariaLabel="見積ステータスを変更"
+                          orderId={o.id}
                         />
-                        <StatusDropdown
+                        <InvoiceStatusBadge
                           value={o.invoice_status}
-                          options={INVOICE_STATUSES}
-                          classMap={invoiceClass}
-                          onSelect={async (next) => {
-                            const result = await updateInvoiceStatus(o.id, next);
-                            if (
-                              !result &&
-                              next === "請求済" &&
-                              typeof window !== "undefined" &&
-                              window.confirm(
-                                `受注「${o.id}」をアーカイブして一覧から非表示にしますか？`,
-                              )
-                            ) {
-                              await updateArchived(o.id, true);
-                            }
-                          }}
-                          confirmOn={{
-                            value: "請求済",
-                            message:
-                              "「請求済」にすると売上計上の対象になります。よろしいですか？",
-                          }}
-                          ariaLabel="請求ステータスを変更"
+                          orderId={o.id}
                         />
                       </div>
                     </td>
@@ -197,16 +163,17 @@ export default function OrdersTable({ rows }: Props) {
                     </td>
                     <td className="px-4 py-3 align-top text-right">
                       <div className="inline-flex gap-2">
-                        <Link
-                          href={`/dashboard/orders/${o.id}/edit`}
+                        <DeleteButton
+                          action={restoreOrderFormAction}
+                          hidden={{ id: o.id }}
+                          confirmMessage={`受注「${o.id}」をアーカイブから復元しますか？`}
+                          label="復元"
                           className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          編集
-                        </Link>
+                        />
                         <DeleteButton
                           action={deleteOrder}
                           hidden={{ id: o.id }}
-                          confirmMessage={`受注「${o.id}」を削除します。よろしいですか？`}
+                          confirmMessage={`受注「${o.id}」を完全に削除します。よろしいですか？`}
                           label="削除"
                           className="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-50 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/30"
                         />

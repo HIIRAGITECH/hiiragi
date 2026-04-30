@@ -45,6 +45,12 @@ export default async function DashboardLayout({
                 受注管理
               </Link>
               <Link
+                href="/dashboard/sales"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                売上集計
+              </Link>
+              <Link
                 href="/dashboard/settings"
                 className="hover:text-zinc-900 dark:hover:text-zinc-50"
               >

@@ -208,9 +208,14 @@ CREATE TABLE IF NOT EXISTS orders (
   vehicle_id        text,
   reception_date    date NOT NULL DEFAULT current_date,
   work_status       text NOT NULL DEFAULT '受付'
-    CHECK (work_status IN ('受付','作業中','完了','請求済')),
+    CHECK (work_status IN ('受付','作業中','完了')),
   estimate_status   text NOT NULL DEFAULT '未作成'
-    CHECK (estimate_status IN ('未作成','見積済')),
+    CHECK (estimate_status IN ('未作成','発行済','了承済')),
+  invoice_status    text NOT NULL DEFAULT '未請求'
+    CHECK (invoice_status IN ('未請求','請求済','入金済')),
+  invoiced_at       timestamptz, -- 請求書発行日（売上計上の基準日）
+  paid_at           timestamptz, -- 入金確認日
+  is_archived       boolean NOT NULL DEFAULT false,
   notes             text,
   items             jsonb   NOT NULL DEFAULT '[]'::jsonb,
   discount_amount   integer NOT NULL DEFAULT 0,
@@ -226,6 +231,8 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS orders_user_id_idx     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS orders_customer_id_idx ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS orders_vehicle_id_idx  ON orders(vehicle_id);
+CREATE INDEX IF NOT EXISTS orders_invoiced_at_idx ON orders(invoiced_at);
+CREATE INDEX IF NOT EXISTS orders_is_archived_idx ON orders(is_archived);
 
 -- 管理番号採番 trigger
 -- INSERT...ON CONFLICT で last_seq をアトミックにインクリメントし、

@@ -5,8 +5,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import {
   ESTIMATE_STATUSES,
+  INVOICE_STATUSES,
   WORK_STATUSES,
   type EstimateStatus,
+  type InvoiceStatus,
   type OrderItem,
   type WorkStatus,
 } from "@/lib/types";
@@ -20,19 +22,12 @@ function pickString(formData: FormData, key: string): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-function isWorkStatus(v: string | null): v is WorkStatus {
-  return v !== null && (WORK_STATUSES as readonly string[]).includes(v);
-}
-function isEstimateStatus(v: string | null): v is EstimateStatus {
-  return v !== null && (ESTIMATE_STATUSES as readonly string[]).includes(v);
-}
-
+// ステータス3種は受注フォームから外し、バッジのドロップダウンで変更する。
+// 新規作成時は DB の default ('受付' / '未作成' / '未請求') が効く。
 type OrderPayload = {
   customer_id: string;
   vehicle_id: string | null;
   reception_date: string;
-  work_status: WorkStatus;
-  estimate_status: EstimateStatus;
   notes: string | null;
 };
 
@@ -40,22 +35,14 @@ function readPayload(formData: FormData): OrderPayload | { error: string } {
   const customer_id = pickString(formData, "customer_id");
   const vehicle_id = pickString(formData, "vehicle_id");
   const reception_date = pickString(formData, "reception_date");
-  const work_status = pickString(formData, "work_status");
-  const estimate_status = pickString(formData, "estimate_status");
 
   if (!customer_id) return { error: "顧客を選択してください。" };
   if (!reception_date) return { error: "受付日を入力してください。" };
-  if (!isWorkStatus(work_status)) return { error: "作業ステータスが不正です。" };
-  if (!isEstimateStatus(estimate_status)) {
-    return { error: "見積ステータスが不正です。" };
-  }
 
   return {
     customer_id,
     vehicle_id,
     reception_date,
-    work_status,
-    estimate_status,
     notes: pickString(formData, "notes"),
   };
 }
@@ -250,7 +237,148 @@ export async function updatePhotoFolderUrl(
   return undefined;
 }
 
-// 見積書を開く際に呼ぶ。estimate_status を「見積済」に更新してから印刷ページへ遷移する。
+// バッジドロップダウンから呼ばれる作業ステータス更新。
+export async function updateWorkStatus(
+  id: string,
+  next: WorkStatus,
+): Promise<{ error: string } | undefined> {
+  if (!(WORK_STATUSES as readonly string[]).includes(next)) {
+    return { error: "不正なステータスです。" };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ work_status: next })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${id}`);
+  return undefined;
+}
+
+export async function updateEstimateStatus(
+  id: string,
+  next: EstimateStatus,
+): Promise<{ error: string } | undefined> {
+  if (!(ESTIMATE_STATUSES as readonly string[]).includes(next)) {
+    return { error: "不正なステータスです。" };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ estimate_status: next })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${id}`);
+  return undefined;
+}
+
+// invoice_status の更新。
+// '請求済' なら invoiced_at を初回 now() に。
+// '入金済' なら paid_at を初回 now() に（invoiced_at が未設定なら同時に埋める）。
+// '未請求' に戻す場合は両方 null にリセット。
+export async function updateInvoiceStatus(
+  id: string,
+  next: InvoiceStatus,
+): Promise<{ error: string } | undefined> {
+  if (!(INVOICE_STATUSES as readonly string[]).includes(next)) {
+    return { error: "不正なステータスです。" };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data: current } = await supabase
+    .from("orders")
+    .select("invoiced_at, paid_at")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const nowIso = new Date().toISOString();
+  let invoiced_at: string | null = current?.invoiced_at ?? null;
+  let paid_at: string | null = current?.paid_at ?? null;
+
+  if (next === "未請求") {
+    invoiced_at = null;
+    paid_at = null;
+  } else if (next === "請求済") {
+    if (!invoiced_at) invoiced_at = nowIso;
+    paid_at = null;
+  } else if (next === "入金済") {
+    if (!invoiced_at) invoiced_at = nowIso;
+    if (!paid_at) paid_at = nowIso;
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ invoice_status: next, invoiced_at, paid_at })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${id}`);
+  revalidatePath("/dashboard/sales");
+  return undefined;
+}
+
+// form action 用の薄いラッパー（DeleteButton から hidden id を受けて呼ぶ）
+export async function archiveOrderFormAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await updateArchived(id, true);
+}
+
+export async function restoreOrderFormAction(formData: FormData) {
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  await updateArchived(id, false);
+}
+
+// アーカイブ / 復元
+export async function updateArchived(
+  id: string,
+  archived: boolean,
+): Promise<{ error: string } | undefined> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ is_archived: archived })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath("/dashboard/orders/archive");
+  revalidatePath(`/dashboard/orders/${id}`);
+  return undefined;
+}
+
+// 見積書を開く際に呼ぶ。estimate_status を「発行済」に更新してから印刷ページへ遷移する。
+// 既に「了承済」の場合は status を変更しない（後退させない）。
 export async function openEstimate(id: string) {
   const supabase = await createClient();
   const {
@@ -258,11 +386,21 @@ export async function openEstimate(id: string) {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  await supabase
+  const { data: current } = await supabase
     .from("orders")
-    .update({ estimate_status: "見積済" satisfies EstimateStatus })
+    .select("estimate_status")
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const currentStatus = (current?.estimate_status ?? "未作成") as EstimateStatus;
+  if (currentStatus === "未作成") {
+    await supabase
+      .from("orders")
+      .update({ estimate_status: "発行済" satisfies EstimateStatus })
+      .eq("id", id)
+      .eq("user_id", user.id);
+  }
 
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath("/dashboard/orders");

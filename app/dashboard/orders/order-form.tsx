@@ -2,11 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import {
-  ESTIMATE_STATUSES,
-  WORK_STATUSES,
-  type Order,
-} from "@/lib/types";
+import { type Order } from "@/lib/types";
 import type { FormState } from "./actions";
 import VehicleQuickAddModal from "./vehicle-quick-add-modal";
 
@@ -146,44 +142,6 @@ export default function OrderForm({
             defaultValue={initial?.reception_date ?? defaultReceptionDate}
             className={inputClass}
           />
-        </div>
-
-        <div>
-          <label htmlFor="work_status" className={labelClass}>
-            作業ステータス <span className="text-red-600">*</span>
-          </label>
-          <select
-            id="work_status"
-            name="work_status"
-            required
-            defaultValue={initial?.work_status ?? WORK_STATUSES[0]}
-            className={inputClass}
-          >
-            {WORK_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label htmlFor="estimate_status" className={labelClass}>
-            見積ステータス <span className="text-red-600">*</span>
-          </label>
-          <select
-            id="estimate_status"
-            name="estimate_status"
-            required
-            defaultValue={initial?.estimate_status ?? ESTIMATE_STATUSES[0]}
-            className={inputClass}
-          >
-            {ESTIMATE_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
         </div>
 
         <div className="sm:col-span-2">

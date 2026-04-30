@@ -36,11 +36,17 @@ export type VehicleInput = Omit<
   "id" | "user_id" | "customer_id" | "created_at" | "updated_at"
 >;
 
-export const WORK_STATUSES = ["受付", "作業中", "完了", "請求済"] as const;
+// 作業ステータスは「請求」を含まない。請求は invoice_status に分離。
+export const WORK_STATUSES = ["受付", "作業中", "完了"] as const;
 export type WorkStatus = (typeof WORK_STATUSES)[number];
 
-export const ESTIMATE_STATUSES = ["未作成", "見積済"] as const;
+// 見積ステータス: '未作成' → '発行済'(印刷した) → '了承済'(顧客から了承を得た)
+export const ESTIMATE_STATUSES = ["未作成", "発行済", "了承済"] as const;
 export type EstimateStatus = (typeof ESTIMATE_STATUSES)[number];
+
+// 請求ステータス: '未請求' → '請求済'(請求書を発行した) → '入金済'(入金を確認した)
+export const INVOICE_STATUSES = ["未請求", "請求済", "入金済"] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
 // type 省略時は 'normal'、tax_free 省略時は false として扱う。
 // labor_cost / parts_cost は1個あたりの工賃・部品代。両方省略時は unit_price のみが有効な
@@ -67,6 +73,10 @@ export type Order = {
   reception_date: string; // YYYY-MM-DD
   work_status: WorkStatus;
   estimate_status: EstimateStatus;
+  invoice_status: InvoiceStatus;
+  invoiced_at: string | null; // ISO timestamptz、売上計上の基準日
+  paid_at: string | null; // ISO timestamptz、入金確認日
+  is_archived: boolean;
   notes: string | null;
   items: OrderItem[];
   discount_amount: number;
@@ -109,7 +119,15 @@ export type OrderInput = Omit<
 // 一覧用: 顧客名・車種を join 表示。一覧の検索対象になる列も含む。
 export type OrderListRow = Pick<
   Order,
-  "id" | "reception_date" | "work_status" | "estimate_status" | "notes"
+  | "id"
+  | "reception_date"
+  | "work_status"
+  | "estimate_status"
+  | "invoice_status"
+  | "invoiced_at"
+  | "paid_at"
+  | "is_archived"
+  | "notes"
 > & {
   customer: Pick<Customer, "id" | "name" | "name_kana"> | null;
   vehicle: Pick<Vehicle, "id" | "maker" | "model" | "plate_number"> | null;

@@ -6,16 +6,15 @@ import DeleteButton from "@/lib/components/delete-button";
 import type { Customer, Order, Vehicle } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 import {
+  archiveOrderFormAction,
   deleteOrder,
   openEstimate,
+  restoreOrderFormAction,
   updateOrderItems,
   updatePhotoFolderUrl,
 } from "../actions";
-import {
-  EstimateStatusBadge,
-  WorkStatusBadge,
-} from "../status-badge";
 import ItemsForm from "./items-form";
+import OrderStatusBar from "./order-status-bar";
 import PhotoFolderForm from "./photo-folder-form";
 
 export const metadata: Metadata = {
@@ -76,27 +75,45 @@ export default async function OrderDetailPage(
         </Link>
         <div className="mt-2 flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <h2 className="font-mono text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
                 {order.id}
               </h2>
-              <WorkStatusBadge value={order.work_status} />
-              <EstimateStatusBadge
-                value={order.estimate_status}
+              <OrderStatusBar
                 orderId={order.id}
+                workStatus={order.work_status}
+                estimateStatus={order.estimate_status}
+                invoiceStatus={order.invoice_status}
               />
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
               受付日: {formatDate(order.reception_date)}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link
               href={`/dashboard/orders/${order.id}/edit`}
               className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               受注情報を編集
             </Link>
+            {order.is_archived ? (
+              <DeleteButton
+                action={restoreOrderFormAction}
+                hidden={{ id: order.id }}
+                confirmMessage={`受注「${order.id}」をアーカイブから復元しますか？`}
+                label="アーカイブから戻す"
+                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              />
+            ) : (
+              <DeleteButton
+                action={archiveOrderFormAction}
+                hidden={{ id: order.id }}
+                confirmMessage={`受注「${order.id}」をアーカイブしますか？（一覧から非表示になります）`}
+                label="アーカイブ"
+                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              />
+            )}
             <DeleteButton
               action={deleteOrder}
               hidden={{ id: order.id }}
