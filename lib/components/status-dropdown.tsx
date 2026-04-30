@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 
 type ConfirmOn<T extends string> = {
   // 指定値に変更しようとしたとき confirm() で確認する
@@ -24,6 +25,16 @@ type Props<T extends string> = {
 const DEFAULT_BASE =
   "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium";
 
+// メニュー1項目の概算高さ（px）。上下配置の判定にだけ使うので厳密でなくて良い。
+const MENU_ITEM_HEIGHT = 36;
+const MENU_VERTICAL_PADDING = 8;
+const MENU_GAP = 4;
+
+type MenuPosition = {
+  top: number;
+  left: number;
+};
+
 export default function StatusDropdown<T extends string>({
   value,
   options,
@@ -34,15 +45,58 @@ export default function StatusDropdown<T extends string>({
   baseClassName,
 }: Props<T>) {
   const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<MenuPosition | null>(null);
   const [pending, startTransition] = useTransition();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
+  // メニュー位置の計算（ボタン直下、画面下端で空きが足りなければ上方向に展開）
+  function computePosition(): MenuPosition | null {
+    const btn = buttonRef.current;
+    if (!btn) return null;
+    const rect = btn.getBoundingClientRect();
+    const estimatedMenuHeight =
+      options.length * MENU_ITEM_HEIGHT + MENU_VERTICAL_PADDING;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const placeAbove =
+      spaceBelow < estimatedMenuHeight && rect.top > estimatedMenuHeight;
+
+    return {
+      top: placeAbove
+        ? rect.top - estimatedMenuHeight - MENU_GAP + window.scrollY
+        : rect.bottom + MENU_GAP + window.scrollY,
+      left: rect.left + window.scrollX,
+    };
+  }
+
+  function openMenu() {
+    const pos = computePosition();
+    if (!pos) return;
+    setPosition(pos);
+    setOpen(true);
+  }
+
+  function toggleMenu() {
+    if (open) {
+      setOpen(false);
+    } else {
+      openMenu();
+    }
+  }
+
+  // 開いている間: 外クリック / ESC / スクロール / リサイズで閉じる
   useEffect(() => {
     if (!open) return;
+    function close() {
+      setOpen(false);
+    }
     function onDown(e: MouseEvent) {
+      const target = e.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        buttonRef.current &&
+        !buttonRef.current.contains(target) &&
+        menuRef.current &&
+        !menuRef.current.contains(target)
       ) {
         setOpen(false);
       }
@@ -52,9 +106,14 @@ export default function StatusDropdown<T extends string>({
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
+    // capture: true で祖先要素のスクロールも検知（テーブル横スクロール等）
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
     };
   }, [open]);
 
@@ -76,11 +135,56 @@ export default function StatusDropdown<T extends string>({
 
   const base = baseClassName ?? DEFAULT_BASE;
 
+  const menu =
+    open && position ? (
+      <div
+        ref={menuRef}
+        role="listbox"
+        style={{
+          position: "absolute",
+          top: position.top,
+          left: position.left,
+          zIndex: 50,
+        }}
+        className="min-w-[7rem] overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+      >
+        {options.map((o) => {
+          const selected = o === value;
+          return (
+            <button
+              key={o}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              onClick={() => handleSelect(o)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
+                selected
+                  ? "bg-zinc-50 font-semibold text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
+                  : "text-zinc-700 dark:text-zinc-300"
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`inline-block h-2 w-2 shrink-0 rounded-full ${classMap[o]}`}
+              />
+              <span>{o}</span>
+              {selected && (
+                <span aria-hidden className="ml-auto text-[10px]">
+                  ✓
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    ) : null;
+
   return (
-    <div ref={containerRef} className="relative inline-block">
+    <>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleMenu}
         disabled={pending}
         aria-label={ariaLabel ?? "ステータスを変更"}
         aria-haspopup="listbox"
@@ -92,42 +196,7 @@ export default function StatusDropdown<T extends string>({
           ▼
         </span>
       </button>
-
-      {open && (
-        <div
-          role="listbox"
-          className="absolute left-0 top-full z-20 mt-1 min-w-[7rem] overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-        >
-          {options.map((o) => {
-            const selected = o === value;
-            return (
-              <button
-                key={o}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={() => handleSelect(o)}
-                className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
-                  selected
-                    ? "bg-zinc-50 font-semibold text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
-                    : "text-zinc-700 dark:text-zinc-300"
-                }`}
-              >
-                <span
-                  aria-hidden
-                  className={`inline-block h-2 w-2 shrink-0 rounded-full ${classMap[o]}`}
-                />
-                <span>{o}</span>
-                {selected && (
-                  <span aria-hidden className="ml-auto text-[10px]">
-                    ✓
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+      {menu && createPortal(menu, document.body)}
+    </>
   );
 }

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
 import SearchInput from "@/lib/components/search-input";
 import StatusDropdown from "@/lib/components/status-dropdown";
+import StatusRow from "@/lib/components/status-row";
 import Tooltip from "@/lib/components/tooltip";
 import {
   ESTIMATE_STATUSES,
@@ -143,45 +144,56 @@ export default function OrdersTable({ rows }: Props) {
                       {formatDate(o.reception_date)}
                     </td>
                     <td className="px-4 py-3 align-top">
-                      <div className="flex flex-col items-start gap-1">
-                        <StatusDropdown
-                          value={o.work_status}
-                          options={WORK_STATUSES}
-                          classMap={workClass}
-                          onSelect={(next) => updateWorkStatus(o.id, next)}
-                          ariaLabel="作業ステータスを変更"
-                        />
-                        <StatusDropdown
-                          value={o.estimate_status}
-                          options={ESTIMATE_STATUSES}
-                          classMap={estimateClass}
-                          onSelect={(next) => updateEstimateStatus(o.id, next)}
-                          ariaLabel="見積ステータスを変更"
-                        />
-                        <StatusDropdown
-                          value={o.invoice_status}
-                          options={INVOICE_STATUSES}
-                          classMap={invoiceClass}
-                          onSelect={async (next) => {
-                            const result = await updateInvoiceStatus(o.id, next);
-                            if (
-                              !result &&
-                              next === "請求済" &&
-                              typeof window !== "undefined" &&
-                              window.confirm(
-                                `受注「${o.id}」をアーカイブして一覧から非表示にしますか？`,
-                              )
-                            ) {
-                              await updateArchived(o.id, true);
+                      <div className="flex flex-col gap-1">
+                        <StatusRow label="作業">
+                          <StatusDropdown
+                            value={o.work_status}
+                            options={WORK_STATUSES}
+                            classMap={workClass}
+                            onSelect={(next) => updateWorkStatus(o.id, next)}
+                            ariaLabel="作業ステータスを変更"
+                          />
+                        </StatusRow>
+                        <StatusRow label="見積">
+                          <StatusDropdown
+                            value={o.estimate_status}
+                            options={ESTIMATE_STATUSES}
+                            classMap={estimateClass}
+                            onSelect={(next) =>
+                              updateEstimateStatus(o.id, next)
                             }
-                          }}
-                          confirmOn={{
-                            value: "請求済",
-                            message:
-                              "「請求済」にすると売上計上の対象になります。よろしいですか？",
-                          }}
-                          ariaLabel="請求ステータスを変更"
-                        />
+                            ariaLabel="見積ステータスを変更"
+                          />
+                        </StatusRow>
+                        <StatusRow label="請求">
+                          <StatusDropdown
+                            value={o.invoice_status}
+                            options={INVOICE_STATUSES}
+                            classMap={invoiceClass}
+                            onSelect={async (next) => {
+                              const result = await updateInvoiceStatus(
+                                o.id,
+                                next,
+                              );
+                              if (
+                                !result &&
+                                next === "請求済" &&
+                                typeof window !== "undefined" &&
+                                window.confirm(
+                                  `受注「${o.id}」をアーカイブして一覧から非表示にしますか？`,
+                                )
+                              ) {
+                                await updateArchived(o.id, true);
+                              }
+                            }}
+                            confirmOn={{
+                              value: "請求済",
+                              message:
+                                "「請求済」にすると売上計上の対象になります。よろしいですか？",
+                            }}
+                            ariaLabel="請求ステータスを変更"
+                          />
+                        </StatusRow>
                       </div>
                     </td>
                     <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">

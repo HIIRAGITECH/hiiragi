@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
 import SearchInput from "@/lib/components/search-input";
+import StatusRow from "@/lib/components/status-row";
 import Tooltip from "@/lib/components/tooltip";
 import type { OrderListRow } from "@/lib/types";
 import {
@@ -138,16 +139,22 @@ export default function ArchiveTable({ rows }: Props) {
                       {formatDate(o.reception_date)}
                     </td>
                     <td className="px-4 py-3 align-top">
-                      <div className="flex flex-col items-start gap-1">
-                        <WorkStatusBadge value={o.work_status} />
-                        <EstimateStatusBadge
-                          value={o.estimate_status}
-                          orderId={o.id}
-                        />
-                        <InvoiceStatusBadge
-                          value={o.invoice_status}
-                          orderId={o.id}
-                        />
+                      <div className="flex flex-col gap-1">
+                        <StatusRow label="作業">
+                          <WorkStatusBadge value={o.work_status} />
+                        </StatusRow>
+                        <StatusRow label="見積">
+                          <EstimateStatusBadge
+                            value={o.estimate_status}
+                            orderId={o.id}
+                          />
+                        </StatusRow>
+                        <StatusRow label="請求">
+                          <InvoiceStatusBadge
+                            value={o.invoice_status}
+                            orderId={o.id}
+                          />
+                        </StatusRow>
                       </div>
                     </td>
                     <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">
