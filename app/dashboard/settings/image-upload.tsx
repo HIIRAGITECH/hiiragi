@@ -29,23 +29,22 @@ export default function ImageUpload({
 }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  // currentPath が null の間は派生で null 表示（effect の同期 setState を避けるため）
+  const previewUrl = currentPath ? signedUrl : null;
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [, startTransition] = useTransition();
 
   useEffect(() => {
-    if (!currentPath) {
-      setPreviewUrl(null);
-      return;
-    }
+    if (!currentPath) return;
     let cancelled = false;
     const supabase = createClient();
     supabase.storage
       .from("shop-assets")
       .createSignedUrl(currentPath, 3600)
       .then(({ data }) => {
-        if (!cancelled && data) setPreviewUrl(data.signedUrl);
+        if (!cancelled && data) setSignedUrl(data.signedUrl);
       });
     return () => {
       cancelled = true;
