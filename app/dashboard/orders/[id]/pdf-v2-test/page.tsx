@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { getShopInfo } from "@/lib/shop";
+import { getShopAssetSignedUrl, getShopInfo } from "@/lib/shop";
 import type { Customer, Order, Vehicle } from "@/lib/types";
 import PdfV2TestButton from "./pdf-v2-test-button";
 
@@ -50,6 +50,12 @@ export default async function PdfV2TestPage(props: PageParams) {
     getShopInfo(),
   ]);
 
+  // 画像はサーバー側で signed URL だけ発行し、base64 化はクライアント側 fetch で行う。
+  const [logoUrl, stampUrl] = await Promise.all([
+    getShopAssetSignedUrl(shop.logo_path),
+    getShopAssetSignedUrl(shop.stamp_path),
+  ]);
+
   return (
     <div className="space-y-4 p-6">
       <div>
@@ -75,6 +81,8 @@ export default async function PdfV2TestPage(props: PageParams) {
           customer={customerData as Customer | null}
           vehicle={vehicleResult.data as Vehicle | null}
           shop={shop}
+          logoUrl={logoUrl}
+          stampUrl={stampUrl}
         />
         <PdfV2TestButton
           documentType="invoice"
@@ -82,6 +90,8 @@ export default async function PdfV2TestPage(props: PageParams) {
           customer={customerData as Customer | null}
           vehicle={vehicleResult.data as Vehicle | null}
           shop={shop}
+          logoUrl={logoUrl}
+          stampUrl={stampUrl}
         />
       </div>
     </div>

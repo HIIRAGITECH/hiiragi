@@ -16,16 +16,19 @@ interface Props {
   customer: Customer | null;
   vehicle: Vehicle | null;
   shop: ShopInfo;
+  logoUrl: string | null;
+  stampUrl: string | null;
 }
 
 // 検証用ボタン。新方式（lib/pdf/v2）で PDF を生成しダウンロードする。
-// Step 5 で logo / stamp の base64 化を実装するまでは画像なしで生成する。
 export default function PdfV2TestButton({
   documentType,
   order,
   customer,
   vehicle,
   shop,
+  logoUrl,
+  stampUrl,
 }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +38,22 @@ export default function PdfV2TestButton({
     setError(null);
     try {
       // フォントが重い（11MB+）ため、押下時に動的 import する
-      const { generateOrderPdf } = await import("@/lib/pdf/v2");
+      const [{ generateOrderPdf }, { fetchTenantAssets }] = await Promise.all([
+        import("@/lib/pdf/v2"),
+        import("@/lib/pdf/v2/assets"),
+      ]);
+      const { logoDataUrl, stampDataUrl } = await fetchTenantAssets(
+        logoUrl,
+        stampUrl,
+      );
       const blob = await generateOrderPdf({
         documentType,
         order,
         shop,
         customer,
         vehicle,
-        // logoDataUrl / stampDataUrl は Step 5 で実装
+        logoDataUrl,
+        stampDataUrl,
       });
       const fileName = buildPdfFileName({
         documentType,

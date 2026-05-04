@@ -1,6 +1,7 @@
 import type { jsPDF } from "jspdf";
 import { PAGE } from "./constants";
 import type { PdfRenderInput } from "./types";
+import type { LoadedImage } from "./utils/image";
 
 // 各 section 関数で共有する描画コンテキスト。
 // 関数は (doc, ctx) => number で「描画後の Y 座標」を返す慣例。
@@ -13,6 +14,12 @@ export interface RenderContext {
   marginTop: number;
   marginBottom: number;
   cursorY: number;
+  // 事前に Image() で自然サイズを解決済みの画像。
+  // 各 section/overlay は同期的にこれを参照して addImage する。
+  loadedAssets: {
+    logo: LoadedImage | null;
+    stamp: LoadedImage | null;
+  };
 }
 
 export function createContext(
@@ -27,6 +34,7 @@ export function createContext(
     marginTop: PAGE.marginTop,
     marginBottom: PAGE.marginBottom,
     cursorY: PAGE.marginTop,
+    loadedAssets: { logo: null, stamp: null },
   };
 }
 
