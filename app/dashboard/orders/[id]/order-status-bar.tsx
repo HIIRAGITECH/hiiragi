@@ -1,5 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import PaymentDueModal, {
+  calculateDefaultDueDate,
+} from "@/lib/components/payment-due-modal";
 import StatusDropdown from "@/lib/components/status-dropdown";
 import StatusRow from "@/lib/components/status-row";
 import {
@@ -35,6 +39,21 @@ export default function OrderStatusBar({
   estimateStatus,
   invoiceStatus,
 }: Props) {
+  const [showPaymentDue, setShowPaymentDue] = useState(false);
+
+  async function applyInvoiced(dueDate: string) {
+    const result = await updateInvoiceStatus(orderId, "請求済", dueDate);
+    if (
+      !result &&
+      typeof window !== "undefined" &&
+      window.confirm(
+        `受注「${orderId}」をアーカイブして一覧から非表示にしますか？`,
+      )
+    ) {
+      await updateArchived(orderId, true);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-1">
       <StatusRow label="作業">
@@ -46,7 +65,14 @@ export default function OrderStatusBar({
           ariaLabel="作業ステータスを変更"
         />
       </StatusRow>
-      <StatusRow label="見積">
+      <StatusRow
+        label="見積"
+        href={
+          estimateStatus === "発行済" || estimateStatus === "了承済"
+            ? `/dashboard/orders/${orderId}/estimate`
+            : undefined
+        }
+      >
         <StatusDropdown
           value={estimateStatus}
           options={ESTIMATE_STATUSES}
@@ -55,32 +81,40 @@ export default function OrderStatusBar({
           ariaLabel="見積ステータスを変更"
         />
       </StatusRow>
-      <StatusRow label="請求">
+      <StatusRow
+        label="請求"
+        href={
+          invoiceStatus === "請求済" || invoiceStatus === "入金済"
+            ? `/dashboard/orders/${orderId}/invoice`
+            : undefined
+        }
+      >
         <StatusDropdown
           value={invoiceStatus}
           options={INVOICE_STATUSES}
           classMap={invoiceClass}
           onSelect={async (next) => {
-            const result = await updateInvoiceStatus(orderId, next);
-            if (
-              !result &&
-              next === "請求済" &&
-              typeof window !== "undefined" &&
-              window.confirm(
-                `受注「${orderId}」をアーカイブして一覧から非表示にしますか？`,
-              )
-            ) {
-              await updateArchived(orderId, true);
+            if (next === "請求済") {
+              setShowPaymentDue(true);
+            } else {
+              await updateInvoiceStatus(orderId, next);
             }
-          }}
-          confirmOn={{
-            value: "請求済",
-            message:
-              "「請求済」にすると売上計上の対象になります。よろしいですか？",
           }}
           ariaLabel="請求ステータスを変更"
         />
       </StatusRow>
+
+      {showPaymentDue && (
+        <PaymentDueModal
+          orderId={orderId}
+          defaultDate={calculateDefaultDueDate(new Date())}
+          onClose={() => setShowPaymentDue(false)}
+          onConfirm={async (date) => {
+            setShowPaymentDue(false);
+            await applyInvoiced(date);
+          }}
+        />
+      )}
     </div>
   );
 }

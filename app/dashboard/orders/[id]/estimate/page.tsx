@@ -73,7 +73,12 @@ export default async function EstimatePage(
           ← 受注詳細に戻る
         </Link>
         <div className="flex items-center gap-2">
-          <PdfButton targetId="printable-document" fileName={pdfFileName} />
+          <PdfButton
+            targetId="printable-document"
+            fileName={pdfFileName}
+            headerText={`Estimate (cont.) ${order.id}`}
+            watermarkUrl={logoUrl}
+          />
           <PrintButton />
         </div>
       </div>

@@ -215,6 +215,7 @@ CREATE TABLE IF NOT EXISTS orders (
     CHECK (invoice_status IN ('未請求','請求済','入金済')),
   invoiced_at       timestamptz, -- 請求書発行日（売上計上の基準日）
   paid_at           timestamptz, -- 入金確認日
+  payment_due_date  date,        -- 振込期限（請求書フッタ表示用、任意）
   is_archived       boolean NOT NULL DEFAULT false,
   notes             text,
   items             jsonb   NOT NULL DEFAULT '[]'::jsonb,

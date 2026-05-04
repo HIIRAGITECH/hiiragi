@@ -233,13 +233,29 @@ export default function ArchiveTable({ rows, year }: Props) {
                               <StatusRow label="作業">
                                 <WorkStatusBadge value={o.work_status} />
                               </StatusRow>
-                              <StatusRow label="見積">
+                              <StatusRow
+                                label="見積"
+                                href={
+                                  o.estimate_status === "発行済" ||
+                                  o.estimate_status === "了承済"
+                                    ? `/dashboard/orders/${o.id}/estimate`
+                                    : undefined
+                                }
+                              >
                                 <EstimateStatusBadge
                                   value={o.estimate_status}
                                   orderId={o.id}
                                 />
                               </StatusRow>
-                              <StatusRow label="請求">
+                              <StatusRow
+                                label="請求"
+                                href={
+                                  o.invoice_status === "請求済" ||
+                                  o.invoice_status === "入金済"
+                                    ? `/dashboard/orders/${o.id}/invoice`
+                                    : undefined
+                                }
+                              >
                                 <InvoiceStatusBadge
                                   value={o.invoice_status}
                                   orderId={o.id}

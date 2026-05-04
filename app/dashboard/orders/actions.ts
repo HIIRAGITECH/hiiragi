@@ -289,12 +289,13 @@ export async function updateEstimateStatus(
 }
 
 // invoice_status の更新。
-// '請求済' なら invoiced_at を初回 now() に。
+// '請求済' なら invoiced_at を初回 now() に。任意で payment_due_date を保存可能。
 // '入金済' なら paid_at を初回 now() に（invoiced_at が未設定なら同時に埋める）。
-// '未請求' に戻す場合は両方 null にリセット。
+// '未請求' に戻す場合は invoiced_at / paid_at / payment_due_date をすべて null にリセット。
 export async function updateInvoiceStatus(
   id: string,
   next: InvoiceStatus,
+  paymentDueDate?: string, // YYYY-MM-DD（請求済への変更時のみ意味あり）
 ): Promise<{ error: string } | undefined> {
   if (!(INVOICE_STATUSES as readonly string[]).includes(next)) {
     return { error: "不正なステータスです。" };
@@ -307,7 +308,7 @@ export async function updateInvoiceStatus(
 
   const { data: current } = await supabase
     .from("orders")
-    .select("invoiced_at, paid_at")
+    .select("invoiced_at, paid_at, payment_due_date")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -315,13 +316,19 @@ export async function updateInvoiceStatus(
   const nowIso = new Date().toISOString();
   let invoiced_at: string | null = current?.invoiced_at ?? null;
   let paid_at: string | null = current?.paid_at ?? null;
+  let payment_due_date: string | null =
+    (current?.payment_due_date as string | null | undefined) ?? null;
 
   if (next === "未請求") {
     invoiced_at = null;
     paid_at = null;
+    payment_due_date = null;
   } else if (next === "請求済") {
     if (!invoiced_at) invoiced_at = nowIso;
     paid_at = null;
+    if (paymentDueDate !== undefined) {
+      payment_due_date = paymentDueDate || null;
+    }
   } else if (next === "入金済") {
     if (!invoiced_at) invoiced_at = nowIso;
     if (!paid_at) paid_at = nowIso;
@@ -329,7 +336,12 @@ export async function updateInvoiceStatus(
 
   const { error } = await supabase
     .from("orders")
-    .update({ invoice_status: next, invoiced_at, paid_at })
+    .update({
+      invoice_status: next,
+      invoiced_at,
+      paid_at,
+      payment_due_date,
+    })
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };

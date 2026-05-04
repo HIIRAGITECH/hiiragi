@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
+import PaymentDueModal, {
+  calculateDefaultDueDate,
+} from "@/lib/components/payment-due-modal";
 import SearchInput from "@/lib/components/search-input";
 import StatusDropdown from "@/lib/components/status-dropdown";
 import StatusRow from "@/lib/components/status-row";
@@ -53,6 +56,21 @@ type Props = {
 export default function OrdersTable({ rows }: Props) {
   const [query, setQuery] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [paymentDueFor, setPaymentDueFor] = useState<string | null>(null);
+
+  // 「請求済」確定後の共通処理: invoice 更新 + アーカイブ提案
+  async function applyInvoiced(orderId: string, dueDate: string) {
+    const result = await updateInvoiceStatus(orderId, "請求済", dueDate);
+    if (
+      !result &&
+      typeof window !== "undefined" &&
+      window.confirm(
+        `受注「${orderId}」をアーカイブして一覧から非表示にしますか？`,
+      )
+    ) {
+      await updateArchived(orderId, true);
+    }
+  }
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -154,7 +172,15 @@ export default function OrdersTable({ rows }: Props) {
                             ariaLabel="作業ステータスを変更"
                           />
                         </StatusRow>
-                        <StatusRow label="見積">
+                        <StatusRow
+                          label="見積"
+                          href={
+                            o.estimate_status === "発行済" ||
+                            o.estimate_status === "了承済"
+                              ? `/dashboard/orders/${o.id}/estimate`
+                              : undefined
+                          }
+                        >
                           <StatusDropdown
                             value={o.estimate_status}
                             options={ESTIMATE_STATUSES}
@@ -165,31 +191,25 @@ export default function OrdersTable({ rows }: Props) {
                             ariaLabel="見積ステータスを変更"
                           />
                         </StatusRow>
-                        <StatusRow label="請求">
+                        <StatusRow
+                          label="請求"
+                          href={
+                            o.invoice_status === "請求済" ||
+                            o.invoice_status === "入金済"
+                              ? `/dashboard/orders/${o.id}/invoice`
+                              : undefined
+                          }
+                        >
                           <StatusDropdown
                             value={o.invoice_status}
                             options={INVOICE_STATUSES}
                             classMap={invoiceClass}
                             onSelect={async (next) => {
-                              const result = await updateInvoiceStatus(
-                                o.id,
-                                next,
-                              );
-                              if (
-                                !result &&
-                                next === "請求済" &&
-                                typeof window !== "undefined" &&
-                                window.confirm(
-                                  `受注「${o.id}」をアーカイブして一覧から非表示にしますか？`,
-                                )
-                              ) {
-                                await updateArchived(o.id, true);
+                              if (next === "請求済") {
+                                setPaymentDueFor(o.id);
+                              } else {
+                                await updateInvoiceStatus(o.id, next);
                               }
-                            }}
-                            confirmOn={{
-                              value: "請求済",
-                              message:
-                                "「請求済」にすると売上計上の対象になります。よろしいですか？",
                             }}
                             ariaLabel="請求ステータスを変更"
                           />
@@ -231,6 +251,19 @@ export default function OrdersTable({ rows }: Props) {
           </table>
         )}
       </div>
+
+      {paymentDueFor && (
+        <PaymentDueModal
+          orderId={paymentDueFor}
+          defaultDate={calculateDefaultDueDate(new Date())}
+          onClose={() => setPaymentDueFor(null)}
+          onConfirm={async (date) => {
+            const orderId = paymentDueFor;
+            setPaymentDueFor(null);
+            await applyInvoiced(orderId, date);
+          }}
+        />
+      )}
     </>
   );
 }

@@ -76,6 +76,7 @@ export type Order = {
   invoice_status: InvoiceStatus;
   invoiced_at: string | null; // ISO timestamptz、売上計上の基準日
   paid_at: string | null; // ISO timestamptz、入金確認日
+  payment_due_date: string | null; // YYYY-MM-DD、振込期限（請求書フッタ表示）
   is_archived: boolean;
   notes: string | null;
   items: OrderItem[];
@@ -126,6 +127,7 @@ export type OrderListRow = Pick<
   | "invoice_status"
   | "invoiced_at"
   | "paid_at"
+  | "payment_due_date"
   | "is_archived"
   | "notes"
 > & {

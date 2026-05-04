@@ -16,6 +16,12 @@ function hasBankInfo(b: BankInfo | undefined): b is BankInfo {
   );
 }
 
+// YYYY-MM-DD → 「YYYY年M月D日」
+function formatDateJP(s: string): string {
+  const [y, m, d] = s.split("-");
+  return `${y}年${Number.parseInt(m, 10)}月${Number.parseInt(d, 10)}日`;
+}
+
 type Props = {
   type: "estimate" | "invoice";
   order: Order;
@@ -222,6 +228,20 @@ export default function PrintableDocument({
             お振込先
           </h2>
           <BankInfoRows bank={shop.bank_info} />
+        </section>
+      )}
+
+      {type === "invoice" && order.payment_due_date && (
+        <section
+          className="mb-6 text-xs"
+          style={{ pageBreakInside: "avoid" }}
+        >
+          <p className="text-zinc-700">
+            お振込期限:{" "}
+            <span className="font-semibold text-zinc-900">
+              {formatDateJP(order.payment_due_date)}
+            </span>
+          </p>
         </section>
       )}
 

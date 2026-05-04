@@ -6,9 +6,18 @@ import { generatePdfFromElement } from "@/lib/pdf/generate-pdf";
 interface PdfButtonProps {
   targetId: string;
   fileName: string;
+  // 2ページ目以降に表示するヘッダー（英字推奨）
+  headerText?: string;
+  // 透かしロゴ画像 URL（null なら透かしなし）
+  watermarkUrl?: string | null;
 }
 
-export default function PdfButton({ targetId, fileName }: PdfButtonProps) {
+export default function PdfButton({
+  targetId,
+  fileName,
+  headerText,
+  watermarkUrl,
+}: PdfButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleClick = async (): Promise<void> => {
@@ -19,7 +28,10 @@ export default function PdfButton({ targetId, fileName }: PdfButtonProps) {
     }
     setIsGenerating(true);
     try {
-      await generatePdfFromElement(el, fileName);
+      await generatePdfFromElement(el, fileName, {
+        headerText,
+        watermarkUrl,
+      });
     } finally {
       setIsGenerating(false);
     }
