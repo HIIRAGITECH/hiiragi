@@ -14,6 +14,10 @@ export const COLORS = {
   gray: [100, 100, 100] as [number, number, number],
   light: [240, 240, 240] as [number, number, number],
   black: [30, 30, 30] as [number, number, number],
+  // カテゴリ見出し行の薄い背景
+  categoryBand: [230, 235, 245] as [number, number, number],
+  // テーブル罫線
+  tableLine: [200, 200, 200] as [number, number, number],
 };
 
 export const FONT_SIZE = {
@@ -26,3 +30,12 @@ export const FONT_SIZE = {
 
 // 日本語フォント名（registerJapaneseFont 後に setFont で参照する識別子）
 export const FONT_FAMILY = "NotoSansJP";
+
+// 明細テーブルのカテゴリ。printable-document.tsx の表記と完全一致させること。
+export const CATEGORIES = [
+  { key: "maintenance" as const, label: "整備" },
+  { key: "shakenTaxable" as const, label: "車検（課税）" },
+  { key: "shakenTaxFree" as const, label: "車検（非課税）" },
+];
+
+export type CategoryKey = (typeof CATEGORIES)[number]["key"];

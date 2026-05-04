@@ -1,12 +1,20 @@
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import { registerJapaneseFont } from "../fonts/register";
-import { COLORS, FONT_FAMILY, FONT_SIZE, PAGE } from "./constants";
+import { PAGE } from "./constants";
+import { createContext } from "./context";
+import { drawHeader } from "./sections/header";
+import { drawItemsTable } from "./sections/items-table";
+import { drawNotes } from "./sections/notes";
+import { drawParties } from "./sections/parties";
+import { drawPaymentInfo } from "./sections/payment-info";
+import { drawTotals } from "./sections/totals";
+import { drawVehicle } from "./sections/vehicle";
 import type { PdfRenderInput } from "./types";
 
 // 受注 PDF を生成して Blob を返す。
-// この時点では「タイトル + ダミー明細テーブル」だけの最小構成。
-// Step 3 以降で本実装に差し替える。
+// 各 section は (doc, ctx) => number で「描画後の Y 座標」を返す約束。
+// autoTable は内部で改ページしてくれるので、本体側ではセクション境界の
+// 改ページのみ ensureSpace で面倒を見る。
 export async function generateOrderPdf(
   input: PdfRenderInput,
 ): Promise<Blob> {
@@ -18,36 +26,15 @@ export async function generateOrderPdf(
 
   registerJapaneseFont(doc);
 
-  // タイトル
-  const title = input.documentType === "estimate" ? "見積書" : "請求書";
-  doc.setFont(FONT_FAMILY, "bold");
-  doc.setFontSize(FONT_SIZE.title);
-  doc.text(title, 105, 25, { align: "center" });
+  const ctx = createContext(doc, input);
 
-  // ダミー明細（最大5件）
-  const items = (input.items ?? input.order.items ?? []).slice(0, 5);
-  autoTable(doc, {
-    startY: 40,
-    head: [["品名", "数量", "工賃", "部品代", "小計"]],
-    body: items.map((it) => [
-      it.name ?? "",
-      String(it.quantity ?? ""),
-      String(it.labor_cost ?? ""),
-      String(it.parts_cost ?? ""),
-      String((it.labor_cost ?? 0) + (it.parts_cost ?? 0)),
-    ]),
-    styles: {
-      font: FONT_FAMILY,
-      fontStyle: "normal",
-      fontSize: FONT_SIZE.body,
-    },
-    headStyles: {
-      font: FONT_FAMILY,
-      fontStyle: "bold",
-      fillColor: COLORS.primary,
-      textColor: [255, 255, 255],
-    },
-  });
+  ctx.cursorY = drawHeader(doc, ctx);
+  ctx.cursorY = drawParties(doc, ctx);
+  ctx.cursorY = drawVehicle(doc, ctx);
+  ctx.cursorY = drawItemsTable(doc, ctx);
+  ctx.cursorY = drawTotals(doc, ctx);
+  ctx.cursorY = drawPaymentInfo(doc, ctx);
+  ctx.cursorY = drawNotes(doc, ctx);
 
   return doc.output("blob");
 }
