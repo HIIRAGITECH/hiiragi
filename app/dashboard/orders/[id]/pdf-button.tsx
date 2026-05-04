@@ -1,37 +1,81 @@
 "use client";
 
 import { useState } from "react";
-import { generatePdfFromElement } from "@/lib/pdf/generate-pdf";
+import type { Customer, Order, ShopInfo, Vehicle } from "@/lib/types";
+import { buildPdfFileName } from "@/lib/pdf/file-name";
+import type { PdfDocumentType } from "@/lib/pdf/v2";
 
 interface PdfButtonProps {
-  targetId: string;
-  fileName: string;
-  // 2ページ目以降に表示するヘッダー（英字推奨）
-  headerText?: string;
-  // 透かしロゴ画像 URL（null なら透かしなし）
-  watermarkUrl?: string | null;
+  documentType: PdfDocumentType;
+  order: Order;
+  customer: Customer | null;
+  vehicle: Vehicle | null;
+  shop: ShopInfo;
+  // Supabase Storage 上の画像 signed URL（fail-soft：取得失敗でも PDF は生成される）
+  logoUrl: string | null;
+  stampUrl: string | null;
 }
 
+// 受注 PDF（見積書 or 請求書）をクライアント側で生成しダウンロードするボタン。
+// 旧 html2canvas-pro 方式から jspdf-autotable + 日本語フォント埋め込み方式へ移行。
+// 見た目・ローディング・エラーハンドリングは旧実装を踏襲。
 export default function PdfButton({
-  targetId,
-  fileName,
-  headerText,
-  watermarkUrl,
+  documentType,
+  order,
+  customer,
+  vehicle,
+  shop,
+  logoUrl,
+  stampUrl,
 }: PdfButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const handleClick = async (): Promise<void> => {
-    const el = document.getElementById(targetId);
-    if (!el) {
-      alert("PDF対象要素が見つかりません");
-      return;
-    }
     setIsGenerating(true);
     try {
-      await generatePdfFromElement(el, fileName, {
-        headerText,
-        watermarkUrl,
+      // フォントが重い（11MB+）ため、ボタン押下時に動的 import する
+      const [{ generateOrderPdf }, { fetchTenantAssets }] = await Promise.all([
+        import("@/lib/pdf/v2"),
+        import("@/lib/pdf/v2/assets"),
+      ]);
+
+      const { logoDataUrl, stampDataUrl } = await fetchTenantAssets(
+        logoUrl,
+        stampUrl,
+      );
+
+      const blob = await generateOrderPdf({
+        documentType,
+        order,
+        customer,
+        vehicle,
+        shop,
+        logoDataUrl,
+        stampDataUrl,
       });
+
+      const fileName = buildPdfFileName({
+        documentType,
+        date:
+          documentType === "invoice"
+            ? (order.invoiced_at ?? new Date())
+            : new Date(),
+        customerName: customer?.name ?? null,
+        orderNumber: order.id,
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err: unknown) {
+      console.error("PDF生成失敗:", err);
+      const message = err instanceof Error ? err.message : String(err);
+      alert("PDF生成に失敗しました: " + message);
     } finally {
       setIsGenerating(false);
     }

@@ -1,3 +1,7 @@
+/**
+ * @deprecated v2 (lib/pdf/v2) に移行済み。次のリリースで削除予定。
+ * 旧 html2canvas-pro 方式の PDF 生成器。新規呼び出しは追加しないこと。
+ */
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 
