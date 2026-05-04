@@ -4,7 +4,8 @@ export const PAGE = {
   format: "a4" as const,
   unit: "mm" as const,
   marginX: 15,
-  marginTop: 20,
+  // 2ページ目以降の continuation-header（Y=10〜14mm）と本文が被らないよう 25mm に確保
+  marginTop: 25,
   marginBottom: 25,
 };
 
