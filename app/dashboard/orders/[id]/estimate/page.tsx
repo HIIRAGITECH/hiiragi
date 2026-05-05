@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getShopAssetSignedUrl, getShopInfo } from "@/lib/shop";
 import type { Customer, Order, Vehicle } from "@/lib/types";
-import { buildPdfFileName } from "@/lib/pdf/file-name";
 import PrintableDocument from "../printable-document";
 import PrintButton from "../print-button";
 import PdfButton from "../pdf-button";
@@ -56,13 +55,6 @@ export default async function EstimatePage(
     getShopAssetSignedUrl(shop.stamp_path),
   ]);
 
-  const pdfFileName = buildPdfFileName({
-    documentType: "estimate",
-    date: new Date(),
-    customerName: (customerData as Customer | null)?.name ?? null,
-    orderNumber: order.id,
-  });
-
   return (
     <>
       <div className="no-print mb-4 flex items-center justify-between">
@@ -74,10 +66,13 @@ export default async function EstimatePage(
         </Link>
         <div className="flex items-center gap-2">
           <PdfButton
-            targetId="printable-document"
-            fileName={pdfFileName}
-            headerText={`Estimate (cont.) ${order.id}`}
-            watermarkUrl={logoUrl}
+            documentType="estimate"
+            order={order}
+            customer={customerData as Customer | null}
+            vehicle={vehicleData as Vehicle | null}
+            shop={shop}
+            logoUrl={logoUrl}
+            stampUrl={stampUrl}
           />
           <PrintButton />
         </div>
