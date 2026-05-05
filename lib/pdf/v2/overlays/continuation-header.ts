@@ -3,7 +3,7 @@ import { COLORS, FONT_FAMILY, FONT_SIZE } from "../constants";
 import type { RenderContext } from "../context";
 
 // 2ページ目以降の上部に表示する細い帯。
-// - 左: タイトル「見積書（つづき）」or「請求書（つづき）」（太字、primary 色）
+// - 左: タイトル「見積書」or「請求書」（太字、primary 色）
 // - 中央: 文書番号 + 顧客名 + 様（gray）
 // - 右: ページ番号 「2 / 3」（gray）
 // - Y=14mm に薄い水平線（primary、線幅 0.3mm）
@@ -17,8 +17,7 @@ export function drawContinuationHeader(
 ): void {
   const { documentType, order, customer } = ctx.input;
 
-  const titleText =
-    documentType === "estimate" ? "見積書（つづき）" : "請求書（つづき）";
+  const titleText = documentType === "estimate" ? "見積書" : "請求書";
   const centerText = `${order.id}  ${customer?.name ?? "—"} 様`;
   const rightText = `${page} / ${total}`;
 
