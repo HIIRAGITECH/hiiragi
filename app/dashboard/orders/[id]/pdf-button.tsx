@@ -16,7 +16,8 @@ interface PdfButtonProps {
 
 // PDF 生成は移行作業中（jsPDF → @react-pdf/renderer）。
 // 後続コミットで /api/invoice-pdf/[id] への呼び出しに差し替える。
-export default function PdfButton(_: PdfButtonProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function PdfButton(props: PdfButtonProps) {
   const handleClick = () => {
     alert("PDF 生成は移行作業中です。完了までしばらくお待ちください。");
   };
