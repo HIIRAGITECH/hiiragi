@@ -22,41 +22,21 @@ export function registerJapaneseFont(): void {
       },
     ],
   });
-  // CJK は単語区切りの空白がないため、react-pdf 内部の line break が
-  // 「1 トークン丸ごと」を改行できないとみなし長文が右にはみ出すことがある。
-  // 一方で `Array.from(word)` で全文字を分割すると半角スペースまで 1 文字単位の
-  // syllable になり、textkit の line breaker が空白を glue として折り畳む過程で
-  // ASCII / CJK 境界の空白が出力から脱落する事象があった
-  //   （例: "No.2603-033 水戸..." → "No.2603-033水戸..."）。
+  // ハイフネーションコールバック。
   //
-  // 対策として「半角スペース」「CJK 1 文字」「連続する非 CJK 文字（英数記号）」を
-  // 互いに独立した chunk に分けて返す。半角スペースを単独 chunk にすることで
-  // ASCII 連続ランや CJK 文字に紛れ込んで消えることがなくなる。
-  // CJK が 1 文字も含まれない単語は分割不要なのでそのまま返す（既定動作維持）。
-  const cjk = /[　-鿿＀-￯]/;
-  Font.registerHyphenationCallback((word) => {
-    if (!cjk.test(word)) return [word];
-    const parts: string[] = [];
-    let buffer = "";
-    const flush = () => {
-      if (buffer !== "") {
-        parts.push(buffer);
-        buffer = "";
-      }
-    };
-    for (const ch of word) {
-      if (cjk.test(ch)) {
-        flush();
-        parts.push(ch);
-      } else if (ch === " ") {
-        flush();
-        parts.push(ch);
-      } else {
-        buffer += ch;
-      }
-    }
-    flush();
-    return parts;
-  });
+  // 経緯:
+  //   旧実装は「CJK と 非 CJK が混在するトークンを CJK 1 文字 / ASCII ラン / 半角スペース
+  //   の chunk に分けて返す」方式をとっていたが、subset 化された日本語フォントを
+  //   PDF に埋め込んだとき、Adobe Reader 等の PC 向け PDF ビューアで chunk 先頭の
+  //   1 グリフが "&" に置換される現象が発生した（ブラウザ内蔵ビューアでは正常）。
+  //   chunk の組み方によって fontkit の subset / CMap 生成に影響する可能性が高いと判断。
+  //
+  // 対策:
+  //   chunk 分割を辞めて 1 文字ずつ syllable にする最も単純な形にする。
+  //   これで multi-char chunk 起因の「&」置換バグは解消する。CJK 文字単位の
+  //   折り返しもそのまま効くため、長文品名の右はみ出しも引き続き発生しない。
+  //   ASCII 単語が単語の途中で改行されうる弱点は残るが、本プロジェクトの明細欄は
+  //   95mm 程度確保しており実害は小さい。
+  Font.registerHyphenationCallback((word) => Array.from(word));
   registered = true;
 }
