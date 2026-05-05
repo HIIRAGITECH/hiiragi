@@ -296,6 +296,23 @@ function formatDateJP(s: string): string {
   return `${y}年${Number.parseInt(m, 10)}月${Number.parseInt(d, 10)}日`;
 }
 
+// 制御文字（U+0000〜U+001F）を半角スペースに置換するサニタイザ。
+// 経緯:
+//   品名に TAB(0x09) が含まれる既存データがあり、IPAex Gothic / NotoSansJP
+//   どちらでも U+0009 → glyph 0 (.notdef) にフォールバックしてしまうため、
+//   Adobe Reader が CID 0 を環境依存のフォールバックグリフ（"&" 等）で描画し、
+//   かつ .notdef の advanceWidth が広いため隣接グリフと重なって
+//   「最初の 1 文字が消えたように見える」現象が発生していた。
+//
+//   ブラウザ内蔵 PDF ビューアでは .notdef を空白として描画するため見た目は問題ない。
+//   このため気付きづらかったが、データ衛生の観点でも控除すべき。
+//
+//   連続する制御文字をまとめて 1 つの半角スペースに正規化する。
+function sanitizeText(s: string | null | undefined): string {
+  if (!s) return "";
+  return s.replace(/[\x00-\x1f]+/g, " ");
+}
+
 interface ItemsSectionProps {
   title: string;
   items: OrderItem[];
@@ -320,7 +337,7 @@ function ItemsSection({ title, items }: ItemsSectionProps) {
             style={styles.tableRow}
             wrap={false}
           >
-            <Text style={styles.colName}>{it.name}</Text>
+            <Text style={styles.colName}>{sanitizeText(it.name)}</Text>
             <Text style={styles.colQty}>{it.quantity}</Text>
             {showBreakdown ? (
               <>
@@ -640,7 +657,7 @@ export function InvoiceDocument({
         {order.notes && order.notes.trim() !== "" ? (
           <View style={styles.notesBox}>
             <Text style={styles.notesHeading}>備考</Text>
-            <Text style={styles.notesBody}>{order.notes}</Text>
+            <Text style={styles.notesBody}>{sanitizeText(order.notes)}</Text>
           </View>
         ) : null}
       </Page>
