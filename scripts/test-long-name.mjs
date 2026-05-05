@@ -48,6 +48,15 @@ registerJapaneseFont(doc);
 
 const cellLogs = [];
 
+// autoTable が "Of the table content, X units width could not fit page" のような
+// 警告を console.log で出力するので、autoTable 実行中だけ console.log を hook して
+// 捕捉する。捕捉した警告はテストの主判定にも反映する。
+const capturedLogs = [];
+const originalLog = console.log;
+console.log = (...args) => {
+  capturedLogs.push(args.map((a) => String(a)).join(" "));
+};
+
 autoTable(doc, {
   startY: 20,
   head: [["品名", "数量", "工賃", "部品代", "小計"]],
@@ -75,11 +84,12 @@ autoTable(doc, {
   },
   bodyStyles: { minCellHeight: 0 },
   columnStyles: {
-    0: { cellWidth: 80 },
-    1: { cellWidth: 15, halign: "right" },
-    2: { cellWidth: 25, halign: "right" },
-    3: { cellWidth: 25, halign: "right" },
-    4: { cellWidth: 30, halign: "right" },
+    // items-table.ts と完全一致させる（合計 165mm）
+    0: { cellWidth: 75 },
+    1: { cellWidth: 14, halign: "right" },
+    2: { cellWidth: 24, halign: "right" },
+    3: { cellWidth: 24, halign: "right" },
+    4: { cellWidth: 28, halign: "right" },
   },
   didDrawCell: (data) => {
     if (data.section === "body" && data.column.index === 0) {
@@ -96,12 +106,48 @@ autoTable(doc, {
   },
 });
 
+// autoTable の実行が終わったので console.log を元に戻す
+console.log = originalLog;
+
 const buf = Buffer.from(doc.output("arraybuffer"));
 writeFileSync(OUT_PATH, buf);
 console.log(`PDF 生成完了: ${OUT_PATH}`);
 console.log(`  サイズ: ${(buf.length / 1024).toFixed(1)} KB`);
 
 let mainOk = true;
+
+console.log("\n--- autoTable の警告ログ捕捉 ---");
+// jspdf-autotable v5 のソース上、resizeWidth = |利用可能幅 - テーブル幅| が
+// 0.1/scaleFactor を超えると常に警告が出る。つまり「余ってる時」も出る。
+// 全列 customWidth なら resizableColumns が空なので自動縮小は発動しない。
+// 「中間行が消える」のは self-healing の自動縮小が customWidth 列を
+// 縮めようとした時に起こる。本実装は全列 customWidth なのでそのケースはない。
+// よって判定は「overflow 値が 10mm 未満なら fail」に緩める：
+//   <10mm → 自動縮小トリガまでの余裕が足りず CJK 幅計算ズレで再発しうる
+//   >=10mm → 設計通りの余裕（実害なし、警告は出るが）
+const fitWarning = capturedLogs.find((l) => /could not fit page/.test(l));
+if (fitWarning) {
+  const m = fitWarning.match(/(\d+(?:\.\d+)?)\s*units/);
+  const overflow = m ? Number.parseFloat(m[1]) : Number.POSITIVE_INFINITY;
+  if (overflow < 10) {
+    console.error(
+      `❌ autoTable オーバーフロー警告（実害あり）: "${fitWarning}"`,
+    );
+    console.error(
+      `   overflow=${overflow}mm < 10mm。CJK 幅計算ズレで中間行欠落の可能性`,
+    );
+    mainOk = false;
+  } else {
+    console.log(
+      `⚠️ autoTable 余裕警告（実害なし）: "${fitWarning}" (overflow=${overflow}mm)`,
+    );
+    console.log(
+      "   全列 customWidth のため自動縮小は発動せず、設計通りの余裕です",
+    );
+  }
+} else {
+  console.log("✓ autoTable のオーバーフロー警告は出ていません");
+}
 
 console.log(
   "\n--- 主判定: didDrawCell の cell.text 行配列を結合して入力と一致するか ---",

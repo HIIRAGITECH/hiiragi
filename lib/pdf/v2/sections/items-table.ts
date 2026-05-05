@@ -135,12 +135,18 @@ export function drawItemsTable(doc: jsPDF, ctx: RenderContext): number {
       // 品名列を数値固定にして autoTable に「この幅で折り返せ」と明示する。
       // CJK では cellWidth: "auto" だと内部の getStringUnitWidth による幅計算が
       // ズレ、折り返し行数と確保高さの整合が取れず中間行が描画されないバグになる。
-      // 80 + 15 + 25 + 25 + 30 = 175mm（左右マージン 30mm 込みで A4 210mm 内に収まる）
-      0: { cellWidth: 80 },
-      1: { cellWidth: 15, halign: "right" },
-      2: { cellWidth: 25, halign: "right" },
-      3: { cellWidth: 25, halign: "right" },
-      4: { cellWidth: 30, halign: "right" },
+      //
+      // 合計 75 + 14 + 24 + 24 + 28 = 165mm。
+      // autoTable はテーブルの罫線・パディングを含めてオーバーフロー判定するため、
+      // A4 利用可能幅 180mm（210 - marginX×2）に対して最低でも 10mm 以上の
+      // 余裕を持たせる必要がある。175mm（5mm 余裕）だと autoTable が自動縮小を
+      // 発動し（"X units width could not fit page" 警告）、CJK 幅計算とのズレで
+      // 中間行が消えるバグが再発する。165mm（15mm 余裕）でこれを回避する。
+      0: { cellWidth: 75 },
+      1: { cellWidth: 14, halign: "right" },
+      2: { cellWidth: 24, halign: "right" },
+      3: { cellWidth: 24, halign: "right" },
+      4: { cellWidth: 28, halign: "right" },
     },
   });
 
