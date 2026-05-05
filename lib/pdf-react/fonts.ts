@@ -24,32 +24,38 @@ export function registerJapaneseFont(): void {
   });
   // CJK は単語区切りの空白がないため、react-pdf 内部の line break が
   // 「1 トークン丸ごと」を改行できないとみなし長文が右にはみ出すことがある。
-  // 一方で `Array.from(word)` で全文字を分割すると、ASCII 半角スペースなど
-  // 非 CJK 文字も 1 文字単位の syllable になり、line breaker が空白を glue として
-  // 折り畳んで出力から脱落させるケースが発生する（実測で確認）。
+  // 一方で `Array.from(word)` で全文字を分割すると半角スペースまで 1 文字単位の
+  // syllable になり、textkit の line breaker が空白を glue として折り畳む過程で
+  // ASCII / CJK 境界の空白が出力から脱落する事象があった
+  //   （例: "No.2603-033 水戸..." → "No.2603-033水戸..."）。
   //
-  // そのため:
-  //   - CJK 文字を含まないトークン（半角英数のみ・空白のみ）は触らずそのまま返す
-  //   - CJK と非 CJK が混在するトークンは、CJK 文字 1 つを 1 chunk、
-  //     連続する非 CJK 文字（ASCII 半角スペースを含む）を 1 chunk にまとめる
-  //   これで CJK 部分は 1 文字単位で改行可能、非 CJK ランは中間で切れず空白も保持される。
+  // 対策として「半角スペース」「CJK 1 文字」「連続する非 CJK 文字（英数記号）」を
+  // 互いに独立した chunk に分けて返す。半角スペースを単独 chunk にすることで
+  // ASCII 連続ランや CJK 文字に紛れ込んで消えることがなくなる。
+  // CJK が 1 文字も含まれない単語は分割不要なのでそのまま返す（既定動作維持）。
+  const cjk = /[　-鿿＀-￯]/;
   Font.registerHyphenationCallback((word) => {
-    const cjk = /[　-鿿＀-￯]/;
     if (!cjk.test(word)) return [word];
     const parts: string[] = [];
     let buffer = "";
+    const flush = () => {
+      if (buffer !== "") {
+        parts.push(buffer);
+        buffer = "";
+      }
+    };
     for (const ch of word) {
       if (cjk.test(ch)) {
-        if (buffer !== "") {
-          parts.push(buffer);
-          buffer = "";
-        }
+        flush();
+        parts.push(ch);
+      } else if (ch === " ") {
+        flush();
         parts.push(ch);
       } else {
         buffer += ch;
       }
     }
-    if (buffer !== "") parts.push(buffer);
+    flush();
     return parts;
   });
   registered = true;
