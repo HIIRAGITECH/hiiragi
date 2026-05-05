@@ -1,31 +1,32 @@
 import { Font } from "@react-pdf/renderer";
 import { join } from "node:path";
 
-// react-pdf 用の NotoSansJP 登録。サーバーサイド（route handler）専用。
+// react-pdf 用の日本語フォント登録。サーバーサイド（route handler）専用。
 //
-// 重要: TTF ではなく OTF (CFF) を使う。
-//   pdfkit の subset embed は TTF だと CIDFontType2 + CIDToGIDMap=Identity を出力するが、
-//   サブセット内のグリフ並びとそれに合わせた CIDToGIDMap の整合がうまく行かず、
-//   Adobe Reader 等の PC 向けビューアで先頭グリフが別文字（"&" 等）に化ける問題があった
-//   （ブラウザ内蔵ビューアでは glyph 描画が正常）。
-//   OTF を渡すと pdfkit は CIDFontType0 + FontFile3 (CIDFontType0C) として埋め込み、
-//   CFF 内部の CID マッピングを直接使うため Adobe を含む各ビューアで正しく表示される。
+// 経緯:
+//   NotoSansJP（TTF も OTF も）を Font.register に渡すと、Adobe Reader 等の
+//   PC 向け PDF ビューアで一部の文字が "&" などの別グリフに化ける現象が発生した
+//   （ブラウザ内蔵ビューアと pdf-parse 抽出は正常）。
+//   pdfkit/fontkit のサブセット化と NotoSansJP のグリフテーブルの組み合わせに
+//   起因する問題と推測される。
+//
+// 対策:
+//   IPAex Gothic (ipaexg.ttf) に切り替える。pdfkit との互換性が高く実績豊富で、
+//   Adobe Reader でも安定して描画される。Bold ウェイトは無いため、bold 指定箇所は
+//   Regular にフォールバックされる（同ファイルを bold として再登録）。
+//
+// InvoiceDocument 側との互換性のため `family: "NotoSansJP"` の名前は変えない。
 let registered = false;
 
 export function registerJapaneseFont(): void {
   if (registered) return;
   const fontDir = join(process.cwd(), "public", "fonts");
+  const ipaex = join(fontDir, "ipaexg.ttf");
   Font.register({
     family: "NotoSansJP",
     fonts: [
-      {
-        src: join(fontDir, "NotoSansJP-Regular.otf"),
-        fontWeight: "normal",
-      },
-      {
-        src: join(fontDir, "NotoSansJP-Bold.otf"),
-        fontWeight: "bold",
-      },
+      { src: ipaex, fontWeight: "normal" },
+      { src: ipaex, fontWeight: "bold" },
     ],
   });
   // CJK は単語区切りの空白がないため、デフォルトの hyphenation だと「1 トークン
