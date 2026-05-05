@@ -2,8 +2,14 @@ import { Font } from "@react-pdf/renderer";
 import { join } from "node:path";
 
 // react-pdf 用の NotoSansJP 登録。サーバーサイド（route handler）専用。
-// public/fonts/ の TTF を fontkit.open（@react-pdf/font 内部で利用）で読み込ませる。
-// 多重登録防止のためフラグで一度だけ実行する。
+//
+// 重要: TTF ではなく OTF (CFF) を使う。
+//   pdfkit の subset embed は TTF だと CIDFontType2 + CIDToGIDMap=Identity を出力するが、
+//   サブセット内のグリフ並びとそれに合わせた CIDToGIDMap の整合がうまく行かず、
+//   Adobe Reader 等の PC 向けビューアで先頭グリフが別文字（"&" 等）に化ける問題があった
+//   （ブラウザ内蔵ビューアでは glyph 描画が正常）。
+//   OTF を渡すと pdfkit は CIDFontType0 + FontFile3 (CIDFontType0C) として埋め込み、
+//   CFF 内部の CID マッピングを直接使うため Adobe を含む各ビューアで正しく表示される。
 let registered = false;
 
 export function registerJapaneseFont(): void {
@@ -13,30 +19,20 @@ export function registerJapaneseFont(): void {
     family: "NotoSansJP",
     fonts: [
       {
-        src: join(fontDir, "NotoSansJP-Regular.ttf"),
+        src: join(fontDir, "NotoSansJP-Regular.otf"),
         fontWeight: "normal",
       },
       {
-        src: join(fontDir, "NotoSansJP-Bold.ttf"),
+        src: join(fontDir, "NotoSansJP-Bold.otf"),
         fontWeight: "bold",
       },
     ],
   });
-  // ハイフネーションコールバック。
-  //
-  // 経緯:
-  //   旧実装は「CJK と 非 CJK が混在するトークンを CJK 1 文字 / ASCII ラン / 半角スペース
-  //   の chunk に分けて返す」方式をとっていたが、subset 化された日本語フォントを
-  //   PDF に埋め込んだとき、Adobe Reader 等の PC 向け PDF ビューアで chunk 先頭の
-  //   1 グリフが "&" に置換される現象が発生した（ブラウザ内蔵ビューアでは正常）。
-  //   chunk の組み方によって fontkit の subset / CMap 生成に影響する可能性が高いと判断。
-  //
-  // 対策:
-  //   chunk 分割を辞めて 1 文字ずつ syllable にする最も単純な形にする。
-  //   これで multi-char chunk 起因の「&」置換バグは解消する。CJK 文字単位の
-  //   折り返しもそのまま効くため、長文品名の右はみ出しも引き続き発生しない。
-  //   ASCII 単語が単語の途中で改行されうる弱点は残るが、本プロジェクトの明細欄は
-  //   95mm 程度確保しており実害は小さい。
+  // CJK は単語区切りの空白がないため、デフォルトの hyphenation だと「1 トークン
+  // 丸ごと」が改行できないとみなされ長文が右にはみ出す。1 文字ずつ syllable に
+  // 分割することで CJK 文字単位の折り返しを可能にする。
+  // ASCII 単語も同じく文字単位で折れる可能性はあるが、明細欄を 95mm 確保している
+  // ので実害は小さい。
   Font.registerHyphenationCallback((word) => Array.from(word));
   registered = true;
 }
