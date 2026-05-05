@@ -132,21 +132,27 @@ export function drawItemsTable(doc: jsPDF, ctx: RenderContext): number {
       minCellHeight: 0,
     },
     columnStyles: {
-      // 品名列を数値固定にして autoTable に「この幅で折り返せ」と明示する。
-      // CJK では cellWidth: "auto" だと内部の getStringUnitWidth による幅計算が
-      // ズレ、折り返し行数と確保高さの整合が取れず中間行が描画されないバグになる。
+      // 列幅合計 95 + 12 + 22 + 22 + 29 = 180mm。
+      // A4 (210mm) - marginX×2 (30mm) = 利用可能幅 180mm と「完全一致」させる。
       //
-      // 合計 75 + 14 + 24 + 24 + 28 = 165mm。
-      // autoTable はテーブルの罫線・パディングを含めてオーバーフロー判定するため、
-      // A4 利用可能幅 180mm（210 - marginX×2）に対して最低でも 10mm 以上の
-      // 余裕を持たせる必要がある。175mm（5mm 余裕）だと autoTable が自動縮小を
-      // 発動し（"X units width could not fit page" 警告）、CJK 幅計算とのズレで
-      // 中間行が消えるバグが再発する。165mm（15mm 余裕）でこれを回避する。
-      0: { cellWidth: 75 },
-      1: { cellWidth: 14, halign: "right" },
-      2: { cellWidth: 24, halign: "right" },
-      3: { cellWidth: 24, halign: "right" },
-      4: { cellWidth: 28, halign: "right" },
+      // jspdf-autotable v5 のソース (dist/jspdf.plugin.autotable.js:205-224) を
+      // 確認した結果、警告 "Of the table content, X units width could not fit page" は
+      //   resizeWidth = Math.abs(利用可能幅 - テーブル幅)
+      // が閾値 (0.1 / scaleFactor) を超えると常に出る仕様で、
+      // 「テーブルがはみ出す時」だけでなく「テーブルが余る時」にも出る。
+      // つまり列幅を縮めるほど警告数値はむしろ増える（175mm→5mm、165mm→15mm、
+      // 155mm→25mm）。完全に消すには合計を利用可能幅と一致させる必要がある。
+      //
+      // また、全列 customWidth の場合 resizableColumns が空になるため
+      // autoTable の自動縮小ロジックは発動せず、CJK 幅計算ズレによる中間行欠落も
+      // 発生しない。180mm 一致で警告も消え、自動縮小も発動しない最良の構成。
+      //
+      // 増分は品名列に集中させる（長い品名の折り返し回数が減るほうがユーザー有利）。
+      0: { cellWidth: 95 },
+      1: { cellWidth: 12, halign: "right" },
+      2: { cellWidth: 22, halign: "right" },
+      3: { cellWidth: 22, halign: "right" },
+      4: { cellWidth: 29, halign: "right" },
     },
   });
 

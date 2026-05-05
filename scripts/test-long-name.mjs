@@ -48,13 +48,32 @@ registerJapaneseFont(doc);
 
 const cellLogs = [];
 
-// autoTable が "Of the table content, X units width could not fit page" のような
-// 警告を console.log で出力するので、autoTable 実行中だけ console.log を hook して
-// 捕捉する。捕捉した警告はテストの主判定にも反映する。
+// autoTable は "Of the table content, X units width could not fit page" 系の
+// 警告を出す。jsPDF/jspdf-autotable は console.warn / console.error / console.log の
+// いずれを使うか version によって異なるため 3 系統すべて hook して捕捉する。
 const capturedLogs = [];
+const originalWarn = console.warn;
+const originalError = console.error;
 const originalLog = console.log;
+console.warn = (...args) => {
+  capturedLogs.push({
+    method: "warn",
+    text: args.map((a) => String(a)).join(" "),
+  });
+  originalWarn(...args);
+};
+console.error = (...args) => {
+  capturedLogs.push({
+    method: "error",
+    text: args.map((a) => String(a)).join(" "),
+  });
+  originalError(...args);
+};
 console.log = (...args) => {
-  capturedLogs.push(args.map((a) => String(a)).join(" "));
+  capturedLogs.push({
+    method: "log",
+    text: args.map((a) => String(a)).join(" "),
+  });
 };
 
 autoTable(doc, {
@@ -84,12 +103,12 @@ autoTable(doc, {
   },
   bodyStyles: { minCellHeight: 0 },
   columnStyles: {
-    // items-table.ts と完全一致させる（合計 165mm）
-    0: { cellWidth: 75 },
-    1: { cellWidth: 14, halign: "right" },
-    2: { cellWidth: 24, halign: "right" },
-    3: { cellWidth: 24, halign: "right" },
-    4: { cellWidth: 28, halign: "right" },
+    // items-table.ts と完全一致させる（合計 180mm = 利用可能幅と一致）
+    0: { cellWidth: 95 },
+    1: { cellWidth: 12, halign: "right" },
+    2: { cellWidth: 22, halign: "right" },
+    3: { cellWidth: 22, halign: "right" },
+    4: { cellWidth: 29, halign: "right" },
   },
   didDrawCell: (data) => {
     if (data.section === "body" && data.column.index === 0) {
@@ -106,7 +125,9 @@ autoTable(doc, {
   },
 });
 
-// autoTable の実行が終わったので console.log を元に戻す
+// autoTable の実行が終わったので hook を元に戻す
+console.warn = originalWarn;
+console.error = originalError;
 console.log = originalLog;
 
 const buf = Buffer.from(doc.output("arraybuffer"));
@@ -117,34 +138,16 @@ console.log(`  サイズ: ${(buf.length / 1024).toFixed(1)} KB`);
 let mainOk = true;
 
 console.log("\n--- autoTable の警告ログ捕捉 ---");
-// jspdf-autotable v5 のソース上、resizeWidth = |利用可能幅 - テーブル幅| が
-// 0.1/scaleFactor を超えると常に警告が出る。つまり「余ってる時」も出る。
-// 全列 customWidth なら resizableColumns が空なので自動縮小は発動しない。
-// 「中間行が消える」のは self-healing の自動縮小が customWidth 列を
-// 縮めようとした時に起こる。本実装は全列 customWidth なのでそのケースはない。
-// よって判定は「overflow 値が 10mm 未満なら fail」に緩める：
-//   <10mm → 自動縮小トリガまでの余裕が足りず CJK 幅計算ズレで再発しうる
-//   >=10mm → 設計通りの余裕（実害なし、警告は出るが）
-const fitWarning = capturedLogs.find((l) => /could not fit page/.test(l));
+// "could not fit page" を含む警告が捕捉されたら無条件で fail。
+const fitWarning = capturedLogs.find((l) => /could not fit page/.test(l.text));
 if (fitWarning) {
-  const m = fitWarning.match(/(\d+(?:\.\d+)?)\s*units/);
-  const overflow = m ? Number.parseFloat(m[1]) : Number.POSITIVE_INFINITY;
-  if (overflow < 10) {
-    console.error(
-      `❌ autoTable オーバーフロー警告（実害あり）: "${fitWarning}"`,
-    );
-    console.error(
-      `   overflow=${overflow}mm < 10mm。CJK 幅計算ズレで中間行欠落の可能性`,
-    );
-    mainOk = false;
-  } else {
-    console.log(
-      `⚠️ autoTable 余裕警告（実害なし）: "${fitWarning}" (overflow=${overflow}mm)`,
-    );
-    console.log(
-      "   全列 customWidth のため自動縮小は発動せず、設計通りの余裕です",
-    );
-  }
+  console.error(
+    `❌ autoTable オーバーフロー警告: [${fitWarning.method}] "${fitWarning.text}"`,
+  );
+  console.error(
+    "   columnStyles 合計が A4 利用可能幅 180mm との差分 0 でないため警告発生。",
+  );
+  mainOk = false;
 } else {
   console.log("✓ autoTable のオーバーフロー警告は出ていません");
 }
