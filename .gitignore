@@ -53,3 +53,6 @@ next-env.d.ts
 
 # 一時ファイル（フォントバイナリ・PDFテスト出力など）
 .tmp/
+
+# pnpm を使わない方針のため除外
+pnpm-lock.yaml
