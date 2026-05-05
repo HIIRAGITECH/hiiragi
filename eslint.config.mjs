@@ -12,8 +12,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // base64 化された巨大なフォント定義（自動生成・編集禁止）
-    "lib/pdf/fonts/noto-sans-jp.ts",
   ]),
 ]);
 
