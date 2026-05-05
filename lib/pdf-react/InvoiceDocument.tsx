@@ -136,7 +136,17 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   shopLine: { fontSize: 8, textAlign: "right", marginBottom: 1 },
-  stamp: { width: 56, height: 56, marginTop: 2, alignSelf: "flex-end" },
+  // 印鑑: 25mm × 25mm。会社情報の下、右寄せ（partiesRight 自体が alignItems: flex-end）。
+  // flexShrink: 0 で行内の他要素から潰されないようにする。
+  stampWrap: {
+    marginTop: 6,
+    alignItems: "flex-end",
+  },
+  stamp: {
+    width: 25 * 2.83465,
+    height: 25 * 2.83465,
+    flexShrink: 0,
+  },
 
   // 車両情報
   vehicleBox: {
@@ -467,7 +477,11 @@ export function InvoiceDocument({
                 登録番号: {shop.registration_no}
               </Text>
             ) : null}
-            {stampBuffer && <Image src={stampBuffer} style={styles.stamp} />}
+            {stampBuffer ? (
+              <View style={styles.stampWrap}>
+                <Image src={stampBuffer} style={styles.stamp} />
+              </View>
+            ) : null}
           </View>
         </View>
 
