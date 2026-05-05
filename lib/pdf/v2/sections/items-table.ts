@@ -97,6 +97,10 @@ export function drawItemsTable(doc: jsPDF, ctx: RenderContext): number {
     head: [["品名", "数量", "工賃", "部品代", "小計"]],
     body,
     showHead: "everyPage",
+    // 行が長くなって改ページに跨る場合は普通に分割する。
+    // "avoid" だと行が縮められ、内部で折り返し行数と確保高さが食い違って
+    // 中間行が消える事故が起きる（過去にこのバグ）。
+    rowPageBreak: "auto",
     margin: {
       left: ctx.marginX,
       right: ctx.marginX,
@@ -111,6 +115,10 @@ export function drawItemsTable(doc: jsPDF, ctx: RenderContext): number {
       lineColor: COLORS.tableLine,
       lineWidth: 0.1,
       textColor: COLORS.black,
+      // CJK での幅計算に頼らず "linebreak" を明示。
+      // セルが多行に折り返された場合は valign: top で上揃えにする。
+      overflow: "linebreak",
+      valign: "top",
     },
     headStyles: {
       font: FONT_FAMILY,
@@ -119,8 +127,16 @@ export function drawItemsTable(doc: jsPDF, ctx: RenderContext): number {
       textColor: [255, 255, 255],
       halign: "center",
     },
+    bodyStyles: {
+      // minCellHeight を 0 にして行高の自動拡張（折り返し行数に追従）を妨げない
+      minCellHeight: 0,
+    },
     columnStyles: {
-      0: { cellWidth: "auto" },
+      // 品名列を数値固定にして autoTable に「この幅で折り返せ」と明示する。
+      // CJK では cellWidth: "auto" だと内部の getStringUnitWidth による幅計算が
+      // ズレ、折り返し行数と確保高さの整合が取れず中間行が描画されないバグになる。
+      // 80 + 15 + 25 + 25 + 30 = 175mm（左右マージン 30mm 込みで A4 210mm 内に収まる）
+      0: { cellWidth: 80 },
       1: { cellWidth: 15, halign: "right" },
       2: { cellWidth: 25, halign: "right" },
       3: { cellWidth: 25, halign: "right" },
