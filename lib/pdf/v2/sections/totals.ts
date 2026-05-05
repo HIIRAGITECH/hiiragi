@@ -7,6 +7,19 @@ import { ensureSpace, type RenderContext } from "../context";
 // 合計セクション。右寄せに描画。
 // 計算は lib/orders/totals.ts の calculateTotals をそのまま流用し
 // HTML 帳票（printable-document.tsx）と完全に揃える。
+//
+// 行の Y 座標設計（行頭 Y を起点にする）:
+//  ・上線（divider / emphasize 上線） … y（行頭）
+//  ・ベースライン                       … y + 4mm（9pt）/ y + 5mm（11pt強調）
+//      根拠: フォント9pt（高さ約3.2mm、ascender約2.3mm）/ 11pt（高さ約3.9mm、ascender約2.8mm）
+//      に対し、線→ascender top→baseline で約4〜5mm。
+//  ・下線（emphasize の下線のみ）       … baseline + 2mm
+//      根拠: フォント11ptのdescenderは約1mm。下線をbaseline+2mmに置くことで
+//      数字の下端から1mmの余白を確保し重なりを避ける。
+//  ・次の行頭                           … 通常行: baseline + 2mm / 強調行: 下線 + 2mm
+//      前の行の descender（約0.7〜1mm）から1mm以上離して次の上線を置く。
+// 旧実装は上線を「次の行の y - 1mm」に置いていたため、前の行のベースラインと
+// 完全一致して数字に線が被っていた。新実装ではこの重なりを根本的に解消する。
 export function drawTotals(doc: jsPDF, ctx: RenderContext): number {
   const { order } = ctx.input;
   const items = ctx.input.items ?? order.items ?? [];
@@ -16,44 +29,56 @@ export function drawTotals(doc: jsPDF, ctx: RenderContext): number {
     order.deposit_amount,
   );
 
-  // 必要高さの目安。改ページ判定はざっくり（行数 × 5mm + 余白）。
-  ensureSpace(doc, ctx, 50);
+  // 必要高さの目安。行数 × 6mm + 強調2行分（11mm × 2）+ 余白を確保。
+  ensureSpace(doc, ctx, 60);
 
   const blockWidth = 70;
   const valueX = ctx.pageWidth - ctx.marginX;
   const labelX = valueX - blockWidth + 4;
-  let y = ctx.cursorY + 4;
+
+  // y は「次に描画する行の頭」。前のセクションから 2mm 余白を取って開始。
+  let y = ctx.cursorY + 2;
 
   function row(
     label: string,
     value: string,
     opts?: { divider?: boolean; emphasize?: boolean },
   ): void {
-    if (opts?.divider) {
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.3);
-      doc.line(valueX - blockWidth, y - 1, valueX, y - 1);
-    }
+    // フォント設定（オフセット計算で参照するので最初に切替）
     if (opts?.emphasize) {
-      // 上下二重線で強調（合計・差引請求額）
-      doc.setLineWidth(0.5);
-      doc.setDrawColor(0, 0, 0);
-      doc.line(valueX - blockWidth, y - 1, valueX, y - 1);
       doc.setFont(FONT_FAMILY, "bold");
       doc.setFontSize(FONT_SIZE.section);
     } else {
       doc.setFont(FONT_FAMILY, "normal");
       doc.setFontSize(FONT_SIZE.body);
     }
+
+    // 上線（行頭 Y）。前の行のテキストとは行頭まで余白（通常 +2mm）が確保されている。
+    if (opts?.divider || opts?.emphasize) {
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(opts?.emphasize ? 0.5 : 0.3);
+      doc.line(valueX - blockWidth, y, valueX, y);
+    }
+
+    // フォント9pt(高3.2mm)はベースラインを上線+4mmに、
+    // フォント11pt(高3.9mm)はベースラインを上線+5mmに。
+    const baselineOffset = opts?.emphasize ? 5 : 4;
+    const baselineY = y + baselineOffset;
+
     doc.setTextColor(COLORS.black[0], COLORS.black[1], COLORS.black[2]);
-    doc.text(label, labelX, y + 4);
-    doc.text(value, valueX, y + 4, { align: "right" });
-    y += opts?.emphasize ? 7 : 5;
+    doc.text(label, labelX, baselineY);
+    doc.text(value, valueX, baselineY, { align: "right" });
+
     if (opts?.emphasize) {
+      // 下線: ベースライン+2mm（フォント11ptのdescender約1mmに対し1mm余白）
+      const bottomLineY = baselineY + 2;
       doc.setLineWidth(0.5);
-      doc.line(valueX - blockWidth, y - 1, valueX, y - 1);
-      // 強調行の後ろに余白を置いて視覚的に分離
-      y += 1.5;
+      doc.line(valueX - blockWidth, bottomLineY, valueX, bottomLineY);
+      // 次の行頭まで2mm余白
+      y = bottomLineY + 2;
+    } else {
+      // 通常行: ベースライン+2mm を次の行頭にする（descender ≒1mmを1mm余白で逃げる）
+      y = baselineY + 2;
     }
   }
 
