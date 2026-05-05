@@ -136,15 +136,15 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   shopLine: { fontSize: 8, textAlign: "right", marginBottom: 1 },
-  // 印鑑: 25mm × 25mm。会社情報の下、右寄せ（partiesRight 自体が alignItems: flex-end）。
+  // 印鑑: 20mm × 20mm。会社情報の下、右寄せ（partiesRight 自体が alignItems: flex-end）。
   // flexShrink: 0 で行内の他要素から潰されないようにする。
   stampWrap: {
     marginTop: 6,
     alignItems: "flex-end",
   },
   stamp: {
-    width: 25 * 2.83465,
-    height: 25 * 2.83465,
+    width: 20 * 2.83465,
+    height: 20 * 2.83465,
     flexShrink: 0,
   },
 
