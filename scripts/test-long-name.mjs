@@ -48,6 +48,34 @@ registerJapaneseFont(doc);
 
 const cellLogs = [];
 
+// autoTable は "Of the table content, X units width could not fit page" 系の
+// 警告を出す。jsPDF/jspdf-autotable は console.warn / console.error / console.log の
+// いずれを使うか version によって異なるため 3 系統すべて hook して捕捉する。
+const capturedLogs = [];
+const originalWarn = console.warn;
+const originalError = console.error;
+const originalLog = console.log;
+console.warn = (...args) => {
+  capturedLogs.push({
+    method: "warn",
+    text: args.map((a) => String(a)).join(" "),
+  });
+  originalWarn(...args);
+};
+console.error = (...args) => {
+  capturedLogs.push({
+    method: "error",
+    text: args.map((a) => String(a)).join(" "),
+  });
+  originalError(...args);
+};
+console.log = (...args) => {
+  capturedLogs.push({
+    method: "log",
+    text: args.map((a) => String(a)).join(" "),
+  });
+};
+
 autoTable(doc, {
   startY: 20,
   head: [["品名", "数量", "工賃", "部品代", "小計"]],
@@ -75,11 +103,12 @@ autoTable(doc, {
   },
   bodyStyles: { minCellHeight: 0 },
   columnStyles: {
-    0: { cellWidth: 80 },
-    1: { cellWidth: 15, halign: "right" },
-    2: { cellWidth: 25, halign: "right" },
-    3: { cellWidth: 25, halign: "right" },
-    4: { cellWidth: 30, halign: "right" },
+    // items-table.ts と完全一致させる（合計 180mm = 利用可能幅と一致）
+    0: { cellWidth: 95 },
+    1: { cellWidth: 12, halign: "right" },
+    2: { cellWidth: 22, halign: "right" },
+    3: { cellWidth: 22, halign: "right" },
+    4: { cellWidth: 29, halign: "right" },
   },
   didDrawCell: (data) => {
     if (data.section === "body" && data.column.index === 0) {
@@ -96,12 +125,32 @@ autoTable(doc, {
   },
 });
 
+// autoTable の実行が終わったので hook を元に戻す
+console.warn = originalWarn;
+console.error = originalError;
+console.log = originalLog;
+
 const buf = Buffer.from(doc.output("arraybuffer"));
 writeFileSync(OUT_PATH, buf);
 console.log(`PDF 生成完了: ${OUT_PATH}`);
 console.log(`  サイズ: ${(buf.length / 1024).toFixed(1)} KB`);
 
 let mainOk = true;
+
+console.log("\n--- autoTable の警告ログ捕捉 ---");
+// "could not fit page" を含む警告が捕捉されたら無条件で fail。
+const fitWarning = capturedLogs.find((l) => /could not fit page/.test(l.text));
+if (fitWarning) {
+  console.error(
+    `❌ autoTable オーバーフロー警告: [${fitWarning.method}] "${fitWarning.text}"`,
+  );
+  console.error(
+    "   columnStyles 合計が A4 利用可能幅 180mm との差分 0 でないため警告発生。",
+  );
+  mainOk = false;
+} else {
+  console.log("✓ autoTable のオーバーフロー警告は出ていません");
+}
 
 console.log(
   "\n--- 主判定: didDrawCell の cell.text 行配列を結合して入力と一致するか ---",
