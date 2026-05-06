@@ -128,13 +128,13 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.black,
   },
   customerHonor: { fontSize: 11, marginTop: 2 },
-  // 顧客名直下、リード文の上に表示する大きい合計金額。
-  // 受け取った人が請求/見積金額を一目で把握できるようにする。
+  // 車両情報ボックスの直前に独立行で表示する請求/見積金額。
+  // 受け取った人が金額を一目で把握できるようにする。
   amountHeadline: {
     fontSize: 14,
     fontWeight: "bold",
-    marginTop: 8,
-    marginBottom: 2,
+    marginTop: 12,
+    marginBottom: 4,
   },
   lead: { fontSize: 8, color: COLORS.gray, marginTop: 6 },
 
@@ -158,8 +158,9 @@ const styles = StyleSheet.create({
   },
 
   // 車両情報
+  // 上余白は amountHeadline.marginBottom に任せ、ここでは追加マージンを置かない。
   vehicleBox: {
-    marginTop: 14,
+    marginTop: 0,
     borderWidth: 0.5,
     borderColor: COLORS.tableLine,
     paddingTop: 6,
@@ -499,9 +500,6 @@ export function InvoiceDocument({
               <Text style={styles.customerName}>{customer?.name ?? "—"}</Text>
               <Text style={styles.customerHonor}> 様</Text>
             </View>
-            <Text style={styles.amountHeadline}>
-              {amountLabel}: {formatYen(headlineAmount)}
-            </Text>
             <Text style={styles.lead}>{lead}</Text>
           </View>
           <View style={styles.partiesRight}>
@@ -526,6 +524,11 @@ export function InvoiceDocument({
             ) : null}
           </View>
         </View>
+
+        {/* ご請求金額: 車両情報ボックスの直前に独立行で表示。左寄せ・本文 14pt bold */}
+        <Text style={styles.amountHeadline}>
+          {amountLabel}: {formatYen(headlineAmount)}
+        </Text>
 
         {/* 車両情報 */}
         <View style={styles.vehicleBox}>
