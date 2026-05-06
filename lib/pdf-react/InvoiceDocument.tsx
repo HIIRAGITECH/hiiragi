@@ -55,12 +55,13 @@ const styles = StyleSheet.create({
     lineHeight: 1.35,
   },
   // 透かし: 全ページの中央に薄く配置
+  // opacity 0.06 では薄すぎて視認性が低かったため 0.11 に強める。
   watermark: {
     position: "absolute",
     top: "30%",
     left: "20%",
     width: "60%",
-    opacity: 0.06,
+    opacity: 0.11,
   },
   // 2ページ目以降のヘッダー（外枠は位置決めのみ。ボーダーは inner でだけ描く
   // 仕組みにして、1ページ目に空のボーダーが残らないようにする）
