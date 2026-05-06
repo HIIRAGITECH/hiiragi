@@ -128,6 +128,8 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.black,
   },
   customerHonor: { fontSize: 11, marginTop: 2 },
+  // 顧客名の下に出す住所・電話番号などの細字行
+  customerLine: { fontSize: 9, marginTop: 1, color: COLORS.black },
   // 車両情報ボックスの直前に独立行で表示する請求/見積金額。
   // 受け取った人が金額を一目で把握できるようにする。
   amountHeadline: {
@@ -500,6 +502,15 @@ export function InvoiceDocument({
               <Text style={styles.customerName}>{customer?.name ?? "—"}</Text>
               <Text style={styles.customerHonor}> 様</Text>
             </View>
+            {customer?.postal_code ? (
+              <Text style={styles.customerLine}>〒{customer.postal_code}</Text>
+            ) : null}
+            {customer?.address ? (
+              <Text style={styles.customerLine}>{customer.address}</Text>
+            ) : null}
+            {customer?.phone ? (
+              <Text style={styles.customerLine}>TEL: {customer.phone}</Text>
+            ) : null}
             <Text style={styles.lead}>{lead}</Text>
           </View>
           <View style={styles.partiesRight}>
