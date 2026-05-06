@@ -11,12 +11,10 @@ type Props = {
   currentPath: string | null;
   label: string;
   helpText?: string;
-  requireTransparent?: boolean;
   maxSizeMB: number;
 };
 
 const ACCEPT_ALL = "image/png,image/jpeg,image/webp";
-const ACCEPT_PNG_ONLY = "image/png";
 
 export default function ImageUpload({
   userId,
@@ -24,7 +22,6 @@ export default function ImageUpload({
   currentPath,
   label,
   helpText,
-  requireTransparent,
   maxSizeMB,
 }: Props) {
   const router = useRouter();
@@ -52,26 +49,12 @@ export default function ImageUpload({
   }, [currentPath]);
 
   async function handleFile(file: File) {
-    const allowed = requireTransparent
-      ? ["image/png"]
-      : ["image/png", "image/jpeg", "image/webp"];
+    const allowed = ["image/png", "image/jpeg", "image/webp"];
     if (!allowed.includes(file.type)) {
-      throw new Error(
-        requireTransparent
-          ? "印鑑はPNG形式でアップロードしてください。"
-          : "PNG / JPEG / WebP 形式でアップロードしてください。",
-      );
+      throw new Error("PNG / JPEG / WebP 形式でアップロードしてください。");
     }
     if (file.size > maxSizeMB * 1024 * 1024) {
       throw new Error(`ファイルサイズは ${maxSizeMB}MB 以内にしてください。`);
-    }
-    if (requireTransparent) {
-      const transparent = await hasTransparency(file);
-      if (!transparent) {
-        throw new Error(
-          "この画像は背景が透過されていません。背景透過PNGをご用意ください。",
-        );
-      }
     }
 
     const supabase = createClient();
@@ -176,7 +159,7 @@ export default function ImageUpload({
           <input
             ref={inputRef}
             type="file"
-            accept={requireTransparent ? ACCEPT_PNG_ONLY : ACCEPT_ALL}
+            accept={ACCEPT_ALL}
             onChange={onFileChange}
             disabled={busy}
             className="hidden"
@@ -210,29 +193,3 @@ export default function ImageUpload({
   );
 }
 
-async function hasTransparency(file: File): Promise<boolean> {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = () => reject(new Error("画像を読み込めませんでした。"));
-      i.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    const MAX = 256;
-    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
-    canvas.width = Math.max(1, Math.round(img.width * scale));
-    canvas.height = Math.max(1, Math.round(img.height * scale));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return false;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] < 255) return true;
-    }
-    return false;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
