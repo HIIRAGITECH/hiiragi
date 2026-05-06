@@ -205,8 +205,7 @@ export default function SettingsForm({
           kind="stamp"
           currentPath={initial.stamp_path}
           label="電子印鑑（角印）"
-          helpText="背景透過PNGをアップロードしてください（1MB以内）。会社名に重ねて表示されます。300×300px 前後を推奨。"
-          requireTransparent
+          helpText="PNG / JPEG / WebP（1MB以内）。会社情報の下に表示されます。300×300px 前後を推奨。透過PNGなら会社情報と重ねた表示が可能です。"
           maxSizeMB={1}
         />
       </div>
