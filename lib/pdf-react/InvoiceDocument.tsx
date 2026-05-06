@@ -203,8 +203,13 @@ const styles = StyleSheet.create({
   },
   tableRow: {
     flexDirection: "row",
-    borderBottomWidth: 0.4,
-    borderBottomColor: COLORS.tableLine,
+    // 罫線が一部の行（特に複数行折り返しした行）で消えて見える事象があったため、
+    // 線幅 0.4 → 0.7 に強める。色も table line 色だと薄くて anti-alias で
+    // 飛びやすかったため、本文 black に寄せた COLORS.gray に変更する。
+    // borderBottomStyle を明示すると Adobe Reader 等で安定して solid 線が出る。
+    borderBottomWidth: 0.7,
+    borderBottomStyle: "solid",
+    borderBottomColor: COLORS.gray,
     paddingVertical: 3,
     fontSize: 9,
   },
