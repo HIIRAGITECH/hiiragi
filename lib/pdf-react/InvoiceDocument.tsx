@@ -128,6 +128,14 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.black,
   },
   customerHonor: { fontSize: 11, marginTop: 2 },
+  // 顧客名直下、リード文の上に表示する大きい合計金額。
+  // 受け取った人が請求/見積金額を一目で把握できるようにする。
+  amountHeadline: {
+    fontSize: 14,
+    fontWeight: "bold",
+    marginTop: 8,
+    marginBottom: 2,
+  },
   lead: { fontSize: 8, color: COLORS.gray, marginTop: 6 },
 
   shopName: {
@@ -404,6 +412,14 @@ export function InvoiceDocument({
     documentType === "estimate"
       ? "下記の通りお見積申し上げます。"
       : "下記の通りご請求申し上げます。";
+  // 1ページ目上部に大きく出す金額。預かり金がある請求書では差引請求額、
+  // それ以外は total（=税込合計）を採用する。
+  const amountLabel =
+    documentType === "estimate" ? "御見積金額" : "ご請求金額";
+  const headlineAmount =
+    documentType === "invoice" && totals.deposit > 0
+      ? totals.balance
+      : totals.total;
   const today = new Date().toISOString().slice(0, 10);
 
   const maintenanceItems = allItems.filter(
@@ -478,6 +494,9 @@ export function InvoiceDocument({
               <Text style={styles.customerName}>{customer?.name ?? "—"}</Text>
               <Text style={styles.customerHonor}> 様</Text>
             </View>
+            <Text style={styles.amountHeadline}>
+              {amountLabel}: {formatYen(headlineAmount)}
+            </Text>
             <Text style={styles.lead}>{lead}</Text>
           </View>
           <View style={styles.partiesRight}>
