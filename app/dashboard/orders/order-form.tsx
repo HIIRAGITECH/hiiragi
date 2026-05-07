@@ -146,13 +146,48 @@ export default function OrderForm({
 
         <div className="sm:col-span-2">
           <label htmlFor="notes" className={labelClass}>
-            メモ
+            入荷時メモ
           </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            受注一覧画面で確認するための社内向けメモ。見積書・請求書には出ません。
+          </p>
           <textarea
             id="notes"
             name="notes"
             rows={3}
             defaultValue={initial?.notes ?? ""}
+            className={inputClass}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label htmlFor="estimate_notes" className={labelClass}>
+            見積書 備考
+          </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            見積書 PDF / プレビューの備考欄に表示されます（顧客向け）。
+          </p>
+          <textarea
+            id="estimate_notes"
+            name="estimate_notes"
+            rows={3}
+            defaultValue={initial?.estimate_notes ?? ""}
+            className={inputClass}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label htmlFor="invoice_notes" className={labelClass}>
+            請求書 備考
+          </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            請求書 PDF / プレビューの備考欄に表示されます（顧客向け）。
+          </p>
+          <textarea
+            id="invoice_notes"
+            name="invoice_notes"
+            rows={3}
+            defaultValue={initial?.invoice_notes ?? ""}
             className={inputClass}
           />
         </div>

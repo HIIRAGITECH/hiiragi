@@ -29,6 +29,8 @@ type OrderPayload = {
   vehicle_id: string | null;
   reception_date: string;
   notes: string | null;
+  estimate_notes: string | null;
+  invoice_notes: string | null;
 };
 
 function readPayload(formData: FormData): OrderPayload | { error: string } {
@@ -44,6 +46,8 @@ function readPayload(formData: FormData): OrderPayload | { error: string } {
     vehicle_id,
     reception_date,
     notes: pickString(formData, "notes"),
+    estimate_notes: pickString(formData, "estimate_notes"),
+    invoice_notes: pickString(formData, "invoice_notes"),
   };
 }
 

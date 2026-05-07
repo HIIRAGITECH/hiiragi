@@ -78,7 +78,9 @@ export type Order = {
   paid_at: string | null; // ISO timestamptz、入金確認日
   payment_due_date: string | null; // YYYY-MM-DD、振込期限（請求書フッタ表示）
   is_archived: boolean;
-  notes: string | null;
+  notes: string | null;          // 入荷時メモ（受注一覧でのみ表示、帳票には出さない）
+  estimate_notes: string | null; // 見積書帳票の備考
+  invoice_notes: string | null;  // 請求書帳票の備考
   items: OrderItem[];
   discount_amount: number;
   deposit_amount: number;
