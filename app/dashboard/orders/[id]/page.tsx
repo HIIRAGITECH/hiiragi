@@ -227,7 +227,7 @@ export default async function OrderDetailPage(
           帳票出力
         </h3>
         <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
-          明細を保存してから出力してください。「見積書を作成・印刷」を押すと、見積ステータスが自動で「見積済」に更新されます。
+          明細を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「見積済」に更新されます。
         </p>
         <div className="flex flex-wrap gap-2">
           <form action={openEstimateAction}>
@@ -235,14 +235,14 @@ export default async function OrderDetailPage(
               type="submit"
               className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
             >
-              見積書を作成・印刷
+              見積書を出力
             </button>
           </form>
           <Link
             href={`/dashboard/orders/${order.id}/invoice`}
             className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
-            請求書を印刷
+            請求書を出力
           </Link>
         </div>
       </section>
