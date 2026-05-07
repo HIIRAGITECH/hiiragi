@@ -72,6 +72,17 @@ export default function PrintableDocument({
             </span>
             <span className="ml-2">様</span>
           </p>
+          {/* 顧客の郵便番号・住所・電話番号がデータにあれば顧客名直下に積む。
+              null/空はその行ごと省略する。PDF 側 (InvoiceDocument) の partiesLeft と表示順を揃える。 */}
+          {customer?.postal_code && (
+            <p className="text-xs">〒{customer.postal_code}</p>
+          )}
+          {customer?.address && (
+            <p className="text-xs">{customer.address}</p>
+          )}
+          {customer?.phone && (
+            <p className="text-xs">TEL: {customer.phone}</p>
+          )}
           <p className="mt-6 text-xs text-zinc-700">
             {type === "estimate"
               ? "下記の通りお見積申し上げます。"
