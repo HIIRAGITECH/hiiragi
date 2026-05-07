@@ -28,7 +28,9 @@ type Props = {
   customer: Customer | null;
   vehicle: Vehicle | null;
   shop: ShopInfo;
-  logoUrl: string | null;
+  // logoUrl は PDF 側で透かしとして使うが HTML プレビューでは描画しないため受け取らない。
+  // 既存呼び出し側との後方互換のため Props 型には残すが、引数で destructure はしない。
+  logoUrl?: string | null;
   stampUrl: string | null;
 };
 
@@ -38,7 +40,6 @@ export default function PrintableDocument({
   customer,
   vehicle,
   shop,
-  logoUrl,
   stampUrl,
 }: Props) {
   const allItems = order.items ?? [];
@@ -76,14 +77,6 @@ export default function PrintableDocument({
               ? "下記の通りお見積申し上げます。"
               : "下記の通りご請求申し上げます。"}
           </p>
-          {logoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={logoUrl}
-              alt={shop.shop_name || "店舗ロゴ"}
-              className="mt-6 h-12 w-auto object-contain"
-            />
-          )}
         </div>
         <div className="text-right">
           <dl className="mb-3 inline-block text-left text-xs">
