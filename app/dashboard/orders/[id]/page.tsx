@@ -229,7 +229,7 @@ export default async function OrderDetailPage(
           帳票出力
         </h3>
         <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
-          明細を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「見積済」に更新されます。
+          内容を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「見積済」に更新されます。
         </p>
         <div className="flex flex-wrap gap-2">
           <form action={openEstimateAction}>
