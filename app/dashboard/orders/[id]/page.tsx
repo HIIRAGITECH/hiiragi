@@ -201,6 +201,8 @@ export default async function OrderDetailPage(
             initialItems={order.items ?? []}
             initialDiscount={order.discount_amount}
             initialDeposit={order.deposit_amount}
+            initialEstimateNotes={order.estimate_notes}
+            initialInvoiceNotes={order.invoice_notes}
           />
         </div>
       </section>

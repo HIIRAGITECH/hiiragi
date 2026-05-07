@@ -170,6 +170,8 @@ function parseInt0(v: FormDataEntryValue | null): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
+// 受注詳細画面の「内容を保存」ボタンで呼ばれる一括保存。
+// 明細・割引・預かり金に加えて、見積書備考 / 請求書備考もここで一緒に保存する。
 export async function updateOrderItems(
   id: string,
   _prev: FormState,
@@ -182,6 +184,8 @@ export async function updateOrderItems(
 
   const discount_amount = parseInt0(formData.get("discount_amount"));
   const deposit_amount = parseInt0(formData.get("deposit_amount"));
+  const estimate_notes = pickString(formData, "estimate_notes");
+  const invoice_notes = pickString(formData, "invoice_notes");
 
   const supabase = await createClient();
   const {
@@ -193,7 +197,13 @@ export async function updateOrderItems(
 
   const { error } = await supabase
     .from("orders")
-    .update({ items, discount_amount, deposit_amount })
+    .update({
+      items,
+      discount_amount,
+      deposit_amount,
+      estimate_notes,
+      invoice_notes,
+    })
     .eq("id", id)
     .eq("user_id", user.id);
 

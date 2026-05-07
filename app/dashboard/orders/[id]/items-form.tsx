@@ -11,6 +11,9 @@ type Props = {
   initialItems: OrderItem[];
   initialDiscount: number;
   initialDeposit: number;
+  // 見積書 / 請求書の備考も同じフォームで保存する。null は未入力扱い。
+  initialEstimateNotes: string | null;
+  initialInvoiceNotes: string | null;
 };
 
 type ItemRow = {
@@ -98,6 +101,8 @@ export default function ItemsForm({
   initialItems,
   initialDiscount,
   initialDeposit,
+  initialEstimateNotes,
+  initialInvoiceNotes,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -123,6 +128,10 @@ export default function ItemsForm({
   );
   const [discount, setDiscount] = useState(String(initialDiscount));
   const [deposit, setDeposit] = useState(String(initialDeposit));
+  const [estimateNotes, setEstimateNotes] = useState(
+    initialEstimateNotes ?? "",
+  );
+  const [invoiceNotes, setInvoiceNotes] = useState(initialInvoiceNotes ?? "");
 
   // 全セクションの item 配列を組み立てて totals 計算。保存用 JSON もここから作る。
   const allItems: OrderItem[] = [
@@ -317,6 +326,49 @@ export default function ItemsForm({
             </>
           )}
         </dl>
+      </div>
+
+      {/* 帳票備考: 同じフォームで保存される。textarea の name 属性が
+          server action（updateOrderItems）の formData.get("estimate_notes" / "invoice_notes") に対応する。 */}
+      <div className="space-y-4">
+        <div>
+          <label
+            htmlFor="estimate_notes"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            見積書 備考
+          </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            見積書 PDF / プレビューの備考欄に表示されます（顧客向け）。
+          </p>
+          <textarea
+            id="estimate_notes"
+            name="estimate_notes"
+            rows={3}
+            value={estimateNotes}
+            onChange={(e) => setEstimateNotes(e.target.value)}
+            className={cellInputClass}
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="invoice_notes"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            請求書 備考
+          </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            請求書 PDF / プレビューの備考欄に表示されます（顧客向け）。
+          </p>
+          <textarea
+            id="invoice_notes"
+            name="invoice_notes"
+            rows={3}
+            value={invoiceNotes}
+            onChange={(e) => setInvoiceNotes(e.target.value)}
+            className={cellInputClass}
+          />
+        </div>
       </div>
 
       {state?.error && (
