@@ -121,6 +121,19 @@ export default function PrintableDocument({
         </div>
       </div>
 
+      {/* 請求/見積金額: 車両情報ボックスの直前に独立行で大きく表示。
+          PDF 側 (InvoiceDocument の amountHeadline) と揃える。
+          請求書 + 預かり金あり (deposit > 0) の場合は差引請求額を、
+          それ以外は税込合計を採用。 */}
+      <p className="mb-2 mt-3 text-base font-bold">
+        {type === "estimate" ? "御見積金額" : "ご請求金額"}:{" "}
+        {formatYen(
+          type === "invoice" && totals.deposit > 0
+            ? totals.balance
+            : totals.total,
+        )}
+      </p>
+
       {/* 車両情報 */}
       <section className="mb-6 rounded border border-zinc-300 p-3 text-xs">
         <h2 className="mb-1 text-[11px] font-semibold tracking-widest text-zinc-600">
