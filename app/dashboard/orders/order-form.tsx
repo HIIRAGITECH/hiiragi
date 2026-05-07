@@ -159,38 +159,8 @@ export default function OrderForm({
             className={inputClass}
           />
         </div>
-
-        <div className="sm:col-span-2">
-          <label htmlFor="estimate_notes" className={labelClass}>
-            見積書 備考
-          </label>
-          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
-            見積書 PDF / プレビューの備考欄に表示されます（顧客向け）。
-          </p>
-          <textarea
-            id="estimate_notes"
-            name="estimate_notes"
-            rows={3}
-            defaultValue={initial?.estimate_notes ?? ""}
-            className={inputClass}
-          />
-        </div>
-
-        <div className="sm:col-span-2">
-          <label htmlFor="invoice_notes" className={labelClass}>
-            請求書 備考
-          </label>
-          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
-            請求書 PDF / プレビューの備考欄に表示されます（顧客向け）。
-          </p>
-          <textarea
-            id="invoice_notes"
-            name="invoice_notes"
-            rows={3}
-            defaultValue={initial?.invoice_notes ?? ""}
-            className={inputClass}
-          />
-        </div>
+        {/* 見積書 備考 / 請求書 備考は受注詳細画面の帳票出力エリアで編集する。
+            帳票を都度修正する性質が強いため詳細画面側に集約した（編集画面には残さない）。 */}
       </div>
 
       {state?.error && (

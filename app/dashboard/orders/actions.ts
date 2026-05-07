@@ -24,13 +24,15 @@ function pickString(formData: FormData, key: string): string | null {
 
 // ステータス3種は受注フォームから外し、バッジのドロップダウンで変更する。
 // 新規作成時は DB の default ('受付' / '未作成' / '未請求') が効く。
+// 受注編集フォーム（app/dashboard/orders/order-form.tsx）からの保存ペイロード。
+// estimate_notes / invoice_notes は受注詳細画面 (ItemsForm) 側で編集・保存するため
+// このペイロードには含めない。ここで触らないことで edit 経由の更新時に詳細画面で
+// 入力した備考が消えないようにする。
 type OrderPayload = {
   customer_id: string;
   vehicle_id: string | null;
   reception_date: string;
   notes: string | null;
-  estimate_notes: string | null;
-  invoice_notes: string | null;
 };
 
 function readPayload(formData: FormData): OrderPayload | { error: string } {
@@ -46,8 +48,6 @@ function readPayload(formData: FormData): OrderPayload | { error: string } {
     vehicle_id,
     reception_date,
     notes: pickString(formData, "notes"),
-    estimate_notes: pickString(formData, "estimate_notes"),
-    invoice_notes: pickString(formData, "invoice_notes"),
   };
 }
 
