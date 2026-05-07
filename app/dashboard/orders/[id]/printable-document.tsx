@@ -85,25 +85,26 @@ export default function PrintableDocument({
             <Row label="受付日" value={formatDate(order.reception_date)} />
           </dl>
           <div className="mt-3 border-t border-black pt-2 text-xs">
-            <div className="relative inline-block">
-              {/* 印鑑は背景に配置: DOM上で先に置き、会社名側に position:relative を付与することで会社名が前面に来る */}
-              {stampUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={stampUrl}
-                  alt=""
-                  aria-hidden
-                  className="pointer-events-none absolute right-0 top-1/2 h-16 w-16 -translate-y-1/2 translate-x-6 select-none"
-                />
-              )}
-              <p className="relative text-base font-semibold">
-                {shop.shop_name || "（店舗名 未設定）"}
-              </p>
-            </div>
+            <p className="text-base font-semibold">
+              {shop.shop_name || "（店舗名 未設定）"}
+            </p>
             {shop.address && <p>{shop.address}</p>}
             {shop.phone && <p>TEL: {shop.phone}</p>}
             {shop.registration_no && (
               <p>登録番号: {shop.registration_no}</p>
+            )}
+            {/* 電子印鑑: 会社情報の下、右寄せ。20mm × 20mm 相当（≒ 75px）。
+                透過 PNG は会社情報と重ならず単独配置でも自然に見える。 */}
+            {stampUrl && (
+              <div className="mt-2 flex justify-end">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={stampUrl}
+                  alt=""
+                  aria-hidden
+                  className="h-[75px] w-[75px] select-none object-contain"
+                />
+              </div>
             )}
           </div>
         </div>
