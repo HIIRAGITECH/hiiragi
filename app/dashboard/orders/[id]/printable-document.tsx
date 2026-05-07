@@ -59,7 +59,15 @@ export default function PrintableDocument({
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <article className="printable mx-auto max-w-[800px] bg-white p-10 text-sm text-black shadow-sm print:max-w-none print:p-0 print:shadow-none">
+    <article
+      className="printable mx-auto max-w-[800px] bg-white p-10 text-sm text-black shadow-sm print:max-w-none print:p-0 print:shadow-none"
+      // PDF (lib/pdf-react/InvoiceDocument) と同じ IPAex Gothic を使い、未ロード時は
+      // system 日本語フォントにフォールバック。preview と PDF の見た目を揃える狙い。
+      style={{
+        fontFamily:
+          '"IPAex Gothic", "Yu Gothic", "Hiragino Kaku Gothic ProN", "Noto Sans JP", system-ui, sans-serif',
+      }}
+    >
       <h1 className="mb-8 text-center text-3xl font-bold tracking-[0.5em]">
         {title}
       </h1>
@@ -336,49 +344,64 @@ function ItemsSection({
 }) {
   return (
     <section className="mb-5">
-      <h2 className="mb-1 break-after-avoid border-b border-black pb-0.5 text-xs font-bold tracking-wide">
+      <h2 className="mb-0 break-after-avoid border-b-[1.2px] border-black pb-0.5 text-xs font-bold tracking-wide">
         【{title}】
       </h2>
-      <table className="w-full border-collapse text-xs">
+      {/* 列幅は PDF (InvoiceDocument styles.colName/colQty/colLabor/colParts/colSubtotal) と同じ % 比率に揃える。
+          colgroup で固定することで、長文品名でも他の列幅がブレない。 */}
+      <table className="w-full table-fixed border-collapse text-xs">
+        <colgroup>
+          <col style={{ width: "52%" }} />
+          <col style={{ width: "9%" }} />
+          {showBreakdown ? (
+            <>
+              <col style={{ width: "13%" }} />
+              <col style={{ width: "13%" }} />
+            </>
+          ) : (
+            <col style={{ width: "26%" }} />
+          )}
+          <col style={{ width: "13%" }} />
+        </colgroup>
         <thead>
-          <tr className="border-b-2 border-black">
-            <th className="px-2 py-1.5 text-left">品名</th>
-            <th className="w-14 px-2 py-1.5 text-right">数量</th>
+          <tr className="border-b-[1.2px] border-black">
+            <th className="px-2 py-1 text-left text-[10px]">品名</th>
+            <th className="px-2 py-1 text-right text-[10px]">数量</th>
             {showBreakdown ? (
               <>
-                <th className="w-24 px-2 py-1.5 text-right">工賃</th>
-                <th className="w-24 px-2 py-1.5 text-right">部品代</th>
+                <th className="px-2 py-1 text-right text-[10px]">工賃</th>
+                <th className="px-2 py-1 text-right text-[10px]">部品代</th>
               </>
             ) : (
-              <th className="w-28 px-2 py-1.5 text-right">単価</th>
+              <th className="px-2 py-1 text-right text-[10px]">単価</th>
             )}
-            <th className="w-28 px-2 py-1.5 text-right">小計</th>
+            <th className="px-2 py-1 text-right text-[10px]">小計</th>
           </tr>
         </thead>
         <tbody>
           {items.map((it, i) => (
-            <tr key={i} className="border-b border-zinc-300">
-              <td className="px-2 py-1.5">{it.name}</td>
-              <td className="px-2 py-1.5 text-right">{it.quantity}</td>
+            <tr key={i} className="border-b border-zinc-500 align-top">
+              <td className="px-2 py-1 break-words">{it.name}</td>
+              <td className="px-2 py-1 text-right">{it.quantity}</td>
               {showBreakdown ? (
                 <>
-                  <td className="px-2 py-1.5 text-right">
+                  <td className="px-2 py-1 text-right">
                     {it.labor_cost !== undefined
                       ? formatYen(it.labor_cost)
                       : "—"}
                   </td>
-                  <td className="px-2 py-1.5 text-right">
+                  <td className="px-2 py-1 text-right">
                     {it.parts_cost !== undefined
                       ? formatYen(it.parts_cost)
                       : "—"}
                   </td>
                 </>
               ) : (
-                <td className="px-2 py-1.5 text-right">
+                <td className="px-2 py-1 text-right">
                   {formatYen(it.unit_price)}
                 </td>
               )}
-              <td className="px-2 py-1.5 text-right">
+              <td className="px-2 py-1 text-right">
                 {formatYen(rowSubtotal(it))}
               </td>
             </tr>

@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* 帳票プレビュー（PrintableDocument）の本文に PDF 版と同じ IPAex Gothic を使う。
+   public/fonts/ipaexg.ttf を /fonts/ipaexg.ttf として配信する。
+   font-display: swap でロード前は system フォントにフォールバックして表示が止まらない。 */
+@font-face {
+  font-family: "IPAex Gothic";
+  src: url("/fonts/ipaexg.ttf") format("truetype");
+  font-display: swap;
+  font-weight: normal;
+  font-style: normal;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
