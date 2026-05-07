@@ -217,7 +217,9 @@ CREATE TABLE IF NOT EXISTS orders (
   paid_at           timestamptz, -- 入金確認日
   payment_due_date  date,        -- 振込期限（請求書フッタ表示用、任意）
   is_archived       boolean NOT NULL DEFAULT false,
-  notes             text,
+  notes             text,                 -- 入荷時メモ（受注一覧表示用、帳票には出さない）
+  estimate_notes    text,                 -- 見積書 PDF / プレビュー の備考（顧客向け）
+  invoice_notes     text,                 -- 請求書 PDF / プレビュー の備考（顧客向け）
   items             jsonb   NOT NULL DEFAULT '[]'::jsonb,
   discount_amount   integer NOT NULL DEFAULT 0,
   deposit_amount    integer NOT NULL DEFAULT 0,
