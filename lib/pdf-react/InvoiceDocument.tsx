@@ -692,13 +692,21 @@ export function InvoiceDocument({
           </Text>
         ) : null}
 
-        {/* 備考 */}
-        {order.notes && order.notes.trim() !== "" ? (
-          <View style={styles.notesBox}>
-            <Text style={styles.notesHeading}>備考</Text>
-            <Text style={styles.notesBody}>{sanitizeText(order.notes)}</Text>
-          </View>
-        ) : null}
+        {/* 備考: 見積書は estimate_notes、請求書は invoice_notes を参照する。
+            order.notes（入荷時メモ）は社内向けなので帳票には出さない。 */}
+        {(() => {
+          const noteText =
+            documentType === "estimate"
+              ? order.estimate_notes
+              : order.invoice_notes;
+          if (!noteText || noteText.trim() === "") return null;
+          return (
+            <View style={styles.notesBox}>
+              <Text style={styles.notesHeading}>備考</Text>
+              <Text style={styles.notesBody}>{sanitizeText(noteText)}</Text>
+            </View>
+          );
+        })()}
       </Page>
     </Document>
   );

@@ -271,15 +271,22 @@ export default function PrintableDocument({
         </section>
       )}
 
-      {order.notes && (
-        <section
-          className="mt-8 border-t border-zinc-300 pt-3 text-xs"
-          style={{ pageBreakInside: "avoid" }}
-        >
-          <h2 className="mb-1 font-semibold">備考</h2>
-          <p className="whitespace-pre-wrap">{order.notes}</p>
-        </section>
-      )}
+      {/* 備考: 見積書は estimate_notes、請求書は invoice_notes を参照する。
+          order.notes（入荷時メモ）は社内向けなので帳票には出さない。 */}
+      {(() => {
+        const noteText =
+          type === "estimate" ? order.estimate_notes : order.invoice_notes;
+        if (!noteText || noteText.trim() === "") return null;
+        return (
+          <section
+            className="mt-8 border-t border-zinc-300 pt-3 text-xs"
+            style={{ pageBreakInside: "avoid" }}
+          >
+            <h2 className="mb-1 font-semibold">備考</h2>
+            <p className="whitespace-pre-wrap">{noteText}</p>
+          </section>
+        );
+      })()}
     </article>
   );
 }
