@@ -11,9 +11,11 @@ type Props = {
   initialItems: OrderItem[];
   initialDiscount: number;
   initialDeposit: number;
-  // 見積書 / 請求書の備考も同じフォームで保存する。null は未入力扱い。
+  // 見積書 / 請求書の備考、整備写真フォルダ URL も同じフォームで保存する。
+  // null は未入力扱い。
   initialEstimateNotes: string | null;
   initialInvoiceNotes: string | null;
+  initialPhotoFolderUrl: string | null;
 };
 
 type ItemRow = {
@@ -103,6 +105,7 @@ export default function ItemsForm({
   initialDeposit,
   initialEstimateNotes,
   initialInvoiceNotes,
+  initialPhotoFolderUrl,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -132,6 +135,9 @@ export default function ItemsForm({
     initialEstimateNotes ?? "",
   );
   const [invoiceNotes, setInvoiceNotes] = useState(initialInvoiceNotes ?? "");
+  const [photoFolderUrl, setPhotoFolderUrl] = useState(
+    initialPhotoFolderUrl ?? "",
+  );
 
   // 全セクションの item 配列を組み立てて totals 計算。保存用 JSON もここから作る。
   const allItems: OrderItem[] = [
@@ -328,9 +334,45 @@ export default function ItemsForm({
         </dl>
       </div>
 
-      {/* 帳票備考: 同じフォームで保存される。textarea の name 属性が
-          server action（updateOrderItems）の formData.get("estimate_notes" / "invoice_notes") に対応する。 */}
+      {/* 整備写真フォルダ URL / 帳票備考: 同じフォームで保存される。
+          各 input/textarea の name 属性が server action（updateOrderItems）の
+          formData.get(...) に対応する。 */}
       <div className="space-y-4">
+        <div>
+          <label
+            htmlFor="photo_folder_url"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            整備写真フォルダ
+          </label>
+          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+            Google Drive 等の整備写真を保管しているフォルダ URL。
+            http:// または https:// で始まる URL を入力してください。
+          </p>
+          {photoFolderUrl &&
+            /^https?:\/\//i.test(photoFolderUrl) && (
+              <p className="mb-1 break-all text-xs text-zinc-500 dark:text-zinc-400">
+                <span>登録URL: </span>
+                <a
+                  href={photoFolderUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-zinc-700 underline-offset-2 hover:underline dark:text-zinc-300"
+                >
+                  {photoFolderUrl} ↗
+                </a>
+              </p>
+            )}
+          <input
+            id="photo_folder_url"
+            name="photo_folder_url"
+            type="url"
+            value={photoFolderUrl}
+            onChange={(e) => setPhotoFolderUrl(e.target.value)}
+            placeholder="https://drive.google.com/drive/folders/..."
+            className={cellInputClass}
+          />
+        </div>
         <div>
           <label
             htmlFor="estimate_notes"

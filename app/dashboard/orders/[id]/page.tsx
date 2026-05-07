@@ -11,11 +11,9 @@ import {
   openEstimate,
   restoreOrderFormAction,
   updateOrderItems,
-  updatePhotoFolderUrl,
 } from "../actions";
 import ItemsForm from "./items-form";
 import OrderStatusBar from "./order-status-bar";
-import PhotoFolderForm from "./photo-folder-form";
 
 export const metadata: Metadata = {
   title: "受注詳細 | HIIRAGI",
@@ -62,7 +60,6 @@ export default async function OrderDetailPage(
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
-  const photoFolderAction = updatePhotoFolderUrl.bind(null, order.id);
 
   return (
     <>
@@ -203,25 +200,12 @@ export default async function OrderDetailPage(
             initialDeposit={order.deposit_amount}
             initialEstimateNotes={order.estimate_notes}
             initialInvoiceNotes={order.invoice_notes}
+            initialPhotoFolderUrl={order.photo_folder_url}
           />
         </div>
       </section>
 
-      {/* 写真フォルダ */}
-      <section className="mt-8">
-        <h3 className="mb-3 text-base font-semibold text-zinc-900 dark:text-zinc-50">
-          整備写真フォルダ
-        </h3>
-        <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-            Google Drive 等の整備写真を保管しているフォルダURLを登録します。
-          </p>
-          <PhotoFolderForm
-            action={photoFolderAction}
-            initialUrl={order.photo_folder_url}
-          />
-        </div>
-      </section>
+      {/* 整備写真フォルダの入力は ItemsForm 内に統合済み（「内容を保存」で一括保存）。 */}
 
       {/* 見積/請求 出力 */}
       <section className="mt-8 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">

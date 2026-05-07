@@ -171,7 +171,8 @@ function parseInt0(v: FormDataEntryValue | null): number {
 }
 
 // 受注詳細画面の「内容を保存」ボタンで呼ばれる一括保存。
-// 明細・割引・預かり金に加えて、見積書備考 / 請求書備考もここで一緒に保存する。
+// 明細・割引・預かり金に加えて、見積書備考 / 請求書備考 / 整備写真フォルダ URL も
+// ここで一緒に保存する（旧 updatePhotoFolderUrl の役目はこちらに統合済み）。
 export async function updateOrderItems(
   id: string,
   _prev: FormState,
@@ -186,6 +187,13 @@ export async function updateOrderItems(
   const deposit_amount = parseInt0(formData.get("deposit_amount"));
   const estimate_notes = pickString(formData, "estimate_notes");
   const invoice_notes = pickString(formData, "invoice_notes");
+
+  const photo_folder_url = pickString(formData, "photo_folder_url");
+  if (photo_folder_url !== null && !/^https?:\/\//i.test(photo_folder_url)) {
+    return {
+      error: "整備写真フォルダURLは http:// または https:// で始めてください。",
+    };
+  }
 
   const supabase = await createClient();
   const {
@@ -203,6 +211,7 @@ export async function updateOrderItems(
       deposit_amount,
       estimate_notes,
       invoice_notes,
+      photo_folder_url,
     })
     .eq("id", id)
     .eq("user_id", user.id);
@@ -214,40 +223,6 @@ export async function updateOrderItems(
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath(`/dashboard/orders/${id}/estimate`);
   revalidatePath(`/dashboard/orders/${id}/invoice`);
-  return undefined;
-}
-
-export async function updatePhotoFolderUrl(
-  id: string,
-  _prev: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const raw = String(formData.get("photo_folder_url") ?? "").trim();
-  const value = raw === "" ? null : raw;
-
-  if (value !== null && !/^https?:\/\//i.test(value)) {
-    return { error: "URLは http:// または https:// で始めてください。" };
-  }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return { error: "認証エラー: 再度ログインしてください。" };
-  }
-
-  const { error } = await supabase
-    .from("orders")
-    .update({ photo_folder_url: value })
-    .eq("id", id)
-    .eq("user_id", user.id);
-
-  if (error) {
-    return { error: `保存に失敗しました: ${error.message}` };
-  }
-
-  revalidatePath(`/dashboard/orders/${id}`);
   return undefined;
 }
 
