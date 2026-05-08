@@ -3,7 +3,8 @@
 import { useActionState, useMemo, useState } from "react";
 import type {
   OrderItem,
-  WorkCategory,
+  TaxCategory,
+  WorkItemCategory,
   WorkMenuItem,
   WorkMenuSet,
 } from "@/lib/types";
@@ -31,22 +32,21 @@ type Props = {
   // 「メニューから追加」「セットから追加」picker 用のマスター一覧
   allMenus: WorkMenuItem[];
   allSetsWithItems: SetWithItems[];
+  // 業務カテゴリ（アクティブのみ、display_order 昇順）
+  allCategories: WorkItemCategory[];
 };
 
-// セクション識別子（明細を 3 セクションに振り分けるための型）
-type Section = "normal" | "shakenTaxable" | "shakenTaxFree";
+// カテゴリ名から推奨される税区分を返す。
+function defaultTaxCategoryFor(categoryName: string | undefined): TaxCategory {
+  return categoryName === "車検法定費用" ? "shaken_non_tax" : "taxable";
+}
 
-const SECTION_OF_CATEGORY: Record<WorkCategory, Section> = {
-  normal: "normal",
-  shaken: "shakenTaxable",
-  shaken_tax_free: "shakenTaxFree",
-};
-
-const CATEGORY_OF_SECTION: Record<Section, WorkCategory> = {
-  normal: "normal",
-  shakenTaxable: "shaken",
-  shakenTaxFree: "shaken_tax_free",
-};
+// 旧フィールド (type / tax_free) からカテゴリ名を推定（後方互換のフォールバック）。
+function legacyCategoryNameFromOldFields(item: OrderItem): string {
+  if (item.type === "shaken" && item.tax_free === true) return "車検法定費用";
+  if (item.type === "shaken") return "車検整備";
+  return "整備";
+}
 
 // マスターのデフォルト値から ItemRow を作る
 function rowFromMenu(m: WorkMenuItem): ItemRow {
@@ -64,6 +64,8 @@ function rowFromMenu(m: WorkMenuItem): ItemRow {
         ? String((Number(labor) || 0) + (Number(parts) || 0))
         : String(m.default_unit_price ?? 0),
     source_menu_id: m.id,
+    tax_category: m.tax_category ?? "taxable",
+    item_category_id: m.item_category_id ?? "",
   };
 }
 
@@ -81,6 +83,10 @@ type ItemRow = {
   unit_price: string;
   // 作業メニューマスターから挿入された場合のみセット。null/空文字は手入力扱い。
   source_menu_id: string;
+  // 税区分（システム固定: 'taxable' | 'shaken_non_tax'）。
+  tax_category: TaxCategory;
+  // 業務カテゴリ id。空文字 = 未設定（互換目的、通常は必ず設定される）。
+  item_category_id: string;
   // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
   // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
   _noteExpanded?: boolean;
@@ -91,7 +97,19 @@ function hasBreakdown(r: ItemRow): boolean {
   return r.labor_cost !== "" || r.parts_cost !== "";
 }
 
-function toRow(i: OrderItem): ItemRow {
+// OrderItem → ItemRow の変換。新フィールドが無い既存データは旧フィールド (type/tax_free)
+// から推定したカテゴリ名を allCategories から逆引きしてフォールバックする。
+function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
+  // tax_category: 新フィールド > 旧 tax_free からの派生
+  const taxCategory: TaxCategory =
+    i.tax_category ?? (i.tax_free === true ? "shaken_non_tax" : "taxable");
+  // item_category_id: 新フィールド > 旧 type/tax_free からのカテゴリ名逆引き
+  let itemCategoryId = i.item_category_id ?? "";
+  if (!itemCategoryId) {
+    const fallbackName = legacyCategoryNameFromOldFields(i);
+    itemCategoryId =
+      allCategories.find((c) => c.name === fallbackName)?.id ?? "";
+  }
   return {
     name: i.work_name,
     part_name: i.part_name ?? "",
@@ -101,10 +119,15 @@ function toRow(i: OrderItem): ItemRow {
     parts_cost: i.parts_cost !== undefined ? String(i.parts_cost) : "",
     unit_price: String(i.unit_price),
     source_menu_id: i.source_menu_id ?? "",
+    tax_category: taxCategory,
+    item_category_id: itemCategoryId,
   };
 }
 
-function toItem(r: ItemRow): OrderItem {
+// ItemRow → OrderItem。新フィールドを書き、ローカル totals 計算用に旧 type/tax_free
+// も派生して書く（categoryName ベース）。サーバー側 parseItems も同じ派生を行うため、
+// この出力をそのまま JSON 化して送ってよい。
+function toItem(r: ItemRow, categoryName: string | null): OrderItem {
   const quantity = Number(r.quantity) || 0;
   const base = ((): OrderItem => {
     if (hasBreakdown(r)) {
@@ -129,10 +152,23 @@ function toItem(r: ItemRow): OrderItem {
   if (r.part_name.trim() !== "") base.part_name = r.part_name.trim();
   if (r.note.trim() !== "") base.note = r.note.trim();
   if (r.source_menu_id !== "") base.source_menu_id = r.source_menu_id;
+  // 新フィールド
+  base.tax_category = r.tax_category;
+  if (r.item_category_id) base.item_category_id = r.item_category_id;
+  // 旧フィールド派生（calculateTotals が type/tax_free を見るので必要）
+  if (r.tax_category === "shaken_non_tax") {
+    base.type = "shaken";
+    base.tax_free = true;
+  } else if (r.tax_category === "taxable" && categoryName === "車検整備") {
+    base.type = "shaken";
+  }
   return base;
 }
 
-const emptyRow = (): ItemRow => ({
+const emptyRow = (
+  itemCategoryId: string,
+  taxCategory: TaxCategory,
+): ItemRow => ({
   name: "",
   part_name: "",
   note: "",
@@ -141,27 +177,33 @@ const emptyRow = (): ItemRow => ({
   parts_cost: "",
   unit_price: "0",
   source_menu_id: "",
+  tax_category: taxCategory,
+  item_category_id: itemCategoryId,
 });
 
-// 既存 items を 3 セクションに振り分ける（type / tax_free による）
-function splitInitial(items: OrderItem[]): {
-  normal: ItemRow[];
-  shakenTaxable: ItemRow[];
-  shakenTaxFree: ItemRow[];
-} {
-  const normal: ItemRow[] = [];
-  const shakenTaxable: ItemRow[] = [];
-  const shakenTaxFree: ItemRow[] = [];
+// 既存 items を category id ベースの Record に振り分ける。
+// item_category_id が空または allCategories に無い場合は旧 type/tax_free から
+// カテゴリ名を逆引きして近い id に振る。フォールバックすら見つからない場合は
+// allCategories[0] に入れる（全くカテゴリが無い極端なケースは想定外）。
+function splitByCategory(
+  items: OrderItem[],
+  allCategories: WorkItemCategory[],
+): Record<string, ItemRow[]> {
+  const result: Record<string, ItemRow[]> = {};
+  // すべてのアクティブカテゴリのキーを先に確保（空セクションも表示するため）。
+  for (const c of allCategories) result[c.id] = [];
   for (const it of items) {
-    const r = toRow(it);
-    if (it.type === "shaken") {
-      if (it.tax_free) shakenTaxFree.push(r);
-      else shakenTaxable.push(r);
-    } else {
-      normal.push(r);
-    }
+    const r = toRow(it, allCategories);
+    const key =
+      r.item_category_id && (result[r.item_category_id] !== undefined)
+        ? r.item_category_id
+        : (allCategories[0]?.id ?? "_orphan");
+    if (!result[key]) result[key] = [];
+    // r.item_category_id が空だった場合は割り当てたキーで補正する。
+    if (!r.item_category_id) r.item_category_id = key;
+    result[key].push(r);
   }
-  return { normal, shakenTaxable, shakenTaxFree };
+  return result;
 }
 
 const cellInputClass =
@@ -180,29 +222,37 @@ export default function ItemsForm({
   initialPhotoFolderUrl,
   allMenus,
   allSetsWithItems,
+  allCategories,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
     undefined,
   );
 
-  // useState 初期値は初回 render でのみ使われるため、useMemo 不要
-  const split = splitInitial(initialItems);
+  // カテゴリ id → name の逆引き（旧 type/tax_free 派生 / セクション見出し / 保存JSON で使用）
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of allCategories) m.set(c.id, c.name);
+    return m;
+  }, [allCategories]);
 
-  const [normalRows, setNormalRows] = useState<ItemRow[]>(
-    split.normal.length > 0
-      ? split.normal
-      : [emptyRow()],
-  );
-  const [shakenTaxableRows, setShakenTaxableRows] = useState<ItemRow[]>(
-    split.shakenTaxable,
-  );
-  const [shakenTaxFreeRows, setShakenTaxFreeRows] = useState<ItemRow[]>(
-    split.shakenTaxFree,
-  );
-  const [shakenOpen, setShakenOpen] = useState(
-    split.shakenTaxable.length + split.shakenTaxFree.length > 0,
-  );
+  // category_name_map_json: サーバー側 parseItems が旧 type/tax_free を派生する際に使う。
+  const categoryNameMapJson = useMemo(() => {
+    return JSON.stringify(Object.fromEntries(categoryNameById));
+  }, [categoryNameById]);
+
+  // 初期 state: 既存 items を category id 単位の Record に振り分ける。
+  // カテゴリ未登録（極端なケース）でも壊れないようフォールバック空オブジェクトで初期化。
+  const [rowsByCat, setRowsByCat] = useState<Record<string, ItemRow[]>>(() => {
+    const split = splitByCategory(initialItems, allCategories);
+    // 何も無い受注（新規）の場合、最初のカテゴリに空 1 行を置いて即入力できる UX に。
+    if (initialItems.length === 0 && allCategories.length > 0) {
+      const head = allCategories[0];
+      split[head.id] = [emptyRow(head.id, defaultTaxCategoryFor(head.name))];
+    }
+    return split;
+  });
+
   const [discount, setDiscount] = useState(String(initialDiscount));
   const [deposit, setDeposit] = useState(String(initialDeposit));
   const [estimateNotes, setEstimateNotes] = useState(
@@ -217,29 +267,29 @@ export default function ItemsForm({
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
 
-  // セクション → state setter の対応
-  const setterOf: Record<Section, (rows: ItemRow[]) => void> = {
-    normal: setNormalRows,
-    shakenTaxable: setShakenTaxableRows,
-    shakenTaxFree: setShakenTaxFreeRows,
-  };
-  const rowsOf: Record<Section, ItemRow[]> = {
-    normal: normalRows,
-    shakenTaxable: shakenTaxableRows,
-    shakenTaxFree: shakenTaxFreeRows,
-  };
+  // 表示するセクションの並び: アクティブなカテゴリ display_order 順 +
+  // それに無い orphan カテゴリ id（行を持つが allCategories に無いもの）を末尾に。
+  const sectionOrder = useMemo(() => {
+    const ids = allCategories.map((c) => c.id);
+    const knownSet = new Set(ids);
+    const orphans: string[] = [];
+    for (const id of Object.keys(rowsByCat)) {
+      if (!id) continue;
+      if (!knownSet.has(id) && (rowsByCat[id]?.length ?? 0) > 0) {
+        orphans.push(id);
+      }
+    }
+    return [...ids, ...orphans];
+  }, [allCategories, rowsByCat]);
 
-  // 一括追加: 各 ItemRow を category 由来の section に振り分けて末尾に追加。
-  // shaken 系を追加した場合は車検費用エリアを開いておく。
-  function addRowsBySection(rows: { row: ItemRow; section: Section }[]) {
-    const buckets: Record<Section, ItemRow[]> = {
-      normal: [...normalRows],
-      shakenTaxable: [...shakenTaxableRows],
-      shakenTaxFree: [...shakenTaxFreeRows],
-    };
+  // セクション set helper: 指定 categoryId の rows を更新する。
+  function setRowsFor(categoryId: string, rows: ItemRow[]) {
+    setRowsByCat((prev) => ({ ...prev, [categoryId]: rows }));
+  }
 
-    // normal セクションは初期に空 1 行が居る場合があるので、最初の挿入で
-    // 「未入力の空行」を吸収する（先頭が完全に空ならそれを置き換える）。
+  // 一括追加: 各 ItemRow を item_category_id 単位で末尾に追加。
+  // categoryId が allCategories に無いものはそのキーに新規バケットを作る（orphan）。
+  function addRowsByCategory(newRows: ItemRow[]) {
     function isEmptyRow(r: ItemRow): boolean {
       return (
         r.name.trim() === "" &&
@@ -250,57 +300,64 @@ export default function ItemsForm({
         (r.unit_price === "" || r.unit_price === "0")
       );
     }
-
-    let touchedShaken = false;
-    for (const { row, section } of rows) {
-      if (section !== "normal") touchedShaken = true;
-      const list = buckets[section];
-      if (list.length === 1 && isEmptyRow(list[0])) {
-        buckets[section] = [row];
-      } else {
-        buckets[section] = [...list, row];
+    setRowsByCat((prev) => {
+      const next: Record<string, ItemRow[]> = { ...prev };
+      for (const row of newRows) {
+        const key = row.item_category_id;
+        if (!key) continue;
+        const list = next[key] ?? [];
+        if (list.length === 1 && isEmptyRow(list[0])) {
+          next[key] = [row];
+        } else {
+          next[key] = [...list, row];
+        }
       }
-    }
-
-    setNormalRows(buckets.normal);
-    setShakenTaxableRows(buckets.shakenTaxable);
-    setShakenTaxFreeRows(buckets.shakenTaxFree);
-    if (touchedShaken && !shakenOpen) setShakenOpen(true);
+      return next;
+    });
   }
 
   function handleMenuPickerConfirm(menus: WorkMenuItem[]) {
-    addRowsBySection(
-      menus.map((m) => ({
-        row: rowFromMenu(m),
-        section: SECTION_OF_CATEGORY[m.category],
-      })),
-    );
+    // メニューに item_category_id が無い極稀ケースは「整備」相当に振る。
+    const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
+    const rows = menus.map((m) => {
+      const row = rowFromMenu(m);
+      if (!row.item_category_id) row.item_category_id = fallbackId;
+      return row;
+    });
+    addRowsByCategory(rows);
     setMenuPickerOpen(false);
   }
 
   function handleSetPickerConfirm(set: SetWithItems) {
-    addRowsBySection(
-      set.items.map((x) => ({
-        row: rowFromMenu(x.menu),
-        section: SECTION_OF_CATEGORY[x.menu.category],
-      })),
-    );
+    const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
+    const rows = set.items.map((x) => {
+      const row = rowFromMenu(x.menu);
+      if (!row.item_category_id) row.item_category_id = fallbackId;
+      return row;
+    });
+    addRowsByCategory(rows);
     setSetPickerOpen(false);
   }
 
   // 行の ☆ ボタン: その行をマスター（work_menu_items）に登録する。
   // 登録成功時は当該 row.source_menu_id を新規 id でセットして二重登録を抑止する。
   const [registeringRow, setRegisteringRow] = useState<{
-    section: Section;
+    categoryId: string;
     index: number;
   } | null>(null);
   function handleRegisterRow(
-    section: Section,
+    categoryId: string,
     index: number,
   ): Promise<void> {
-    const r = rowsOf[section][index];
+    const list = rowsByCat[categoryId] ?? [];
+    const r = list[index];
+    if (!r) return Promise.resolve();
     if (!r.name.trim()) {
       alert("作業内容が空のため登録できません。");
+      return Promise.resolve();
+    }
+    if (!r.item_category_id) {
+      alert("業務カテゴリが未設定のため登録できません。");
       return Promise.resolve();
     }
     if (
@@ -310,47 +367,48 @@ export default function ItemsForm({
     ) {
       return Promise.resolve();
     }
-    const item = toItem(r);
-    setRegisteringRow({ section, index });
+    const categoryName = categoryNameById.get(r.item_category_id) ?? null;
+    const item = toItem(r, categoryName);
+    setRegisteringRow({ categoryId, index });
     return registerOrderItemAsMenu({
       work_name: item.work_name,
       part_name: item.part_name ?? null,
-      category: CATEGORY_OF_SECTION[section],
       default_quantity: item.quantity,
       default_unit_price: item.unit_price,
       default_labor_cost: item.labor_cost ?? 0,
       default_parts_cost: item.parts_cost ?? 0,
-      tax_free: section === "shakenTaxFree",
+      tax_category: r.tax_category,
+      item_category_id: r.item_category_id,
     })
       .then((res) => {
         if ("error" in res) {
           alert(res.error);
           return;
         }
-        // ローカル row の source_menu_id を更新（同一 section 内）
-        const list = rowsOf[section];
-        setterOf[section](
-          list.map((row, idx) =>
-            idx === index ? { ...row, source_menu_id: res.id } : row,
-          ),
-        );
+        setRowsByCat((prev) => {
+          const cur = prev[categoryId] ?? [];
+          return {
+            ...prev,
+            [categoryId]: cur.map((row, idx) =>
+              idx === index ? { ...row, source_menu_id: res.id } : row,
+            ),
+          };
+        });
       })
       .finally(() => setRegisteringRow(null));
   }
 
-  // 全セクションの item 配列を組み立てて totals 計算。保存用 JSON もここから作る。
-  const allItems: OrderItem[] = [
-    ...normalRows.map((r) => toItem(r)),
-    ...shakenTaxableRows.map((r) => ({
-      ...toItem(r),
-      type: "shaken" as const,
-    })),
-    ...shakenTaxFreeRows.map((r) => ({
-      ...toItem(r),
-      type: "shaken" as const,
-      tax_free: true,
-    })),
-  ];
+  // 全セクションの item 配列を組み立てて totals 計算 & 保存 JSON を作る。
+  // 並び順は sectionOrder で確定（display_order 昇順 + orphan 末尾）。
+  const allItems: OrderItem[] = useMemo(() => {
+    const out: OrderItem[] = [];
+    for (const catId of sectionOrder) {
+      const list = rowsByCat[catId] ?? [];
+      const name = categoryNameById.get(catId) ?? null;
+      for (const r of list) out.push(toItem(r, name));
+    }
+    return out;
+  }, [sectionOrder, rowsByCat, categoryNameById]);
 
   const totals = calculateTotals(
     allItems,
@@ -360,27 +418,17 @@ export default function ItemsForm({
 
   const itemsToSave = allItems.filter((i) => i.work_name.trim() !== "");
 
-  const shakenFilledCount =
-    shakenTaxableRows.filter((r) => r.name.trim() !== "").length +
-    shakenTaxFreeRows.filter((r) => r.name.trim() !== "").length;
-
-  function openShaken() {
-    setShakenOpen(true);
-    // 初回展開時は各サブセクションに空行を1つ用意しておく
-    if (shakenTaxableRows.length === 0) {
-      setShakenTaxableRows([emptyRow()]);
-    }
-    if (shakenTaxFreeRows.length === 0) {
-      setShakenTaxFreeRows([emptyRow()]);
-    }
-  }
-
   return (
     <form action={formAction} className="space-y-6">
       <input
         type="hidden"
         name="items_json"
         value={JSON.stringify(itemsToSave)}
+      />
+      <input
+        type="hidden"
+        name="category_name_map_json"
+        value={categoryNameMapJson}
       />
       <input
         type="hidden"
@@ -393,16 +441,42 @@ export default function ItemsForm({
         value={Number(deposit) || 0}
       />
 
-      {/* 通常明細 */}
-      <section>
-        <ItemTableEditor
-          rows={normalRows}
-          onChange={setNormalRows}
-          section="normal"
-          onRegisterRow={handleRegisterRow}
-          registeringRow={registeringRow}
-        />
-      </section>
+      {/* カテゴリ単位の動的セクション。空セクションも一括追加ボタンを置くため表示する。
+          orphan（allCategories に無いが行が存在する categoryId）は末尾にまとめて出す。 */}
+      {sectionOrder.map((catId) => {
+        const list = rowsByCat[catId] ?? [];
+        const cat = allCategories.find((c) => c.id === catId);
+        const sectionName = cat?.name ?? "（不明カテゴリ）";
+        const sectionTaxCategory = defaultTaxCategoryFor(sectionName);
+        return (
+          <section key={catId}>
+            <div className="mb-2 flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                【{sectionName}】
+              </h3>
+              {!cat && (
+                <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                  削除済み
+                </span>
+              )}
+              {cat?.is_system && (
+                <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                  標準
+                </span>
+              )}
+            </div>
+            <ItemTableEditor
+              rows={list}
+              onChange={(next) => setRowsFor(catId, next)}
+              categoryId={catId}
+              categoryName={cat?.name ?? null}
+              defaultTaxCategory={sectionTaxCategory}
+              onRegisterRow={handleRegisterRow}
+              registeringRow={registeringRow}
+            />
+          </section>
+        );
+      })}
 
       {/* 作業メニュー / 作業セットからの一括追加 */}
       <section>
@@ -422,65 +496,9 @@ export default function ItemsForm({
             📦 作業セットから追加
           </button>
           <p className="ml-1 self-center text-xs text-zinc-500 dark:text-zinc-400">
-            選択した項目は category に応じて整備 / 車検（課税）/ 車検（非課税）に振り分けられます。
+            選択した項目は業務カテゴリに応じて該当セクションに振り分けられます。
           </p>
         </div>
-      </section>
-
-      {/* 車検費用セクション */}
-      <section>
-        {!shakenOpen ? (
-          <button
-            type="button"
-            onClick={openShaken}
-            className="w-full rounded-md border border-dashed border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
-          >
-            ＋ 車検費用を追加
-            {shakenFilledCount > 0 && `（入力済み ${shakenFilledCount} 件）`}
-          </button>
-        ) : (
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                車検費用
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShakenOpen(false)}
-                className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
-              >
-                閉じる
-              </button>
-            </div>
-
-            <div className="space-y-5">
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  課税分（消費税10%）
-                </h4>
-                <ItemTableEditor
-                  rows={shakenTaxableRows}
-                  onChange={setShakenTaxableRows}
-                  section="shakenTaxable"
-                  onRegisterRow={handleRegisterRow}
-                  registeringRow={registeringRow}
-                />
-              </div>
-              <div>
-                <h4 className="mb-2 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  非課税分（自賠責・重量税・印紙代など）
-                </h4>
-                <ItemTableEditor
-                  rows={shakenTaxFreeRows}
-                  onChange={setShakenTaxFreeRows}
-                  section="shakenTaxFree"
-                  onRegisterRow={handleRegisterRow}
-                  registeringRow={registeringRow}
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </section>
 
       <div className="grid gap-6 sm:grid-cols-2">
@@ -499,11 +517,9 @@ export default function ItemsForm({
               onChange={(e) => setDiscount(e.target.value)}
               className={`${cellInputClass} text-right`}
             />
-            {shakenOpen && (
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                ※ 割引は整備費用（通常明細）のみに適用されます
-              </p>
-            )}
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              ※ 割引は課税の整備費用にのみ適用されます
+            </p>
           </div>
           <div>
             <label htmlFor="deposit" className={labelClass}>
@@ -669,6 +685,7 @@ export default function ItemsForm({
       {menuPickerOpen && (
         <MenuPickerModal
           allMenus={allMenus}
+          allCategories={allCategories}
           onConfirm={handleMenuPickerConfirm}
           onClose={() => setMenuPickerOpen(false)}
         />
@@ -676,6 +693,7 @@ export default function ItemsForm({
       {setPickerOpen && (
         <SetPickerModal
           sets={allSetsWithItems}
+          allCategories={allCategories}
           onConfirm={handleSetPickerConfirm}
           onClose={() => setSetPickerOpen(false)}
         />
@@ -687,15 +705,21 @@ export default function ItemsForm({
 function ItemTableEditor({
   rows,
   onChange,
-  section,
+  categoryId,
+  categoryName,
+  defaultTaxCategory,
   onRegisterRow,
   registeringRow,
 }: {
   rows: ItemRow[];
   onChange: (rows: ItemRow[]) => void;
-  section: Section;
-  onRegisterRow: (section: Section, index: number) => Promise<void>;
-  registeringRow: { section: Section; index: number } | null;
+  categoryId: string;
+  // 小計計算 (toItem) 内で旧 type/tax_free を派生するために必要。
+  categoryName: string | null;
+  // セクションの推奨税区分。「+ 明細行を追加」で空行を作るときに使う。
+  defaultTaxCategory: TaxCategory;
+  onRegisterRow: (categoryId: string, index: number) => Promise<void>;
+  registeringRow: { categoryId: string; index: number } | null;
 }) {
   // 工賃 / 部品代 が編集された場合、片方でも値があれば単価を自動計算で上書き。
   // 両方クリアされたときは最後の計算値（または元の単価）を残して手動入力可能に戻る。
@@ -720,7 +744,7 @@ function ItemTableEditor({
     );
   }
   function add() {
-    onChange([...rows, emptyRow()]);
+    onChange([...rows, emptyRow(categoryId, defaultTaxCategory)]);
   }
   function remove(i: number) {
     onChange(rows.filter((_, idx) => idx !== i));
@@ -853,9 +877,9 @@ function ItemTableEditor({
                 {/* 列6 上: ☆ ボタン */}
                 <button
                   type="button"
-                  onClick={() => onRegisterRow(section, i)}
+                  onClick={() => onRegisterRow(categoryId, i)}
                   disabled={
-                    registeringRow?.section === section &&
+                    registeringRow?.categoryId === categoryId &&
                     registeringRow?.index === i
                   }
                   aria-label="この行をマスターに登録"
@@ -918,7 +942,7 @@ function ItemTableEditor({
                     小計
                   </div>
                   <div className="px-2 py-1.5 text-right text-sm font-bold text-zinc-900 dark:text-zinc-50">
-                    {formatYen(rowSubtotal(toItem(r)))}
+                    {formatYen(rowSubtotal(toItem(r, categoryName)))}
                   </div>
                 </div>
 
@@ -1015,12 +1039,6 @@ function normalizeForSearch(s: string): string {
   return s.toLowerCase().normalize("NFKC");
 }
 
-const CATEGORY_LABEL: Record<WorkCategory, string> = {
-  normal: "整備",
-  shaken: "車検（課税）",
-  shaken_tax_free: "車検（非課税）",
-};
-
 function menuRowTotal(m: WorkMenuItem): number {
   return m.default_labor_cost > 0 || m.default_parts_cost > 0
     ? m.default_labor_cost + m.default_parts_cost
@@ -1029,21 +1047,32 @@ function menuRowTotal(m: WorkMenuItem): number {
 
 function MenuPickerModal({
   allMenus,
+  allCategories,
   onConfirm,
   onClose,
 }: {
   allMenus: WorkMenuItem[];
+  allCategories: WorkItemCategory[];
   onConfirm: (menus: WorkMenuItem[]) => void;
   onClose: () => void;
 }) {
-  type Filter = "all" | WorkCategory;
+  // フィルタ値: 'all' または item_category_id（uuid）。
+  type Filter = "all" | string;
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
 
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of allCategories) m.set(c.id, c.name);
+    return m;
+  }, [allCategories]);
+
   const filtered = useMemo(() => {
     let list = allMenus;
-    if (filter !== "all") list = list.filter((m) => m.category === filter);
+    if (filter !== "all") {
+      list = list.filter((m) => m.item_category_id === filter);
+    }
     const q = query.trim();
     if (q) {
       const needle = normalizeForSearch(q);
@@ -1088,14 +1117,13 @@ function MenuPickerModal({
             作業メニューから追加
           </h3>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {(
-              [
-                ["all", "すべて"],
-                ["normal", "整備"],
-                ["shaken", "車検課税"],
-                ["shaken_tax_free", "車検非課税"],
-              ] as const
-            ).map(([v, l]) => (
+            {[
+              { value: "all" as Filter, label: "すべて" },
+              ...allCategories.map((c) => ({
+                value: c.id as Filter,
+                label: c.name,
+              })),
+            ].map(({ value: v, label: l }) => (
               <button
                 key={v}
                 type="button"
@@ -1141,7 +1169,11 @@ function MenuPickerModal({
                         {m.work_name}
                       </div>
                       <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                        {CATEGORY_LABEL[m.category]}
+                        {m.item_category_id
+                          ? (categoryNameById.get(m.item_category_id) ??
+                            "（不明）")
+                          : "（未分類）"}
+                        {m.tax_category === "shaken_non_tax" ? "・非課税" : ""}
                         {m.part_name ? ` / ${m.part_name}` : ""}
                       </div>
                     </div>
@@ -1187,10 +1219,12 @@ function MenuPickerModal({
 // ============================================
 function SetPickerModal({
   sets,
+  allCategories,
   onConfirm,
   onClose,
 }: {
   sets: SetWithItems[];
+  allCategories: WorkItemCategory[];
   onConfirm: (set: SetWithItems) => void;
   onClose: () => void;
 }) {
@@ -1199,6 +1233,11 @@ function SetPickerModal({
     () => sets.find((s) => s.set.id === pickedId) ?? null,
     [sets, pickedId],
   );
+  const categoryNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of allCategories) m.set(c.id, c.name);
+    return m;
+  }, [allCategories]);
 
   return (
     <div
@@ -1277,7 +1316,13 @@ function SetPickerModal({
                             {x.menu.work_name}
                           </div>
                           <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                            {CATEGORY_LABEL[x.menu.category]}
+                            {x.menu.item_category_id
+                              ? (categoryNameById.get(x.menu.item_category_id) ??
+                                "（不明）")
+                              : "（未分類）"}
+                            {x.menu.tax_category === "shaken_non_tax"
+                              ? "・非課税"
+                              : ""}
                             {x.menu.part_name ? ` / ${x.menu.part_name}` : ""}
                           </div>
                         </div>

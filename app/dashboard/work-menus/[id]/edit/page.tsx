@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { WorkMenuItem } from "@/lib/types";
+import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
 import WorkMenuForm from "../../work-menu-form";
 import { updateWorkMenu } from "../../actions";
 
@@ -19,15 +19,42 @@ export default async function EditWorkMenuPage(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data } = await supabase
-    .from("work_menu_items")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", user!.id)
-    .maybeSingle();
+  const [menuRes, catsRes] = await Promise.all([
+    supabase
+      .from("work_menu_items")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", user!.id)
+      .maybeSingle(),
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
 
-  if (!data) notFound();
-  const initial = data as WorkMenuItem;
+  if (!menuRes.data) notFound();
+  const initial = menuRes.data as WorkMenuItem;
+  let allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+
+  // 編集対象の item_category_id がアクティブ一覧に無い（=削除済みカテゴリ）場合に
+  // セレクトの選択肢から外れて初期値が変わってしまうのを防ぐ。
+  if (
+    initial.item_category_id &&
+    !allCategories.some((c) => c.id === initial.item_category_id)
+  ) {
+    const { data: orphan } = await supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("id", initial.item_category_id)
+      .eq("user_id", user!.id)
+      .maybeSingle();
+    if (orphan) {
+      allCategories = [...allCategories, orphan as WorkItemCategory];
+    }
+  }
 
   const action = updateWorkMenu.bind(null, initial.id);
 
@@ -49,6 +76,7 @@ export default async function EditWorkMenuPage(
         <WorkMenuForm
           action={action}
           initial={initial}
+          allCategories={allCategories}
           submitLabel="更新する"
           cancelHref="/dashboard/work-menus"
         />

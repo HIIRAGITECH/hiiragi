@@ -3,7 +3,12 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { WORK_CATEGORIES, type WorkCategory } from "@/lib/types";
+import {
+  TAX_CATEGORIES,
+  WORK_CATEGORIES,
+  type TaxCategory,
+  type WorkCategory,
+} from "@/lib/types";
 import {
   countWorkMenuUsage,
   type WorkMenuUsage,
@@ -25,47 +30,90 @@ function pickNumber(formData: FormData, key: string, fallback = 0): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-function pickCategory(formData: FormData): WorkCategory | null {
-  const s = pickString(formData, "category");
+function pickTaxCategory(formData: FormData): TaxCategory | null {
+  const s = pickString(formData, "tax_category");
   if (!s) return null;
-  return (WORK_CATEGORIES as readonly string[]).includes(s)
-    ? (s as WorkCategory)
+  return (TAX_CATEGORIES as readonly string[]).includes(s)
+    ? (s as TaxCategory)
     : null;
 }
 
+// 旧 pickCategory は廃止（フォームからは送信されなくなった）。
+// WORK_CATEGORIES を import 維持しているのは互換派生 (deriveLegacyCategory) のため。
+void WORK_CATEGORIES;
+
+// フォームから受け取る生 payload。旧 category / tax_free は派生で計算するため含めない。
 type Payload = {
   work_name: string;
   part_name: string | null;
-  category: WorkCategory;
   default_quantity: number;
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
-  tax_free: boolean;
   memo: string | null;
+  tax_category: TaxCategory;
+  item_category_id: string;
 };
 
 function readPayload(formData: FormData): Payload | { error: string } {
   const work_name = pickString(formData, "work_name");
   if (!work_name) return { error: "作業内容は必須です。" };
-  const category = pickCategory(formData);
-  if (!category) return { error: "カテゴリを選択してください。" };
+  const item_category_id = pickString(formData, "item_category_id");
+  if (!item_category_id) {
+    return { error: "業務カテゴリを選択してください。" };
+  }
+  const tax_category = pickTaxCategory(formData);
+  if (!tax_category) return { error: "税区分を選択してください。" };
 
   return {
     work_name,
     part_name: pickString(formData, "part_name"),
-    category,
     default_quantity: pickNumber(formData, "default_quantity", 1),
     default_unit_price: pickNumber(formData, "default_unit_price", 0),
     default_labor_cost: pickNumber(formData, "default_labor_cost", 0),
     default_parts_cost: pickNumber(formData, "default_parts_cost", 0),
-    // shaken_tax_free カテゴリ選択時は強制的に tax_free=true（CHECK と整合）
-    tax_free:
-      category === "shaken_tax_free"
-        ? true
-        : formData.get("tax_free") === "on",
     memo: pickString(formData, "memo"),
+    tax_category,
+    item_category_id,
   };
+}
+
+// 過渡期: 新フィールド (item_category_id + tax_category) から旧フィールド
+// (category + tax_free) を派生する。Step 6-4 / 6-5 で旧フィールドを削除するまで併走。
+//
+//   tax_category=='shaken_non_tax'                   → category='shaken_tax_free', tax_free=true
+//   tax_category=='taxable' && カテゴリ名=='車検整備' → category='shaken',          tax_free=false
+//   その他                                           → category='normal',         tax_free=false
+function deriveLegacyCategory(
+  taxCategory: TaxCategory,
+  categoryName: string,
+): { category: WorkCategory; tax_free: boolean } {
+  if (taxCategory === "shaken_non_tax") {
+    return { category: "shaken_tax_free", tax_free: true };
+  }
+  if (categoryName === "車検整備") {
+    return { category: "shaken", tax_free: false };
+  }
+  return { category: "normal", tax_free: false };
+}
+
+// 業務カテゴリの存在確認 + 名前取得（旧 category 派生用）。
+async function resolveCategoryName(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  itemCategoryId: string,
+): Promise<{ name: string } | { error: string }> {
+  const { data } = await supabase
+    .from("work_item_categories")
+    .select("name, deleted_at")
+    .eq("id", itemCategoryId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return { error: "業務カテゴリが見つかりません。" };
+  if (data.deleted_at !== null) {
+    return { error: "削除済みのカテゴリは選択できません。" };
+  }
+  return { name: data.name as string };
 }
 
 export async function createWorkMenu(
@@ -81,6 +129,10 @@ export async function createWorkMenu(
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
+  const cat = await resolveCategoryName(supabase, user.id, result.item_category_id);
+  if ("error" in cat) return cat;
+  const legacy = deriveLegacyCategory(result.tax_category, cat.name);
+
   // display_order は既存最大値 + 1（同 user_id 内）
   const { data: maxRow } = await supabase
     .from("work_menu_items")
@@ -94,6 +146,8 @@ export async function createWorkMenu(
 
   const { error } = await supabase.from("work_menu_items").insert({
     ...result,
+    category: legacy.category,
+    tax_free: legacy.tax_free,
     display_order: nextOrder,
     user_id: user.id,
   });
@@ -117,9 +171,17 @@ export async function updateWorkMenu(
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
+  const cat = await resolveCategoryName(supabase, user.id, result.item_category_id);
+  if ("error" in cat) return cat;
+  const legacy = deriveLegacyCategory(result.tax_category, cat.name);
+
   const { error } = await supabase
     .from("work_menu_items")
-    .update(result)
+    .update({
+      ...result,
+      category: legacy.category,
+      tax_free: legacy.tax_free,
+    })
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
@@ -227,7 +289,7 @@ export async function duplicateWorkMenu(formData: FormData) {
   const { data: src } = await supabase
     .from("work_menu_items")
     .select(
-      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, tax_free, memo",
+      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, tax_free, memo, tax_category, item_category_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -263,15 +325,18 @@ export async function duplicateWorkMenu(formData: FormData) {
 
 // 受注明細フォームの ☆ ボタンから呼ばれる: 1 行を作業メニューマスターに登録する。
 // 補足（note）はマスター対象外なので渡さない。redirect しない、戻り値で id を返す。
+//
+// 業務カテゴリ統合後: 呼び出し側が tax_category と item_category_id を渡し、
+// このアクション内で旧 category / tax_free を派生して同期書き込みする。
 export type RegisterMenuPayload = {
   work_name: string;
   part_name: string | null;
-  category: WorkCategory;
   default_quantity: number;
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
-  tax_free: boolean;
+  tax_category: TaxCategory;
+  item_category_id: string;
 };
 
 export type RegisterMenuResult =
@@ -284,8 +349,11 @@ export async function registerOrderItemAsMenu(
   if (!payload.work_name || payload.work_name.trim() === "") {
     return { error: "作業内容が空のため登録できません。" };
   }
-  if (!(WORK_CATEGORIES as readonly string[]).includes(payload.category)) {
-    return { error: "カテゴリが不正です。" };
+  if (!(TAX_CATEGORIES as readonly string[]).includes(payload.tax_category)) {
+    return { error: "税区分が不正です。" };
+  }
+  if (!payload.item_category_id) {
+    return { error: "業務カテゴリが指定されていません。" };
   }
 
   const supabase = await createClient();
@@ -293,6 +361,14 @@ export async function registerOrderItemAsMenu(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const cat = await resolveCategoryName(
+    supabase,
+    user.id,
+    payload.item_category_id,
+  );
+  if ("error" in cat) return cat;
+  const legacy = deriveLegacyCategory(payload.tax_category, cat.name);
 
   const { data: maxRow } = await supabase
     .from("work_menu_items")
@@ -309,13 +385,16 @@ export async function registerOrderItemAsMenu(
     .insert({
       work_name: payload.work_name.trim(),
       part_name: payload.part_name,
-      category: payload.category,
       default_quantity: payload.default_quantity,
       default_unit_price: payload.default_unit_price,
       default_labor_cost: payload.default_labor_cost,
       default_parts_cost: payload.default_parts_cost,
-      tax_free:
-        payload.category === "shaken_tax_free" ? true : payload.tax_free,
+      // 新フィールド
+      tax_category: payload.tax_category,
+      item_category_id: payload.item_category_id,
+      // 旧フィールド（互換）
+      category: legacy.category,
+      tax_free: legacy.tax_free,
       display_order: nextOrder,
       user_id: user.id,
     })

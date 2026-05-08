@@ -1,13 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useState } from "react";
-import type { WorkCategory, WorkMenuItem } from "@/lib/types";
+import { useActionState, useMemo, useState } from "react";
+import type {
+  TaxCategory,
+  WorkItemCategory,
+  WorkMenuItem,
+} from "@/lib/types";
 import type { FormState } from "./actions";
 
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   initial?: WorkMenuItem;
+  // 選択肢として表示するアクティブな業務カテゴリ。display_order 順で渡されている前提。
+  // initial.item_category_id が deleted_at 等で含まれない場合に備えて、
+  // 親ページ側で initial のカテゴリも合流させて渡してもよい。
+  allCategories: WorkItemCategory[];
   submitLabel: string;
   cancelHref: string;
 };
@@ -18,15 +26,17 @@ const inputClass =
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
-const CATEGORY_OPTIONS: { value: WorkCategory; label: string }[] = [
-  { value: "normal", label: "整備" },
-  { value: "shaken", label: "車検（課税）" },
-  { value: "shaken_tax_free", label: "車検（非課税）" },
-];
+// カテゴリ名から推奨される税区分を返す。
+//   「車検法定費用」 → shaken_non_tax
+//   それ以外        → taxable
+function defaultTaxCategoryFor(name: string | undefined): TaxCategory {
+  return name === "車検法定費用" ? "shaken_non_tax" : "taxable";
+}
 
 export default function WorkMenuForm({
   action,
   initial,
+  allCategories,
   submitLabel,
   cancelHref,
 }: Props) {
@@ -34,13 +44,29 @@ export default function WorkMenuForm({
     action,
     undefined,
   );
-  const [category, setCategory] = useState<WorkCategory>(
-    initial?.category ?? "normal",
-  );
-  const [taxFree, setTaxFree] = useState<boolean>(initial?.tax_free ?? false);
 
-  const taxFreeForced = category === "shaken_tax_free";
-  const taxFreeChecked = taxFreeForced ? true : taxFree;
+  // 初期カテゴリ: initial の item_category_id があればそれ、無ければ先頭の active。
+  const initialCategoryId =
+    initial?.item_category_id ?? allCategories[0]?.id ?? "";
+  const [categoryId, setCategoryId] = useState<string>(initialCategoryId);
+
+  const selectedCategory = useMemo(
+    () => allCategories.find((c) => c.id === categoryId) ?? null,
+    [allCategories, categoryId],
+  );
+
+  // 初期税区分: initial があればそれ、無ければカテゴリ名から推奨を採用。
+  const [taxCategory, setTaxCategory] = useState<TaxCategory>(
+    initial?.tax_category ?? defaultTaxCategoryFor(selectedCategory?.name),
+  );
+
+  function handleCategoryChange(id: string) {
+    setCategoryId(id);
+    // カテゴリ変更時、税区分を推奨値で上書き（ユーザーが直前に手動で変えていた場合は
+    // 上書きされるが、UX として「カテゴリ＝税区分の組」を更新する挙動の方が直感的）。
+    const next = allCategories.find((c) => c.id === id) ?? null;
+    setTaxCategory(defaultTaxCategoryFor(next?.name));
+  }
 
   return (
     <form action={formAction} className="space-y-4">
@@ -72,29 +98,61 @@ export default function WorkMenuForm({
       </div>
 
       <div>
+        <label htmlFor="item_category_id" className={labelClass}>
+          業務カテゴリ <span className="text-red-600">*</span>
+        </label>
+        <select
+          id="item_category_id"
+          name="item_category_id"
+          required
+          value={categoryId}
+          onChange={(e) => handleCategoryChange(e.target.value)}
+          className={inputClass}
+        >
+          {allCategories.length === 0 && (
+            <option value="">（カテゴリ未登録）</option>
+          )}
+          {allCategories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+              {c.is_system ? "（標準）" : ""}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          カテゴリは「カテゴリ管理」画面で追加・編集できます。
+        </p>
+      </div>
+
+      <div>
         <span className={labelClass}>
-          カテゴリ <span className="text-red-600">*</span>
+          税区分 <span className="text-red-600">*</span>
         </span>
         <div className="flex flex-wrap gap-3">
-          {CATEGORY_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
-            >
-              <input
-                type="radio"
-                name="category"
-                value={opt.value}
-                checked={category === opt.value}
-                onChange={() => {
-                  setCategory(opt.value);
-                  if (opt.value === "shaken_tax_free") setTaxFree(true);
-                }}
-              />
-              <span>{opt.label}</span>
-            </label>
-          ))}
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+            <input
+              type="radio"
+              name="tax_category"
+              value="taxable"
+              checked={taxCategory === "taxable"}
+              onChange={() => setTaxCategory("taxable")}
+            />
+            <span>課税</span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950">
+            <input
+              type="radio"
+              name="tax_category"
+              value="shaken_non_tax"
+              checked={taxCategory === "shaken_non_tax"}
+              onChange={() => setTaxCategory("shaken_non_tax")}
+            />
+            <span>車検非課税</span>
+          </label>
         </div>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          通常は変更不要です。自賠責保険・重量税・印紙代など消費税の対象外を選ぶ場合のみ「車検非課税」にしてください。
+        </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -157,24 +215,6 @@ export default function WorkMenuForm({
       </div>
 
       <div>
-        <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            name="tax_free"
-            checked={taxFreeChecked}
-            disabled={taxFreeForced}
-            onChange={(e) => setTaxFree(e.target.checked)}
-          />
-          <span>非課税フラグ</span>
-          {taxFreeForced && (
-            <span className="text-xs text-zinc-500">
-              （車検（非課税）カテゴリは自動的に非課税）
-            </span>
-          )}
-        </label>
-      </div>
-
-      <div>
         <label htmlFor="memo" className={labelClass}>
           メモ <span className="text-xs text-zinc-500">（任意）</span>
         </label>
@@ -199,7 +239,7 @@ export default function WorkMenuForm({
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={pending}
+          disabled={pending || allCategories.length === 0}
           className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
         >
           {pending ? "保存中..." : submitLabel}

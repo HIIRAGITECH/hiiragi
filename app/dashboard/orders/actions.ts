@@ -6,10 +6,12 @@ import { createClient } from "@/lib/supabase/server";
 import {
   ESTIMATE_STATUSES,
   INVOICE_STATUSES,
+  TAX_CATEGORIES,
   WORK_STATUSES,
   type EstimateStatus,
   type InvoiceStatus,
   type OrderItem,
+  type TaxCategory,
   type WorkStatus,
 } from "@/lib/types";
 
@@ -126,7 +128,16 @@ export async function deleteOrder(formData: FormData) {
 }
 
 // 明細・割引・預かり金の保存。受注詳細画面の明細フォームから呼ばれる。
-function parseItems(json: string): OrderItem[] | null {
+//
+// 2026-05 業務カテゴリ統合:
+//   - クライアントから tax_category と item_category_id を受け取り、jsonb に書き込む。
+//   - 互換のため、tax_category から旧 type / tax_free を派生して併走書き込みする。
+//     カテゴリ名 (車検整備 vs その他) は category_name_map を使って解決する。
+//     呼び出し側 (items-form.tsx) が JSON に category_name_map（id→name）を同梱する。
+function parseItems(
+  json: string,
+  categoryNameById: Map<string, string>,
+): OrderItem[] | null {
   try {
     const raw = JSON.parse(json);
     if (!Array.isArray(raw)) return null;
@@ -144,8 +155,39 @@ function parseItems(json: string): OrderItem[] | null {
         quantity,
         unit_price: Math.round(unit_price),
       };
-      if (r?.type === "shaken") item.type = "shaken";
-      if (r?.tax_free === true) item.tax_free = true;
+
+      // 新フィールド: tax_category / item_category_id
+      let tax_category: TaxCategory = "taxable";
+      if (typeof r?.tax_category === "string") {
+        if (
+          (TAX_CATEGORIES as readonly string[]).includes(r.tax_category)
+        ) {
+          tax_category = r.tax_category as TaxCategory;
+        }
+      }
+      let item_category_id: string | null = null;
+      if (typeof r?.item_category_id === "string") {
+        const v = r.item_category_id.trim();
+        item_category_id = v === "" ? null : v;
+      }
+      item.tax_category = tax_category;
+      item.item_category_id = item_category_id;
+
+      // 旧フィールド (type / tax_free) を派生。
+      // shaken_non_tax → type=shaken, tax_free=true
+      // taxable && カテゴリ名='車検整備' → type=shaken, tax_free=false
+      // それ以外 → type 省略 (=normal), tax_free=false
+      const categoryName = item_category_id
+        ? (categoryNameById.get(item_category_id) ?? "")
+        : "";
+      if (tax_category === "shaken_non_tax") {
+        item.type = "shaken";
+        item.tax_free = true;
+      } else if (tax_category === "taxable" && categoryName === "車検整備") {
+        item.type = "shaken";
+      }
+      // それ以外は OrderItem の type 省略 = normal、tax_free 省略 = false。
+
       // labor_cost / parts_cost: 値が存在し有効な数値なら保存。両方未指定なら
       // 単価のみの既存データと同じ扱いでこれらのプロパティは出力しない。
       if (r?.labor_cost !== undefined && r?.labor_cost !== null) {
@@ -158,9 +200,6 @@ function parseItems(json: string): OrderItem[] | null {
         if (!Number.isFinite(n) || n < 0) return null;
         item.parts_cost = Math.round(n);
       }
-      // 2026-05 追加フィールド: 入力 UI が将来生やしたときに保存される値を取りこぼさない
-      // ようパススルーする（trim、空文字は null）。Step 1 時点で UI からは入らないが
-      // インポート/移行ツール経由で投入されるケースに備える。
       if (typeof r?.part_name === "string") {
         const v = r.part_name.trim();
         item.part_name = v === "" ? null : v;
@@ -194,7 +233,26 @@ export async function updateOrderItems(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const items = parseItems(String(formData.get("items_json") ?? "[]"));
+  // 業務カテゴリの id→name マップ。クライアント側で JSON 化して送ってくる。
+  // 旧 type / tax_free 派生のために必要（カテゴリ名が "車検整備" かどうか）。
+  const categoryNameById = new Map<string, string>();
+  try {
+    const raw = JSON.parse(
+      String(formData.get("category_name_map_json") ?? "{}"),
+    );
+    if (raw && typeof raw === "object") {
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === "string") categoryNameById.set(k, v);
+      }
+    }
+  } catch {
+    // 不正でも致命的ではない。空マップで続行（旧 type 派生が "車検整備" 検出に失敗するのみ）。
+  }
+
+  const items = parseItems(
+    String(formData.get("items_json") ?? "[]"),
+    categoryNameById,
+  );
   if (items === null) {
     return { error: "明細の値が不正です。数量・単価は0以上の数値にしてください。" };
   }

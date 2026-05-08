@@ -5,7 +5,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import SearchInput from "@/lib/components/search-input";
 import { formatYen } from "@/lib/format";
-import type { WorkCategory, WorkMenuItem } from "@/lib/types";
+import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
 import type { WorkMenuUsage } from "@/lib/work-menus/usage";
 import {
   deleteWorkMenu,
@@ -15,20 +15,8 @@ import {
   restoreWorkMenu,
 } from "./actions";
 
-const CATEGORY_LABEL: Record<WorkCategory, string> = {
-  normal: "整備",
-  shaken: "車検（課税）",
-  shaken_tax_free: "車検（非課税）",
-};
-
-type Filter = "all" | WorkCategory;
-
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "すべて" },
-  { value: "normal", label: "整備" },
-  { value: "shaken", label: "車検課税" },
-  { value: "shaken_tax_free", label: "車検非課税" },
-];
+// フィルタ値: 'all' または item_category_id（uuid）。
+type Filter = "all" | string;
 
 function normalize(s: string): string {
   return s.toLowerCase().normalize("NFKC");
@@ -39,6 +27,8 @@ type Props = {
   // 非表示（deleted_at が立った）行も含めて受け取っているか。
   // 親ページが ?include_deleted=1 のときだけ true を渡す。
   includeDeleted?: boolean;
+  // フィルタ・バッジ表示で使う、アクティブな業務カテゴリ一覧。
+  allCategories: WorkItemCategory[];
 };
 
 // 削除ダイアログの状態。
@@ -52,7 +42,11 @@ type DeleteDialog =
       mode: "soft" | "hard";
     };
 
-export default function WorkMenusTable({ rows, includeDeleted }: Props) {
+export default function WorkMenusTable({
+  rows,
+  includeDeleted,
+  allCategories,
+}: Props) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -60,9 +54,18 @@ export default function WorkMenusTable({ rows, includeDeleted }: Props) {
   const [dialog, setDialog] = useState<DeleteDialog | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 行の item_category_id → カテゴリ名の解決マップ。
+  const categoryNameMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of allCategories) m.set(c.id, c.name);
+    return m;
+  }, [allCategories]);
+
   const filtered = useMemo(() => {
     let list = rows;
-    if (filter !== "all") list = list.filter((r) => r.category === filter);
+    if (filter !== "all") {
+      list = list.filter((r) => r.item_category_id === filter);
+    }
     const q = query.trim();
     if (q) {
       const needle = normalize(q);
@@ -150,7 +153,10 @@ export default function WorkMenusTable({ rows, includeDeleted }: Props) {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {FILTERS.map((f) => (
+        {[
+          { value: "all" as Filter, label: "すべて" },
+          ...allCategories.map((c) => ({ value: c.id as Filter, label: c.name })),
+        ].map((f) => (
           <button
             key={f.value}
             type="button"
@@ -283,9 +289,13 @@ export default function WorkMenusTable({ rows, includeDeleted }: Props) {
                       {r.part_name ?? "—"}
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {CATEGORY_LABEL[r.category]}
-                      {r.tax_free && (
-                        <span className="ml-1 rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                        {(r.item_category_id &&
+                          categoryNameMap.get(r.item_category_id)) ||
+                          "（未分類）"}
+                      </span>
+                      {r.tax_category === "shaken_non_tax" && (
+                        <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
                           非課税
                         </span>
                       )}

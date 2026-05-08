@@ -7,6 +7,7 @@ import type {
   Customer,
   Order,
   Vehicle,
+  WorkItemCategory,
   WorkMenuItem,
   WorkMenuSet,
 } from "@/lib/types";
@@ -50,6 +51,7 @@ export default async function OrderDetailPage(
     menusRes,
     setsRes,
     setItemsRes,
+    catsRes,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -85,6 +87,14 @@ export default async function OrderDetailPage(
       .from("work_menu_set_items")
       .select("set_id, menu_item_id, position")
       .order("position", { ascending: true }),
+    // 業務カテゴリ（明細フォームでセクション分け／カテゴリ選択に使う）
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   const customer = customerData as Customer | null;
@@ -96,6 +106,7 @@ export default async function OrderDetailPage(
     menu_item_id: string;
     position: number;
   }[];
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
   // セットを「中身を menu 解決済み配列で持つ」形にして渡す
   const menuMap = new Map(allMenus.map((m) => [m.id, m]));
   const allSetsWithItems = allSets.map((s) => ({
@@ -255,6 +266,7 @@ export default async function OrderDetailPage(
             initialPhotoFolderUrl={order.photo_folder_url}
             allMenus={allMenus}
             allSetsWithItems={allSetsWithItems}
+            allCategories={allCategories}
           />
         </div>
       </section>

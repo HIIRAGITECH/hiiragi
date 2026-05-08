@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { WorkMenuItem } from "@/lib/types";
+import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
 import WorkMenusTable from "./work-menus-table";
 
 export const metadata: Metadata = {
@@ -20,16 +20,29 @@ export default async function WorkMenusPage(
   } = await supabase.auth.getUser();
 
   // include_deleted=1 のとき deleted_at IS NULL のフィルタを外す。
-  let query = supabase
+  let menusQuery = supabase
     .from("work_menu_items")
     .select("*")
     .eq("user_id", user!.id);
-  if (!includeDeleted) query = query.is("deleted_at", null);
-  const { data, error } = await query
-    .order("display_order", { ascending: true })
-    .order("created_at", { ascending: true });
+  if (!includeDeleted) menusQuery = menusQuery.is("deleted_at", null);
 
-  const rows = (data ?? []) as WorkMenuItem[];
+  const [menusRes, catsRes] = await Promise.all([
+    menusQuery
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    // フィルタ表示用にアクティブな業務カテゴリ一覧を取得。
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
+  const error = menusRes.error;
+
+  const rows = (menusRes.data ?? []) as WorkMenuItem[];
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
   return (
     <>
@@ -57,7 +70,11 @@ export default async function WorkMenusPage(
       )}
 
       <div className="mt-4">
-        <WorkMenusTable rows={rows} includeDeleted={includeDeleted} />
+        <WorkMenusTable
+          rows={rows}
+          includeDeleted={includeDeleted}
+          allCategories={allCategories}
+        />
       </div>
     </>
   );
