@@ -1,10 +1,22 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import type { OrderItem } from "@/lib/types";
+import { useActionState, useMemo, useState } from "react";
+import type {
+  OrderItem,
+  WorkCategory,
+  WorkMenuItem,
+  WorkMenuSet,
+} from "@/lib/types";
 import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
+import SearchInput from "@/lib/components/search-input";
+import { registerOrderItemAsMenu } from "../../work-menus/actions";
 import type { FormState } from "../actions";
+
+type SetWithItems = {
+  set: WorkMenuSet;
+  items: { menu: WorkMenuItem; position: number }[];
+};
 
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
@@ -16,15 +28,59 @@ type Props = {
   initialEstimateNotes: string | null;
   initialInvoiceNotes: string | null;
   initialPhotoFolderUrl: string | null;
+  // 「メニューから追加」「セットから追加」picker 用のマスター一覧
+  allMenus: WorkMenuItem[];
+  allSetsWithItems: SetWithItems[];
 };
 
+// セクション識別子（明細を 3 セクションに振り分けるための型）
+type Section = "normal" | "shakenTaxable" | "shakenTaxFree";
+
+const SECTION_OF_CATEGORY: Record<WorkCategory, Section> = {
+  normal: "normal",
+  shaken: "shakenTaxable",
+  shaken_tax_free: "shakenTaxFree",
+};
+
+const CATEGORY_OF_SECTION: Record<Section, WorkCategory> = {
+  normal: "normal",
+  shakenTaxable: "shaken",
+  shakenTaxFree: "shaken_tax_free",
+};
+
+// マスターのデフォルト値から ItemRow を作る
+function rowFromMenu(m: WorkMenuItem): ItemRow {
+  const labor = m.default_labor_cost > 0 ? String(m.default_labor_cost) : "";
+  const parts = m.default_parts_cost > 0 ? String(m.default_parts_cost) : "";
+  return {
+    name: m.work_name,
+    part_name: m.part_name ?? "",
+    note: "",
+    quantity: String(m.default_quantity ?? 1),
+    labor_cost: labor,
+    parts_cost: parts,
+    unit_price:
+      labor !== "" || parts !== ""
+        ? String((Number(labor) || 0) + (Number(parts) || 0))
+        : String(m.default_unit_price ?? 0),
+    source_menu_id: m.id,
+  };
+}
+
 type ItemRow = {
+  // 旧 name を work_name にリネーム済み。OrderItem.work_name と対応する。
   name: string;
+  // 部品名（任意、マスター対象）
+  part_name: string;
+  // 補足（任意、マスター対象外）
+  note: string;
   quantity: string;
   // 空文字 = 未入力（内訳なし）。片方でも値があれば内訳ありとみなし単価は自動計算される。
   labor_cost: string;
   parts_cost: string;
   unit_price: string;
+  // 作業メニューマスターから挿入された場合のみセット。null/空文字は手入力扱い。
+  source_menu_id: string;
 };
 
 // 工賃 / 部品代の少なくとも片方に値が入っているか（= 単価が自動計算モード）
@@ -35,40 +91,53 @@ function hasBreakdown(r: ItemRow): boolean {
 function toRow(i: OrderItem): ItemRow {
   return {
     name: i.work_name,
+    part_name: i.part_name ?? "",
+    note: i.note ?? "",
     quantity: String(i.quantity),
     labor_cost: i.labor_cost !== undefined ? String(i.labor_cost) : "",
     parts_cost: i.parts_cost !== undefined ? String(i.parts_cost) : "",
     unit_price: String(i.unit_price),
+    source_menu_id: i.source_menu_id ?? "",
   };
 }
 
 function toItem(r: ItemRow): OrderItem {
   const quantity = Number(r.quantity) || 0;
-  if (hasBreakdown(r)) {
-    const labor = Number(r.labor_cost) || 0;
-    const parts = Number(r.parts_cost) || 0;
-    const item: OrderItem = {
+  const base = ((): OrderItem => {
+    if (hasBreakdown(r)) {
+      const labor = Number(r.labor_cost) || 0;
+      const parts = Number(r.parts_cost) || 0;
+      const it: OrderItem = {
+        work_name: r.name,
+        quantity,
+        unit_price: labor + parts,
+      };
+      if (r.labor_cost !== "") it.labor_cost = labor;
+      if (r.parts_cost !== "") it.parts_cost = parts;
+      return it;
+    }
+    return {
       work_name: r.name,
       quantity,
-      unit_price: labor + parts,
+      unit_price: Number(r.unit_price) || 0,
     };
-    if (r.labor_cost !== "") item.labor_cost = labor;
-    if (r.parts_cost !== "") item.parts_cost = parts;
-    return item;
-  }
-  return {
-    work_name: r.name,
-    quantity,
-    unit_price: Number(r.unit_price) || 0,
-  };
+  })();
+  // optional フィールドは値があるときだけ詰める（jsonb を不要に肥大させない）
+  if (r.part_name.trim() !== "") base.part_name = r.part_name.trim();
+  if (r.note.trim() !== "") base.note = r.note.trim();
+  if (r.source_menu_id !== "") base.source_menu_id = r.source_menu_id;
+  return base;
 }
 
 const emptyRow = (): ItemRow => ({
   name: "",
+  part_name: "",
+  note: "",
   quantity: "1",
   labor_cost: "",
   parts_cost: "",
   unit_price: "0",
+  source_menu_id: "",
 });
 
 // 既存 items を 3 セクションに振り分ける（type / tax_free による）
@@ -106,6 +175,8 @@ export default function ItemsForm({
   initialEstimateNotes,
   initialInvoiceNotes,
   initialPhotoFolderUrl,
+  allMenus,
+  allSetsWithItems,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -138,6 +209,131 @@ export default function ItemsForm({
   const [photoFolderUrl, setPhotoFolderUrl] = useState(
     initialPhotoFolderUrl ?? "",
   );
+
+  // ピッカーモーダルの開閉
+  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
+  const [setPickerOpen, setSetPickerOpen] = useState(false);
+
+  // セクション → state setter の対応
+  const setterOf: Record<Section, (rows: ItemRow[]) => void> = {
+    normal: setNormalRows,
+    shakenTaxable: setShakenTaxableRows,
+    shakenTaxFree: setShakenTaxFreeRows,
+  };
+  const rowsOf: Record<Section, ItemRow[]> = {
+    normal: normalRows,
+    shakenTaxable: shakenTaxableRows,
+    shakenTaxFree: shakenTaxFreeRows,
+  };
+
+  // 一括追加: 各 ItemRow を category 由来の section に振り分けて末尾に追加。
+  // shaken 系を追加した場合は車検費用エリアを開いておく。
+  function addRowsBySection(rows: { row: ItemRow; section: Section }[]) {
+    const buckets: Record<Section, ItemRow[]> = {
+      normal: [...normalRows],
+      shakenTaxable: [...shakenTaxableRows],
+      shakenTaxFree: [...shakenTaxFreeRows],
+    };
+
+    // normal セクションは初期に空 1 行が居る場合があるので、最初の挿入で
+    // 「未入力の空行」を吸収する（先頭が完全に空ならそれを置き換える）。
+    function isEmptyRow(r: ItemRow): boolean {
+      return (
+        r.name.trim() === "" &&
+        r.part_name.trim() === "" &&
+        r.note.trim() === "" &&
+        r.labor_cost === "" &&
+        r.parts_cost === "" &&
+        (r.unit_price === "" || r.unit_price === "0")
+      );
+    }
+
+    let touchedShaken = false;
+    for (const { row, section } of rows) {
+      if (section !== "normal") touchedShaken = true;
+      const list = buckets[section];
+      if (list.length === 1 && isEmptyRow(list[0])) {
+        buckets[section] = [row];
+      } else {
+        buckets[section] = [...list, row];
+      }
+    }
+
+    setNormalRows(buckets.normal);
+    setShakenTaxableRows(buckets.shakenTaxable);
+    setShakenTaxFreeRows(buckets.shakenTaxFree);
+    if (touchedShaken && !shakenOpen) setShakenOpen(true);
+  }
+
+  function handleMenuPickerConfirm(menus: WorkMenuItem[]) {
+    addRowsBySection(
+      menus.map((m) => ({
+        row: rowFromMenu(m),
+        section: SECTION_OF_CATEGORY[m.category],
+      })),
+    );
+    setMenuPickerOpen(false);
+  }
+
+  function handleSetPickerConfirm(set: SetWithItems) {
+    addRowsBySection(
+      set.items.map((x) => ({
+        row: rowFromMenu(x.menu),
+        section: SECTION_OF_CATEGORY[x.menu.category],
+      })),
+    );
+    setSetPickerOpen(false);
+  }
+
+  // 行の ☆ ボタン: その行をマスター（work_menu_items）に登録する。
+  // 登録成功時は当該 row.source_menu_id を新規 id でセットして二重登録を抑止する。
+  const [registeringRow, setRegisteringRow] = useState<{
+    section: Section;
+    index: number;
+  } | null>(null);
+  function handleRegisterRow(
+    section: Section,
+    index: number,
+  ): Promise<void> {
+    const r = rowsOf[section][index];
+    if (!r.name.trim()) {
+      alert("作業内容が空のため登録できません。");
+      return Promise.resolve();
+    }
+    if (
+      !confirm(
+        `「${r.name}」を作業メニューマスターに登録しますか？\n（補足は登録されません）`,
+      )
+    ) {
+      return Promise.resolve();
+    }
+    const item = toItem(r);
+    setRegisteringRow({ section, index });
+    return registerOrderItemAsMenu({
+      work_name: item.work_name,
+      part_name: item.part_name ?? null,
+      category: CATEGORY_OF_SECTION[section],
+      default_quantity: item.quantity,
+      default_unit_price: item.unit_price,
+      default_labor_cost: item.labor_cost ?? 0,
+      default_parts_cost: item.parts_cost ?? 0,
+      tax_free: section === "shakenTaxFree",
+    })
+      .then((res) => {
+        if ("error" in res) {
+          alert(res.error);
+          return;
+        }
+        // ローカル row の source_menu_id を更新（同一 section 内）
+        const list = rowsOf[section];
+        setterOf[section](
+          list.map((row, idx) =>
+            idx === index ? { ...row, source_menu_id: res.id } : row,
+          ),
+        );
+      })
+      .finally(() => setRegisteringRow(null));
+  }
 
   // 全セクションの item 配列を組み立てて totals 計算。保存用 JSON もここから作る。
   const allItems: OrderItem[] = [
@@ -196,7 +392,36 @@ export default function ItemsForm({
 
       {/* 通常明細 */}
       <section>
-        <ItemTableEditor rows={normalRows} onChange={setNormalRows} />
+        <ItemTableEditor
+          rows={normalRows}
+          onChange={setNormalRows}
+          section="normal"
+          onRegisterRow={handleRegisterRow}
+          registeringRow={registeringRow}
+        />
+      </section>
+
+      {/* 作業メニュー / 作業セットからの一括追加 */}
+      <section>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setMenuPickerOpen(true)}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            📋 作業メニューから追加
+          </button>
+          <button
+            type="button"
+            onClick={() => setSetPickerOpen(true)}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            📦 作業セットから追加
+          </button>
+          <p className="ml-1 self-center text-xs text-zinc-500 dark:text-zinc-400">
+            選択した項目は category に応じて整備 / 車検（課税）/ 車検（非課税）に振り分けられます。
+          </p>
+        </div>
       </section>
 
       {/* 車検費用セクション */}
@@ -233,6 +458,9 @@ export default function ItemsForm({
                 <ItemTableEditor
                   rows={shakenTaxableRows}
                   onChange={setShakenTaxableRows}
+                  section="shakenTaxable"
+                  onRegisterRow={handleRegisterRow}
+                  registeringRow={registeringRow}
                 />
               </div>
               <div>
@@ -242,6 +470,9 @@ export default function ItemsForm({
                 <ItemTableEditor
                   rows={shakenTaxFreeRows}
                   onChange={setShakenTaxFreeRows}
+                  section="shakenTaxFree"
+                  onRegisterRow={handleRegisterRow}
+                  registeringRow={registeringRow}
                 />
               </div>
             </div>
@@ -431,6 +662,21 @@ export default function ItemsForm({
           {pending ? "保存中..." : "内容を保存"}
         </button>
       </div>
+
+      {menuPickerOpen && (
+        <MenuPickerModal
+          allMenus={allMenus}
+          onConfirm={handleMenuPickerConfirm}
+          onClose={() => setMenuPickerOpen(false)}
+        />
+      )}
+      {setPickerOpen && (
+        <SetPickerModal
+          sets={allSetsWithItems}
+          onConfirm={handleSetPickerConfirm}
+          onClose={() => setSetPickerOpen(false)}
+        />
+      )}
     </form>
   );
 }
@@ -438,9 +684,15 @@ export default function ItemsForm({
 function ItemTableEditor({
   rows,
   onChange,
+  section,
+  onRegisterRow,
+  registeringRow,
 }: {
   rows: ItemRow[];
   onChange: (rows: ItemRow[]) => void;
+  section: Section;
+  onRegisterRow: (section: Section, index: number) => Promise<void>;
+  registeringRow: { section: Section; index: number } | null;
 }) {
   // 工賃 / 部品代 が編集された場合、片方でも値があれば単価を自動計算で上書き。
   // 両方クリアされたときは最後の計算値（または元の単価）を残して手動入力可能に戻る。
@@ -518,14 +770,33 @@ function ItemTableEditor({
               rows.map((r, i) => {
                 const auto = hasBreakdown(r);
                 return (
-                <tr key={i}>
+                <tr key={i} className="align-top">
+                  {/* 品名セル: 作業内容 / 部品名（任意）/ 補足（任意）の 3 段。
+                      OrderItem の work_name / part_name / note にそれぞれ対応。 */}
                   <td className="px-3 py-2">
-                    <input
-                      value={r.name}
-                      onChange={(e) => update(i, { name: e.target.value })}
-                      placeholder="例: エンジンオイル交換"
-                      className={cellInputClass}
-                    />
+                    <div className="space-y-1">
+                      <input
+                        value={r.name}
+                        onChange={(e) => update(i, { name: e.target.value })}
+                        placeholder="作業内容（例: エンジンオイル交換）"
+                        className={cellInputClass}
+                      />
+                      <input
+                        value={r.part_name}
+                        onChange={(e) =>
+                          update(i, { part_name: e.target.value })
+                        }
+                        placeholder="部品名（任意）"
+                        className={cellInputClass}
+                      />
+                      <textarea
+                        value={r.note}
+                        onChange={(e) => update(i, { note: e.target.value })}
+                        rows={1}
+                        placeholder="補足（任意 / マスターには登録されません）"
+                        className={`${cellInputClass} resize-y`}
+                      />
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <input
@@ -603,14 +874,33 @@ function ItemTableEditor({
                     {formatYen(rowSubtotal(toItem(r)))}
                   </td>
                   <td className="px-3 py-2 text-center">
-                    <button
-                      type="button"
-                      onClick={() => remove(i)}
-                      aria-label="行を削除"
-                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
-                    >
-                      ×
-                    </button>
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onRegisterRow(section, i)}
+                        disabled={
+                          registeringRow?.section === section &&
+                          registeringRow?.index === i
+                        }
+                        aria-label="この行をマスターに登録"
+                        title={
+                          r.source_menu_id
+                            ? "現在の内容で別のマスターとして登録"
+                            : "マスターに登録"
+                        }
+                        className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
+                      >
+                        ☆
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(i)}
+                        aria-label="行を削除"
+                        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                      >
+                        ×
+                      </button>
+                    </div>
                   </td>
                 </tr>
                 );
@@ -650,6 +940,313 @@ function Row({
     <div className={`flex items-baseline justify-between ${className}`}>
       <dt>{label}</dt>
       <dd>{value}</dd>
+    </div>
+  );
+}
+
+// ============================================
+// 「📋 作業メニューから追加」モーダル
+// ============================================
+function normalizeForSearch(s: string): string {
+  return s.toLowerCase().normalize("NFKC");
+}
+
+const CATEGORY_LABEL: Record<WorkCategory, string> = {
+  normal: "整備",
+  shaken: "車検（課税）",
+  shaken_tax_free: "車検（非課税）",
+};
+
+function menuRowTotal(m: WorkMenuItem): number {
+  return m.default_labor_cost > 0 || m.default_parts_cost > 0
+    ? m.default_labor_cost + m.default_parts_cost
+    : m.default_unit_price;
+}
+
+function MenuPickerModal({
+  allMenus,
+  onConfirm,
+  onClose,
+}: {
+  allMenus: WorkMenuItem[];
+  onConfirm: (menus: WorkMenuItem[]) => void;
+  onClose: () => void;
+}) {
+  type Filter = "all" | WorkCategory;
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const filtered = useMemo(() => {
+    let list = allMenus;
+    if (filter !== "all") list = list.filter((m) => m.category === filter);
+    const q = query.trim();
+    if (q) {
+      const needle = normalizeForSearch(q);
+      list = list.filter((m) =>
+        normalizeForSearch(`${m.work_name} ${m.part_name ?? ""}`).includes(
+          needle,
+        ),
+      );
+    }
+    return list;
+  }, [allMenus, filter, query]);
+
+  function togglePick(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function confirm() {
+    const selected = filtered.filter((m) => picked.has(m.id));
+    // picker 順序ではなく picked にチェックを入れた順序を尊重したい場合は、
+    // チェック時に配列を維持する形に変更する。今はテーブル表示順で OK。
+    onConfirm(selected);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+            作業メニューから追加
+          </h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {(
+              [
+                ["all", "すべて"],
+                ["normal", "整備"],
+                ["shaken", "車検課税"],
+                ["shaken_tax_free", "車検非課税"],
+              ] as const
+            ).map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setFilter(v)}
+                className={`rounded-full px-3 py-1 text-xs transition-colors ${
+                  filter === v
+                    ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
+                    : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="作業内容・部品名で検索"
+              className="ml-auto w-56"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+              {allMenus.length === 0
+                ? "作業メニューが未登録です。「作業メニュー」画面で登録してください。"
+                : "該当する作業メニューがありません。"}
+            </p>
+          ) : (
+            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {filtered.map((m) => (
+                <li key={m.id} className="px-4 py-2">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={picked.has(m.id)}
+                      onChange={() => togglePick(m.id)}
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm text-zinc-900 dark:text-zinc-50">
+                        {m.work_name}
+                      </div>
+                      <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                        {CATEGORY_LABEL[m.category]}
+                        {m.part_name ? ` / ${m.part_name}` : ""}
+                      </div>
+                    </div>
+                    <div className="text-sm text-zinc-700 dark:text-zinc-300">
+                      {formatYen(menuRowTotal(m))}
+                    </div>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">
+            選択中: {picked.size} 件
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              disabled={picked.size === 0}
+              onClick={confirm}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              明細に追加
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// 「📦 作業セットから追加」モーダル
+// ============================================
+function SetPickerModal({
+  sets,
+  onConfirm,
+  onClose,
+}: {
+  sets: SetWithItems[];
+  onConfirm: (set: SetWithItems) => void;
+  onClose: () => void;
+}) {
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const picked = useMemo(
+    () => sets.find((s) => s.set.id === pickedId) ?? null,
+    [sets, pickedId],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+            作業セットから追加
+          </h3>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {sets.length === 0 ? (
+            <p className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+              作業セットが未登録です。「作業セット」画面で登録してください。
+            </p>
+          ) : (
+            <div className="grid gap-0 sm:grid-cols-[1fr_1.4fr]">
+              {/* 左: セット一覧 */}
+              <ul className="divide-y divide-zinc-200 border-r border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+                {sets.map((s) => {
+                  const total = s.items.reduce(
+                    (sum, x) => sum + menuRowTotal(x.menu),
+                    0,
+                  );
+                  const active = pickedId === s.set.id;
+                  return (
+                    <li key={s.set.id}>
+                      <button
+                        type="button"
+                        onClick={() => setPickedId(s.set.id)}
+                        className={`block w-full px-4 py-2.5 text-left text-sm transition-colors ${
+                          active
+                            ? "bg-zinc-100 dark:bg-zinc-800"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                        }`}
+                      >
+                        <div className="font-medium text-zinc-900 dark:text-zinc-50">
+                          {s.set.name}
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {s.items.length} 件 / 合計 {formatYen(total)}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* 右: 中身プレビュー */}
+              <div className="p-4">
+                {!picked ? (
+                  <p className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+                    左のセットを選ぶと、含まれるメニューが表示されます。
+                  </p>
+                ) : picked.items.length === 0 ? (
+                  <p className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+                    （メニュー未登録）
+                  </p>
+                ) : (
+                  <ol className="space-y-1.5 text-sm">
+                    {picked.items.map((x, idx) => (
+                      <li
+                        key={`${x.menu.id}-${idx}`}
+                        className="flex items-start justify-between gap-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-zinc-900 dark:text-zinc-50">
+                            {x.menu.work_name}
+                          </div>
+                          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                            {CATEGORY_LABEL[x.menu.category]}
+                            {x.menu.part_name ? ` / ${x.menu.part_name}` : ""}
+                          </div>
+                        </div>
+                        <div className="text-zinc-700 dark:text-zinc-300">
+                          {formatYen(menuRowTotal(x.menu))}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            disabled={!picked || picked.items.length === 0}
+            onClick={() => picked && onConfirm(picked)}
+            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            明細に追加
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

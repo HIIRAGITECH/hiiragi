@@ -194,6 +194,74 @@ export async function duplicateWorkMenu(formData: FormData) {
   }
 }
 
+// 受注明細フォームの ☆ ボタンから呼ばれる: 1 行を作業メニューマスターに登録する。
+// 補足（note）はマスター対象外なので渡さない。redirect しない、戻り値で id を返す。
+export type RegisterMenuPayload = {
+  work_name: string;
+  part_name: string | null;
+  category: WorkCategory;
+  default_quantity: number;
+  default_unit_price: number;
+  default_labor_cost: number;
+  default_parts_cost: number;
+  tax_free: boolean;
+};
+
+export type RegisterMenuResult =
+  | { error: string }
+  | { success: true; id: string };
+
+export async function registerOrderItemAsMenu(
+  payload: RegisterMenuPayload,
+): Promise<RegisterMenuResult> {
+  if (!payload.work_name || payload.work_name.trim() === "") {
+    return { error: "作業内容が空のため登録できません。" };
+  }
+  if (!(WORK_CATEGORIES as readonly string[]).includes(payload.category)) {
+    return { error: "カテゴリが不正です。" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data: maxRow } = await supabase
+    .from("work_menu_items")
+    .select("display_order")
+    .eq("user_id", user.id)
+    .order("display_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextOrder =
+    typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
+
+  const { data: inserted, error } = await supabase
+    .from("work_menu_items")
+    .insert({
+      work_name: payload.work_name.trim(),
+      part_name: payload.part_name,
+      category: payload.category,
+      default_quantity: payload.default_quantity,
+      default_unit_price: payload.default_unit_price,
+      default_labor_cost: payload.default_labor_cost,
+      default_parts_cost: payload.default_parts_cost,
+      tax_free:
+        payload.category === "shaken_tax_free" ? true : payload.tax_free,
+      display_order: nextOrder,
+      user_id: user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) {
+    return { error: `登録に失敗しました: ${error?.message ?? "unknown"}` };
+  }
+
+  revalidatePath("/dashboard/work-menus");
+  return { success: true, id: inserted.id };
+}
+
 // ↑↓ ボタン用: 隣接行と display_order を入れ替える。
 export async function moveWorkMenu(
   id: string,
