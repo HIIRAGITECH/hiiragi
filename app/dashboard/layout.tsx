@@ -57,6 +57,12 @@ export default async function DashboardLayout({
                 作業セット
               </Link>
               <Link
+                href="/dashboard/work-item-categories"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                カテゴリ管理
+              </Link>
+              <Link
                 href="/dashboard/sales"
                 className="hover:text-zinc-900 dark:hover:text-zinc-50"
               >
