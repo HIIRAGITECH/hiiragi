@@ -740,248 +740,239 @@ function ItemTableEditor({
 
   return (
     <div className="space-y-2">
-      {/* sticky thead を機能させるため overflow-x-auto は付けない。
-          表が画面幅より広い場合は親レイアウトのスクロールに委ねる。 */}
-      <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 z-20 bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-            <tr>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 text-center font-medium dark:border-zinc-800"
-                style={{ width: "44px" }}
+      {rows.length === 0 ? (
+        <p className="rounded-md border border-zinc-200 bg-white px-3 py-4 text-center text-xs text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-500">
+          明細はありません
+        </p>
+      ) : (
+        rows.map((r, i) => {
+          const auto = hasBreakdown(r);
+          // 偶数行（i=1,3,5...）にゼブラ背景。
+          const zebra =
+            i % 2 === 1 ? "bg-zinc-100 dark:bg-zinc-800/60" : "";
+          const noteOpen = r.note !== "" || r._noteExpanded === true;
+          return (
+            <div
+              key={i}
+              className={`rounded-md border border-zinc-200 p-2.5 dark:border-zinc-800 ${zebra}`}
+            >
+              {/* 2 段グリッド: [#] [作業/工賃] [部品名/部品代] [数量/—] [単価/小計] [☆/×]
+                  items-end で各セルを下端揃え（ラベル付きセルと入力単独セルの底辺を一致）。
+                  # バッジは row-span-2 + self-center で縦方向中央。 */}
+              <div
+                className="grid items-end gap-x-2 gap-y-1.5"
+                style={{
+                  gridTemplateColumns:
+                    "28px minmax(0,1fr) minmax(0,1fr) 70px 90px 36px",
+                }}
               >
-                #
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
-                style={{ minWidth: "200px" }}
-              >
-                品名
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
-                style={{ width: "80px" }}
-              >
-                数量
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
-                style={{ width: "120px" }}
-              >
-                工賃
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
-                style={{ width: "120px" }}
-              >
-                部品代
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
-                style={{ width: "150px" }}
-              >
-                単価
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 text-right font-medium dark:border-zinc-800"
-                style={{ width: "120px" }}
-              >
-                小計
-              </th>
-              <th
-                className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800"
-                style={{ width: "56px" }}
-              />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-            {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={8}
-                  className="px-3 py-4 text-center text-xs text-zinc-400 dark:text-zinc-500"
+                <div className="row-span-2 flex justify-center self-center">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                    {i + 1}
+                  </span>
+                </div>
+
+                {/* 列2 上: 作業内容 */}
+                <input
+                  value={r.name}
+                  onChange={(e) => update(i, { name: e.target.value })}
+                  placeholder="作業内容"
+                  aria-label="作業内容"
+                  className={cellInputClass}
+                />
+
+                {/* 列3 上: 部品名 */}
+                <input
+                  value={r.part_name}
+                  onChange={(e) =>
+                    update(i, { part_name: e.target.value })
+                  }
+                  placeholder="部品名（任意）"
+                  aria-label="部品名"
+                  className={cellInputClass}
+                />
+
+                {/* 列4 上: 数量（ラベル上） */}
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    数量
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.1"
+                    value={r.quantity}
+                    onChange={(e) =>
+                      update(i, { quantity: e.target.value })
+                    }
+                    aria-label="数量"
+                    className={`${cellInputClass} text-center`}
+                  />
+                </div>
+
+                {/* 列5 上: 単価（ラベル上 / 自動バッジ右上 / readonly when auto） */}
+                <div>
+                  <div className="mb-0.5 flex items-end justify-between gap-1">
+                    <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      単価
+                    </label>
+                    {auto && (
+                      <span
+                        aria-hidden
+                        className="rounded bg-zinc-200 px-1 text-[9px] font-medium leading-tight text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+                      >
+                        自動
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1}
+                    value={r.unit_price}
+                    onChange={(e) =>
+                      update(i, { unit_price: e.target.value })
+                    }
+                    readOnly={auto}
+                    title={
+                      auto
+                        ? "工賃と部品代から自動計算されます（両方を空にすると手動入力可能）"
+                        : undefined
+                    }
+                    aria-label="単価"
+                    className={`${cellInputClass} text-right ${
+                      auto
+                        ? "cursor-not-allowed bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400"
+                        : ""
+                    }`}
+                  />
+                </div>
+
+                {/* 列6 上: ☆ ボタン */}
+                <button
+                  type="button"
+                  onClick={() => onRegisterRow(section, i)}
+                  disabled={
+                    registeringRow?.section === section &&
+                    registeringRow?.index === i
+                  }
+                  aria-label="この行をマスターに登録"
+                  title={
+                    r.source_menu_id
+                      ? "現在の内容で別のマスターとして登録"
+                      : "マスターに登録"
+                  }
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-amber-200 bg-white text-sm text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
                 >
-                  明細はありません
-                </td>
-              </tr>
-            ) : (
-              rows.map((r, i) => {
-                const auto = hasBreakdown(r);
-                const zebra =
-                  i % 2 === 0
-                    ? "bg-zinc-100 dark:bg-zinc-800/60"
-                    : "";
-                const noteOpen =
-                  r.note !== "" || r._noteExpanded === true;
-                return (
-                <tr key={i} className={`align-top ${zebra}`}>
-                  {/* 行番号バッジ: セクション内で 1 から振り直し。
-                      行の追加/削除で自動的に再採番される（map の index ベース）。 */}
-                  <td className="px-3 py-2 text-center">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
-                      {i + 1}
-                    </span>
-                  </td>
-                  {/* 品名セル: 作業内容 / 部品名（任意）/ 補足（折りたたみ）。
-                      OrderItem の work_name / part_name / note にそれぞれ対応。
-                      補足は note に値があるか「+ 補足」で展開した行のみ表示。 */}
-                  <td className="px-3 py-2">
-                    <div className="space-y-1">
-                      <input
-                        value={r.name}
-                        onChange={(e) => update(i, { name: e.target.value })}
-                        placeholder="作業内容（例: エンジンオイル交換）"
-                        className={cellInputClass}
-                      />
-                      <input
-                        value={r.part_name}
-                        onChange={(e) =>
-                          update(i, { part_name: e.target.value })
-                        }
-                        placeholder="部品名（任意）"
-                        className={cellInputClass}
-                      />
-                      {noteOpen ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => toggleNote(i)}
-                            className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
-                          >
-                            × 補足を閉じる
-                          </button>
-                          <textarea
-                            value={r.note}
-                            onChange={(e) =>
-                              update(i, { note: e.target.value })
-                            }
-                            rows={2}
-                            placeholder="補足（任意）"
-                            className={`${cellInputClass} resize-y`}
-                          />
-                        </>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleNote(i)}
-                          className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
-                        >
-                          ＋ 補足
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      step="0.1"
-                      value={r.quantity}
-                      onChange={(e) => update(i, { quantity: e.target.value })}
-                      className={`${cellInputClass} text-right`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.labor_cost}
-                      onChange={(e) =>
-                        update(i, { labor_cost: e.target.value })
-                      }
-                      placeholder="—"
-                      className={`${cellInputClass} text-right`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.parts_cost}
-                      onChange={(e) =>
-                        update(i, { parts_cost: e.target.value })
-                      }
-                      placeholder="—"
-                      className={`${cellInputClass} text-right`}
-                    />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        step={1}
-                        value={r.unit_price}
-                        onChange={(e) =>
-                          update(i, { unit_price: e.target.value })
-                        }
-                        readOnly={auto}
-                        title={
-                          auto
-                            ? "工賃と部品代から自動計算されます（両方を空にすると手動入力可能）"
-                            : undefined
-                        }
-                        className={`${cellInputClass} text-right ${
-                          auto
-                            ? "cursor-not-allowed bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400"
-                            : ""
-                        }`}
-                      />
-                      {auto && (
-                        <span
-                          aria-hidden
-                          className="shrink-0 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium leading-none text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                        >
-                          自動
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2 text-right text-zinc-900 dark:text-zinc-50">
+                  ☆
+                </button>
+
+                {/* 列2 下: 工賃（横ラベル + 入力） */}
+                <div className="flex items-center gap-2">
+                  <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    工賃
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1}
+                    value={r.labor_cost}
+                    onChange={(e) =>
+                      update(i, { labor_cost: e.target.value })
+                    }
+                    placeholder="—"
+                    aria-label="工賃"
+                    className={`${cellInputClass} text-right`}
+                  />
+                </div>
+
+                {/* 列3 下: 部品代（横ラベル + 入力） */}
+                <div className="flex items-center gap-2">
+                  <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    部品代
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1}
+                    value={r.parts_cost}
+                    onChange={(e) =>
+                      update(i, { parts_cost: e.target.value })
+                    }
+                    placeholder="—"
+                    aria-label="部品代"
+                    className={`${cellInputClass} text-right`}
+                  />
+                </div>
+
+                {/* 列4 下: 空（数量2段目のスペーサ） */}
+                <div aria-hidden />
+
+                {/* 列5 下: 小計（ラベル上 / 値表示） */}
+                <div>
+                  <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    小計
+                  </div>
+                  <div className="px-2 py-1.5 text-right text-sm font-bold text-zinc-900 dark:text-zinc-50">
                     {formatYen(rowSubtotal(toItem(r)))}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <div className="flex flex-col items-center gap-1">
+                  </div>
+                </div>
+
+                {/* 列6 下: × ボタン */}
+                <button
+                  type="button"
+                  onClick={() => remove(i)}
+                  aria-label="行を削除"
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* 補足（折りたたみ）: グリッド外 / # 列幅 + gap = 36px インデント */}
+              <div className="mt-1.5 pl-9">
+                {noteOpen ? (
+                  <div className="space-y-1">
+                    <div className="flex justify-end">
                       <button
                         type="button"
-                        onClick={() => onRegisterRow(section, i)}
-                        disabled={
-                          registeringRow?.section === section &&
-                          registeringRow?.index === i
-                        }
-                        aria-label="この行をマスターに登録"
-                        title={
-                          r.source_menu_id
-                            ? "現在の内容で別のマスターとして登録"
-                            : "マスターに登録"
-                        }
-                        className="rounded-md border border-amber-200 bg-white px-2 py-1 text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
+                        onClick={() => toggleNote(i)}
+                        className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
                       >
-                        ☆
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(i)}
-                        aria-label="行を削除"
-                        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
-                      >
-                        ×
+                        × 補足を閉じる
                       </button>
                     </div>
-                  </td>
-                </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                    <textarea
+                      value={r.note}
+                      onChange={(e) =>
+                        update(i, { note: e.target.value })
+                      }
+                      rows={2}
+                      placeholder="補足（任意）"
+                      aria-label="補足"
+                      className={`${cellInputClass} min-h-12 resize-y`}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => toggleNote(i)}
+                      className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
+                    >
+                      ＋ 補足
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })
+      )}
       <button
         type="button"
         onClick={add}
