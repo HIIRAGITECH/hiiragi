@@ -81,6 +81,9 @@ type ItemRow = {
   unit_price: string;
   // 作業メニューマスターから挿入された場合のみセット。null/空文字は手入力扱い。
   source_menu_id: string;
+  // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
+  // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
+  _noteExpanded?: boolean;
 };
 
 // 工賃 / 部品代の少なくとも片方に値が入っているか（= 単価が自動計算モード）
@@ -722,12 +725,26 @@ function ItemTableEditor({
   function remove(i: number) {
     onChange(rows.filter((_, idx) => idx !== i));
   }
+  // 補足の展開/折りたたみトグル。展開時は textarea を表示。
+  // 折りたたみ時は note と _noteExpanded を同時にクリア（保存時 null として確定）。
+  function toggleNote(i: number) {
+    onChange(
+      rows.map((r, idx) => {
+        if (idx !== i) return r;
+        const expanded = r.note !== "" || r._noteExpanded === true;
+        if (expanded) return { ...r, note: "", _noteExpanded: false };
+        return { ...r, _noteExpanded: true };
+      }),
+    );
+  }
 
   return (
     <div className="space-y-2">
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      {/* sticky thead を機能させるため overflow-x-auto は付けない。
+          表が画面幅より広い場合は親レイアウトのスクロールに委ねる。 */}
+      <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+          <thead className="sticky top-0 z-20 bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
             <tr>
               <th
                 className="border-b border-zinc-200 px-3 py-2 text-center font-medium dark:border-zinc-800"
@@ -792,8 +809,10 @@ function ItemTableEditor({
                 const auto = hasBreakdown(r);
                 const zebra =
                   i % 2 === 0
-                    ? "bg-zinc-50/60 dark:bg-zinc-800/30"
+                    ? "bg-zinc-100 dark:bg-zinc-800/60"
                     : "";
+                const noteOpen =
+                  r.note !== "" || r._noteExpanded === true;
                 return (
                 <tr key={i} className={`align-top ${zebra}`}>
                   {/* 行番号バッジ: セクション内で 1 から振り直し。
@@ -803,8 +822,9 @@ function ItemTableEditor({
                       {i + 1}
                     </span>
                   </td>
-                  {/* 品名セル: 作業内容 / 部品名（任意）/ 補足（任意）の 3 段。
-                      OrderItem の work_name / part_name / note にそれぞれ対応。 */}
+                  {/* 品名セル: 作業内容 / 部品名（任意）/ 補足（折りたたみ）。
+                      OrderItem の work_name / part_name / note にそれぞれ対応。
+                      補足は note に値があるか「+ 補足」で展開した行のみ表示。 */}
                   <td className="px-3 py-2">
                     <div className="space-y-1">
                       <input
@@ -821,13 +841,34 @@ function ItemTableEditor({
                         placeholder="部品名（任意）"
                         className={cellInputClass}
                       />
-                      <textarea
-                        value={r.note}
-                        onChange={(e) => update(i, { note: e.target.value })}
-                        rows={1}
-                        placeholder="補足（任意）"
-                        className={`${cellInputClass} resize-y`}
-                      />
+                      {noteOpen ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => toggleNote(i)}
+                            className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
+                          >
+                            × 補足を閉じる
+                          </button>
+                          <textarea
+                            value={r.note}
+                            onChange={(e) =>
+                              update(i, { note: e.target.value })
+                            }
+                            rows={2}
+                            placeholder="補足（任意）"
+                            className={`${cellInputClass} resize-y`}
+                          />
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleNote(i)}
+                          className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
+                        >
+                          ＋ 補足
+                        </button>
+                      )}
                     </div>
                   </td>
                   <td className="px-3 py-2">
