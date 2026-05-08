@@ -386,33 +386,56 @@ function ItemsSection({
           </tr>
         </thead>
         <tbody>
-          {items.map((it, i) => (
-            <tr key={i} className="border-b border-zinc-500 align-top">
-              <td className="px-2 py-1 break-words">{it.work_name}</td>
-              <td className="px-2 py-1 text-right">{it.quantity}</td>
-              {showBreakdown ? (
-                <>
-                  <td className="px-2 py-1 text-right">
-                    {it.labor_cost !== undefined
-                      ? formatYen(it.labor_cost)
-                      : "—"}
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    {it.parts_cost !== undefined
-                      ? formatYen(it.parts_cost)
-                      : "—"}
-                  </td>
-                </>
-              ) : (
-                <td className="px-2 py-1 text-right">
-                  {formatYen(it.unit_price)}
+          {items.map((it, i) => {
+            const partName =
+              it.part_name && it.part_name.trim() !== ""
+                ? it.part_name
+                : null;
+            const note =
+              it.note && it.note.trim() !== "" ? it.note : null;
+            // 数量・金額列を最上段（work_name 行）に揃えるため、各 td に明示的に
+            // align-top を付ける（vertical-align は td 単位のため tr 上では効かない）。
+            return (
+              <tr
+                key={i}
+                className="border-b border-zinc-500 [&>td]:align-top"
+              >
+                <td className="px-2 py-1 break-words">
+                  <div>{it.work_name}</div>
+                  {partName && (
+                    <div className="ml-3 break-words">{partName}</div>
+                  )}
+                  {note && (
+                    <div className="ml-3 break-words text-[10px] text-zinc-500">
+                      ※{note}
+                    </div>
+                  )}
                 </td>
-              )}
-              <td className="px-2 py-1 text-right">
-                {formatYen(rowSubtotal(it))}
-              </td>
-            </tr>
-          ))}
+                <td className="px-2 py-1 text-right">{it.quantity}</td>
+                {showBreakdown ? (
+                  <>
+                    <td className="px-2 py-1 text-right">
+                      {it.labor_cost !== undefined
+                        ? formatYen(it.labor_cost)
+                        : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      {it.parts_cost !== undefined
+                        ? formatYen(it.parts_cost)
+                        : "—"}
+                    </td>
+                  </>
+                ) : (
+                  <td className="px-2 py-1 text-right">
+                    {formatYen(it.unit_price)}
+                  </td>
+                )}
+                <td className="px-2 py-1 text-right">
+                  {formatYen(rowSubtotal(it))}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>

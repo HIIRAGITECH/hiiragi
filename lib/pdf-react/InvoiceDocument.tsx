@@ -206,6 +206,9 @@ const styles = StyleSheet.create({
   },
   tableRow: {
     flexDirection: "row",
+    // 品名セルが複数行になる行（部品名・補足あり）で、数値列を最上段（work_name の行）
+    // に揃えるため flex-start を明示。
+    alignItems: "flex-start",
     // 罫線が一部の行（特に複数行折り返しした行）で消えて見える事象があったため、
     // 線幅 0.4 → 0.7 に強める。色も table line 色だと薄くて anti-alias で
     // 飛びやすかったため、本文 black に寄せた COLORS.gray に変更する。
@@ -215,6 +218,18 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.gray,
     paddingVertical: 3,
     fontSize: 9,
+  },
+  // 部品名: 作業内容の下にインデント表示。文字色・サイズは本文と同じ。
+  itemPartName: {
+    marginLeft: 12,
+    marginTop: 1,
+  },
+  // 補足: 「※」付き、薄いグレー、本文より小さめ。
+  itemNote: {
+    marginLeft: 12,
+    marginTop: 1,
+    fontSize: 8,
+    color: COLORS.gray,
   },
   // 5 列構成: 品名 / 数量 / 工賃 / 部品代 / 小計
   // 利用可能幅 180mm を以下で割り振る（合計 100%）。
@@ -348,13 +363,30 @@ function ItemsSection({ title, items }: ItemsSectionProps) {
       </View>
       {items.map((it, i) => {
         const showBreakdown = it.labor_cost != null || it.parts_cost != null;
+        const partName =
+          it.part_name && it.part_name.trim() !== "" ? it.part_name : null;
+        const note = it.note && it.note.trim() !== "" ? it.note : null;
         return (
           <View
             key={`${title}-${i}`}
             style={styles.tableRow}
             wrap={false}
           >
-            <Text style={styles.colName}>{sanitizeText(it.work_name)}</Text>
+            {/* 品名セル: work_name / part_name / note を縦に配置。
+                part_name と note はデータがあるときだけ段が出る。 */}
+            <View style={styles.colName}>
+              <Text>{sanitizeText(it.work_name)}</Text>
+              {partName && (
+                <Text style={styles.itemPartName}>
+                  {sanitizeText(partName)}
+                </Text>
+              )}
+              {note && (
+                <Text style={styles.itemNote}>
+                  ※{sanitizeText(note)}
+                </Text>
+              )}
+            </View>
             <Text style={styles.colQty}>{it.quantity}</Text>
             {showBreakdown ? (
               <>
