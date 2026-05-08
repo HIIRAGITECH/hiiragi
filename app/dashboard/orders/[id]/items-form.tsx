@@ -727,40 +727,61 @@ function ItemTableEditor({
     <div className="space-y-2">
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+          <thead className="sticky top-0 z-10 bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
             <tr>
               <th
-                className="px-3 py-2 font-medium"
+                className="border-b border-zinc-200 px-3 py-2 text-center font-medium dark:border-zinc-800"
+                style={{ width: "44px" }}
+              >
+                #
+              </th>
+              <th
+                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
                 style={{ minWidth: "200px" }}
               >
                 品名
               </th>
-              <th className="px-3 py-2 font-medium" style={{ width: "80px" }}>
+              <th
+                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
+                style={{ width: "80px" }}
+              >
                 数量
               </th>
-              <th className="px-3 py-2 font-medium" style={{ width: "120px" }}>
+              <th
+                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
+                style={{ width: "120px" }}
+              >
                 工賃
               </th>
-              <th className="px-3 py-2 font-medium" style={{ width: "120px" }}>
+              <th
+                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
+                style={{ width: "120px" }}
+              >
                 部品代
               </th>
-              <th className="px-3 py-2 font-medium" style={{ width: "150px" }}>
+              <th
+                className="border-b border-zinc-200 px-3 py-2 font-medium dark:border-zinc-800"
+                style={{ width: "150px" }}
+              >
                 単価
               </th>
               <th
-                className="px-3 py-2 text-right font-medium"
+                className="border-b border-zinc-200 px-3 py-2 text-right font-medium dark:border-zinc-800"
                 style={{ width: "120px" }}
               >
                 小計
               </th>
-              <th className="px-3 py-2" style={{ width: "56px" }} />
+              <th
+                className="border-b border-zinc-200 px-3 py-2 dark:border-zinc-800"
+                style={{ width: "56px" }}
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-3 py-4 text-center text-xs text-zinc-400 dark:text-zinc-500"
                 >
                   明細はありません
@@ -769,8 +790,19 @@ function ItemTableEditor({
             ) : (
               rows.map((r, i) => {
                 const auto = hasBreakdown(r);
+                const zebra =
+                  i % 2 === 0
+                    ? "bg-zinc-50/60 dark:bg-zinc-800/30"
+                    : "";
                 return (
-                <tr key={i} className="align-top">
+                <tr key={i} className={`align-top ${zebra}`}>
+                  {/* 行番号バッジ: セクション内で 1 から振り直し。
+                      行の追加/削除で自動的に再採番される（map の index ベース）。 */}
+                  <td className="px-3 py-2 text-center">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                      {i + 1}
+                    </span>
+                  </td>
                   {/* 品名セル: 作業内容 / 部品名（任意）/ 補足（任意）の 3 段。
                       OrderItem の work_name / part_name / note にそれぞれ対応。 */}
                   <td className="px-3 py-2">
@@ -793,7 +825,7 @@ function ItemTableEditor({
                         value={r.note}
                         onChange={(e) => update(i, { note: e.target.value })}
                         rows={1}
-                        placeholder="補足（任意 / マスターには登録されません）"
+                        placeholder="補足（任意）"
                         className={`${cellInputClass} resize-y`}
                       />
                     </div>
