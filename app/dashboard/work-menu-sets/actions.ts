@@ -183,24 +183,48 @@ export async function updateWorkMenuSet(
   redirect("/dashboard/work-menu-sets");
 }
 
-export async function deleteWorkMenuSet(formData: FormData) {
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
-
+// 作業セット削除はソフト削除のみ。セットは過去明細から参照されない（明細はメニュー本体を
+// source_menu_id で参照するため）ので、業務上は復元前提で安全側に倒す。
+// 中身の work_menu_set_items はそのまま残し、復元時に直前の構成へ復帰できるようにする。
+export async function deleteWorkMenuSet(
+  id: string,
+): Promise<{ error: string } | { success: true }> {
+  if (!id) return { error: "ID が不正です。" };
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
-  // work_menu_set_items は ON DELETE CASCADE で連動削除される
-  await supabase
+  const { error } = await supabase
     .from("work_menu_sets")
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq("id", id)
     .eq("user_id", user.id);
-
+  if (error) return { error: `非表示化に失敗しました: ${error.message}` };
   revalidatePath("/dashboard/work-menu-sets");
+  return { success: true };
+}
+
+// 非表示セットを復元する。
+export async function restoreWorkMenuSet(
+  id: string,
+): Promise<{ error: string } | { success: true }> {
+  if (!id) return { error: "ID が不正です。" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { error } = await supabase
+    .from("work_menu_sets")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `復元に失敗しました: ${error.message}` };
+  revalidatePath("/dashboard/work-menu-sets");
+  return { success: true };
 }
 
 export async function duplicateWorkMenuSet(formData: FormData) {

@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { formatYen } from "@/lib/format";
 import type { WorkMenuItem, WorkMenuSet } from "@/lib/types";
-import { deleteWorkMenuSet, duplicateWorkMenuSet } from "./actions";
+import {
+  deleteWorkMenuSet,
+  duplicateWorkMenuSet,
+  restoreWorkMenuSet,
+} from "./actions";
 
 type SetWithItems = WorkMenuSet & {
   items: { menu: WorkMenuItem; position: number }[];
@@ -18,10 +23,13 @@ function menuTotal(m: WorkMenuItem): number {
 
 type Props = {
   rows: SetWithItems[];
+  includeDeleted?: boolean;
 };
 
-export default function WorkMenuSetsList({ rows }: Props) {
+export default function WorkMenuSetsList({ rows, includeDeleted }: Props) {
+  const router = useRouter();
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
 
   function toggle(id: string) {
     setOpenIds((prev) => {
@@ -32,23 +40,67 @@ export default function WorkMenuSetsList({ rows }: Props) {
     });
   }
 
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-lg border border-zinc-200 bg-white px-6 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-        作業セットが登録されていません。
-      </div>
-    );
+  async function handleDelete(s: WorkMenuSet) {
+    if (
+      !confirm(
+        `作業セット「${s.name}」を非表示にします。よろしいですか？\n（後から「非表示を含める」で復元できます）`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    const r = await deleteWorkMenuSet(s.id);
+    setBusy(false);
+    if ("error" in r) alert(r.error);
+    else router.refresh();
+  }
+
+  async function handleRestore(id: string) {
+    setBusy(true);
+    const r = await restoreWorkMenuSet(id);
+    setBusy(false);
+    if ("error" in r) alert(r.error);
+    else router.refresh();
+  }
+
+  function toggleIncludeDeleted(checked: boolean) {
+    const url = new URL(window.location.href);
+    if (checked) url.searchParams.set("include_deleted", "1");
+    else url.searchParams.delete("include_deleted");
+    router.push(url.pathname + url.search);
   }
 
   return (
+    <>
+      {/* 非表示を含めるトグル */}
+      <div className="mb-3 flex items-center justify-end">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+          <input
+            type="checkbox"
+            checked={!!includeDeleted}
+            onChange={(e) => toggleIncludeDeleted(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          非表示を含める
+        </label>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-zinc-200 bg-white px-6 py-12 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+          作業セットが登録されていません。
+        </div>
+      ) : (
     <ul className="space-y-3">
       {rows.map((s) => {
         const total = s.items.reduce((sum, x) => sum + menuTotal(x.menu), 0);
         const open = openIds.has(s.id);
+        const deleted = s.deleted_at !== null;
         return (
           <li
             key={s.id}
-            className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            className={`overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 ${
+              deleted ? "opacity-50" : ""
+            }`}
           >
             <div className="flex items-start justify-between gap-4 px-5 py-4">
               <button
@@ -61,6 +113,11 @@ export default function WorkMenuSetsList({ rows }: Props) {
                   <span className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
                     {s.name}
                   </span>
+                  {deleted && (
+                    <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                      非表示
+                    </span>
+                  )}
                   <span className="text-xs text-zinc-500 dark:text-zinc-400">
                     {s.items.length} 件 / 合計 {formatYen(total)}
                   </span>
@@ -80,41 +137,42 @@ export default function WorkMenuSetsList({ rows }: Props) {
                 )}
               </button>
               <div className="flex shrink-0 gap-1">
-                <Link
-                  href={`/dashboard/work-menu-sets/${s.id}/edit`}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  編集
-                </Link>
-                <form action={duplicateWorkMenuSet}>
-                  <input type="hidden" name="id" value={s.id} />
+                {deleted ? (
                   <button
-                    type="submit"
-                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    type="button"
+                    onClick={() => handleRestore(s.id)}
+                    disabled={busy}
+                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   >
-                    複製
+                    復元
                   </button>
-                </form>
-                <form
-                  action={deleteWorkMenuSet}
-                  onSubmit={(e) => {
-                    if (
-                      !confirm(
-                        `作業セット「${s.name}」を削除します。よろしいですか？`,
-                      )
-                    ) {
-                      e.preventDefault();
-                    }
-                  }}
-                >
-                  <input type="hidden" name="id" value={s.id} />
-                  <button
-                    type="submit"
-                    className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-50 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950"
-                  >
-                    削除
-                  </button>
-                </form>
+                ) : (
+                  <>
+                    <Link
+                      href={`/dashboard/work-menu-sets/${s.id}/edit`}
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      編集
+                    </Link>
+                    <form action={duplicateWorkMenuSet}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <button
+                        type="submit"
+                        className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                      >
+                        複製
+                      </button>
+                    </form>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(s)}
+                      disabled={busy}
+                      className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950"
+                    >
+                      削除
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -158,5 +216,7 @@ export default function WorkMenuSetsList({ rows }: Props) {
         );
       })}
     </ul>
+      )}
+    </>
   );
 }

@@ -35,6 +35,7 @@ export default async function EditWorkMenuSetPage(
       .from("work_menu_items")
       .select("*")
       .eq("user_id", user!.id)
+      .is("deleted_at", null)
       .order("display_order", { ascending: true }),
   ]);
 

@@ -65,18 +65,20 @@ export default async function OrderDetailPage(
           .eq("user_id", user!.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    // 明細フォームの「メニューから追加」picker 用
+    // 明細フォームの「メニューから追加」picker 用（非表示は除外）
     supabase
       .from("work_menu_items")
       .select("*")
       .eq("user_id", user!.id)
+      .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
-    // 明細フォームの「セットから追加」picker 用
+    // 明細フォームの「セットから追加」picker 用（非表示セットは除外）
     supabase
       .from("work_menu_sets")
       .select("*")
       .eq("user_id", user!.id)
+      .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
     supabase

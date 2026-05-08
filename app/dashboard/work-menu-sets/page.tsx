@@ -14,17 +14,28 @@ type SetItemRow = {
   position: number;
 };
 
-export default async function WorkMenuSetsPage() {
+export default async function WorkMenuSetsPage(
+  props: { searchParams: Promise<{ include_deleted?: string }> },
+) {
+  const sp = await props.searchParams;
+  const includeDeleted = sp.include_deleted === "1";
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // セットは include_deleted=1 のとき非表示も含める。
+  // メニュー側は常にアクティブのみ取得する（削除済みメニューはセット表示でグレーアウトすべきだが
+  // 4-5 のセットモーダル仕様に合わせ、まず一覧では除外する）。
+  let setsQuery = supabase
+    .from("work_menu_sets")
+    .select("*")
+    .eq("user_id", user!.id);
+  if (!includeDeleted) setsQuery = setsQuery.is("deleted_at", null);
+
   const [setsRes, linksRes, menusRes] = await Promise.all([
-    supabase
-      .from("work_menu_sets")
-      .select("*")
-      .eq("user_id", user!.id)
+    setsQuery
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
     supabase
@@ -34,7 +45,8 @@ export default async function WorkMenuSetsPage() {
     supabase
       .from("work_menu_items")
       .select("*")
-      .eq("user_id", user!.id),
+      .eq("user_id", user!.id)
+      .is("deleted_at", null),
   ]);
 
   const sets = (setsRes.data ?? []) as WorkMenuSet[];
@@ -74,7 +86,7 @@ export default async function WorkMenuSetsPage() {
       </div>
 
       <div className="mt-4">
-        <WorkMenuSetsList rows={rows} />
+        <WorkMenuSetsList rows={rows} includeDeleted={includeDeleted} />
       </div>
     </>
   );

@@ -4,6 +4,10 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { WORK_CATEGORIES, type WorkCategory } from "@/lib/types";
+import {
+  countWorkMenuUsage,
+  type WorkMenuUsage,
+} from "@/lib/work-menus/usage";
 
 export type FormState = { error: string } | undefined;
 
@@ -124,27 +128,90 @@ export async function updateWorkMenu(
   redirect("/dashboard/work-menus");
 }
 
-export async function deleteWorkMenu(formData: FormData) {
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
+// 旧 deleteWorkMenu(FormData) は廃止。新 API は明示的な mode を取る。
+//   - 'soft': deleted_at = now() で非表示化（過去明細との紐付け維持、復元可）
+//   - 'hard': 物理削除。work_menu_set_items の参照行を先に削除して FK 制約を回避する。
+//             セット側の position は再採番せず、UI 表示時に並び順は維持される。
+export type DeleteWorkMenuMode = "soft" | "hard";
+export type DeleteWorkMenuResult = { error: string } | { success: true };
+
+export async function deleteWorkMenu(
+  id: string,
+  mode: DeleteWorkMenuMode,
+): Promise<DeleteWorkMenuResult> {
+  if (!id) return { error: "ID が不正です。" };
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return;
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
-  // FK on delete restrict が work_menu_set_items から効くため、セットに含まれる場合は失敗する。
-  // エラーは無視せずユーザーに伝えるべきだが、form action はレスポンス返さないため、
-  // とりあえず revalidate で再表示すると上位で「使用中のため削除できませんでした」のような
-  // フィードバックは Step 後続で検討。今回はそのまま delete を試みる。
-  await supabase
+  if (mode === "soft") {
+    const { error } = await supabase
+      .from("work_menu_items")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", user.id);
+    if (error) return { error: `非表示化に失敗しました: ${error.message}` };
+    revalidatePath("/dashboard/work-menus");
+    revalidatePath("/dashboard/work-menu-sets");
+    return { success: true };
+  }
+
+  // hard: セット参照を先に削除してから本体を削除する。
+  // RLS により他人のセット行は触れない（owner_delete ポリシー）。
+  const { error: linkErr } = await supabase
+    .from("work_menu_set_items")
+    .delete()
+    .eq("menu_item_id", id);
+  if (linkErr) {
+    return { error: `セット参照の削除に失敗しました: ${linkErr.message}` };
+  }
+  const { error } = await supabase
     .from("work_menu_items")
     .delete()
     .eq("id", id)
     .eq("user_id", user.id);
+  if (error) return { error: `削除に失敗しました: ${error.message}` };
 
   revalidatePath("/dashboard/work-menus");
+  revalidatePath("/dashboard/work-menu-sets");
+  return { success: true };
+}
+
+// 使用回数の取得（クライアントから呼び出して警告ダイアログに使う）。
+export async function getWorkMenuUsageAction(
+  id: string,
+): Promise<{ error: string } | { success: true; usage: WorkMenuUsage }> {
+  if (!id) return { error: "ID が不正です。" };
+  try {
+    const usage = await countWorkMenuUsage(id);
+    return { success: true, usage };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// 非表示メニューを復元する。
+export async function restoreWorkMenu(
+  id: string,
+): Promise<{ error: string } | { success: true }> {
+  if (!id) return { error: "ID が不正です。" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { error } = await supabase
+    .from("work_menu_items")
+    .update({ deleted_at: null })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `復元に失敗しました: ${error.message}` };
+  revalidatePath("/dashboard/work-menus");
+  return { success: true };
 }
 
 export async function duplicateWorkMenu(formData: FormData) {

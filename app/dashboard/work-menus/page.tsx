@@ -8,16 +8,24 @@ export const metadata: Metadata = {
   title: "作業メニュー | HIIRAGI",
 };
 
-export default async function WorkMenusPage() {
+export default async function WorkMenusPage(
+  props: { searchParams: Promise<{ include_deleted?: string }> },
+) {
+  const sp = await props.searchParams;
+  const includeDeleted = sp.include_deleted === "1";
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data, error } = await supabase
+  // include_deleted=1 のとき deleted_at IS NULL のフィルタを外す。
+  let query = supabase
     .from("work_menu_items")
     .select("*")
-    .eq("user_id", user!.id)
+    .eq("user_id", user!.id);
+  if (!includeDeleted) query = query.is("deleted_at", null);
+  const { data, error } = await query
     .order("display_order", { ascending: true })
     .order("created_at", { ascending: true });
 
@@ -49,7 +57,7 @@ export default async function WorkMenusPage() {
       )}
 
       <div className="mt-4">
-        <WorkMenusTable rows={rows} />
+        <WorkMenusTable rows={rows} includeDeleted={includeDeleted} />
       </div>
     </>
   );

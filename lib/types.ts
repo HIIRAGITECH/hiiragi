@@ -87,6 +87,8 @@ export type OrderItem = {
 };
 
 // 作業メニュー（work_menu_items テーブルの 1 行）
+// deleted_at: ソフトデリート時刻。NULL = アクティブ、非 NULL = 非表示状態。
+//   非表示メニューは選択モーダルから除外され、一覧では「非表示を含める」ON 時に薄く表示。
 export type WorkMenuItem = {
   id: string;
   user_id: string;
@@ -100,17 +102,20 @@ export type WorkMenuItem = {
   tax_free: boolean;
   display_order: number;
   memo: string | null;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
 
 // 作業セット（work_menu_sets テーブルの 1 行）
+// deleted_at: ソフトデリート時刻（WorkMenuItem と同様）。
 export type WorkMenuSet = {
   id: string;
   user_id: string;
   name: string;
   memo: string | null;
   display_order: number;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 };
