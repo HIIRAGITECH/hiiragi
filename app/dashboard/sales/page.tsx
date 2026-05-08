@@ -7,6 +7,7 @@ import type {
   EstimateStatus,
   InvoiceStatus,
   OrderItem,
+  WorkItemCategory,
   WorkStatus,
 } from "@/lib/types";
 
@@ -67,18 +68,28 @@ export default async function SalesPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data, error } = await supabase
-    .from("orders")
-    .select(
-      "id, invoiced_at, paid_at, work_status, estimate_status, invoice_status, items, discount_amount, customer:customers(id,name)",
-    )
-    .eq("user_id", user!.id)
-    .in("invoice_status", ["請求済", "入金済"])
-    .gte("invoiced_at", start)
-    .lt("invoiced_at", end)
-    .order("invoiced_at", { ascending: true });
-
-  const rows = (data ?? []) as unknown as SalesRow[];
+  const [ordersRes, catsRes] = await Promise.all([
+    supabase
+      .from("orders")
+      .select(
+        "id, invoiced_at, paid_at, work_status, estimate_status, invoice_status, items, discount_amount, customer:customers(id,name)",
+      )
+      .eq("user_id", user!.id)
+      .in("invoice_status", ["請求済", "入金済"])
+      .gte("invoiced_at", start)
+      .lt("invoiced_at", end)
+      .order("invoiced_at", { ascending: true }),
+    // 業務カテゴリ一覧（削除済みも含む。集計画面では過去のカテゴリ名を保持して見せるため）
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
+  const error = ordersRes.error;
+  const rows = (ordersRes.data ?? []) as unknown as SalesRow[];
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
   // 売上計上ロジック
   // work_status='完了' なら売上、それ以外は前受金
@@ -96,6 +107,80 @@ export default async function SalesPage({
   const advanceTotal = enriched
     .filter((o) => !o.isComplete)
     .reduce((acc, o) => acc + o.total, 0);
+
+  // ====================
+  // 業務カテゴリ別 / 税区分別の小計
+  // ====================
+  // 売上計上対象（売上 + 前受金 = enriched 全体）の orders.items を走査して、
+  // item_category_id ごとの「税抜・値引き前」小計を集計する。
+  // 旧 type/tax_free しか持たない明細は legacy 名でフォールバック逆引き。
+  const categoryNameMap = new Map(allCategories.map((c) => [c.id, c]));
+  const categoryByName = new Map(allCategories.map((c) => [c.name, c]));
+
+  function legacyNameFor(item: OrderItem): string {
+    if (item.type === "shaken" && item.tax_free === true) return "車検法定費用";
+    if (item.type === "shaken") return "車検整備";
+    return "整備";
+  }
+
+  const subtotalsByCategoryId = new Map<string, number>();
+  let taxableBucket = 0;
+  let shakenNonTaxBucket = 0;
+  for (const o of rows) {
+    for (const it of o.items ?? []) {
+      const sub = Math.round((it.unit_price ?? 0) * (it.quantity ?? 0));
+      // 業務カテゴリの解決
+      let catId = it.item_category_id ?? "";
+      if (!catId) {
+        catId = categoryByName.get(legacyNameFor(it))?.id ?? "_orphan";
+      }
+      subtotalsByCategoryId.set(
+        catId,
+        (subtotalsByCategoryId.get(catId) ?? 0) + sub,
+      );
+      // 税区分の振り分け（item_category_id 経由ではなく明細自身の tax_category / 旧 tax_free を見る）
+      const isShakenNonTax =
+        it.tax_category === "shaken_non_tax" ||
+        (it.tax_category == null && it.tax_free === true);
+      if (isShakenNonTax) shakenNonTaxBucket += sub;
+      else taxableBucket += sub;
+    }
+  }
+
+  type CategoryRow = {
+    id: string;
+    name: string;
+    subtotal: number;
+    isDeleted: boolean;
+    isOrphan: boolean;
+  };
+  const categoryRows: CategoryRow[] = [];
+  const handled = new Set<string>();
+  for (const c of allCategories) {
+    const sub = subtotalsByCategoryId.get(c.id) ?? 0;
+    if (sub === 0) continue;
+    categoryRows.push({
+      id: c.id,
+      name: c.name,
+      subtotal: sub,
+      isDeleted: c.deleted_at !== null,
+      isOrphan: false,
+    });
+    handled.add(c.id);
+  }
+  for (const [k, v] of subtotalsByCategoryId) {
+    if (handled.has(k)) continue;
+    if (v === 0) continue;
+    const cat = categoryNameMap.get(k);
+    categoryRows.push({
+      id: k,
+      name: cat?.name ?? "（カテゴリ未分類）",
+      subtotal: v,
+      isDeleted: cat?.deleted_at != null,
+      isOrphan: !cat,
+    });
+  }
+  const categorySumTotal = categoryRows.reduce((a, r) => a + r.subtotal, 0);
 
   // 前後の月（ナビ用）
   const prev =
@@ -175,6 +260,100 @@ export default async function SalesPage({
           tone="zinc"
         />
       </div>
+
+      {/* カテゴリ別 / 税区分別 小計 */}
+      {enriched.length > 0 && (
+        <div className="mt-8 grid gap-4 lg:grid-cols-[2fr_1fr]">
+          {/* 業務カテゴリ別 */}
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="border-b border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-50">
+              業務カテゴリ別
+            </h3>
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {categoryRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={2}
+                      className="px-4 py-6 text-center text-xs text-zinc-500 dark:text-zinc-400"
+                    >
+                      対象明細がありません。
+                    </td>
+                  </tr>
+                ) : (
+                  categoryRows.map((c) => (
+                    <tr key={c.id}>
+                      <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
+                        {c.isDeleted || c.isOrphan
+                          ? `（削除済み）${c.name}`
+                          : c.name}
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
+                        {formatYen(c.subtotal)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              {categoryRows.length > 0 && (
+                <tfoot className="border-t border-zinc-200 dark:border-zinc-800">
+                  <tr>
+                    <td className="px-4 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                      合計
+                    </td>
+                    <td className="px-4 py-2 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                      {formatYen(categorySumTotal)}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+
+          {/* 税区分別 */}
+          <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <h3 className="border-b border-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-50">
+              税区分別
+            </h3>
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                <tr>
+                  <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
+                    課税対象
+                  </td>
+                  <td className="px-4 py-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
+                    {formatYen(taxableBucket)}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-4 py-2 text-zinc-900 dark:text-zinc-50">
+                    車検法定費用
+                  </td>
+                  <td className="px-4 py-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
+                    {formatYen(shakenNonTaxBucket)}
+                  </td>
+                </tr>
+              </tbody>
+              <tfoot className="border-t border-zinc-200 dark:border-zinc-800">
+                <tr>
+                  <td className="px-4 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    合計
+                  </td>
+                  <td className="px-4 py-2 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    {formatYen(taxableBucket + shakenNonTaxBucket)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {enriched.length > 0 && (
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          ※ カテゴリ別 / 税区分別の小計は税抜・値引き前の金額です。サマリーの売上 / 前受金（税込・値引き反映後）とは差があります。
+        </p>
+      )}
 
       {/* 明細 */}
       <div className="mt-8 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">

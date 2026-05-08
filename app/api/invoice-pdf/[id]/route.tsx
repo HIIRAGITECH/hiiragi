@@ -7,7 +7,12 @@ import {
 import { buildPdfFileName } from "@/lib/pdf/file-name";
 import { getShopAssetSignedUrl, getShopInfo } from "@/lib/shop";
 import { createClient } from "@/lib/supabase/server";
-import type { Customer, Order, Vehicle } from "@/lib/types";
+import type {
+  Customer,
+  Order,
+  Vehicle,
+  WorkItemCategory,
+} from "@/lib/types";
 
 // react-pdf は Node ランタイム必須（fontkit / pdfkit）。
 export const runtime = "nodejs";
@@ -52,25 +57,34 @@ export async function GET(
   }
   const order = orderData as Order;
 
-  const [{ data: customerData }, vehicleResult, shop] = await Promise.all([
-    supabase
-      .from("customers")
-      .select("*")
-      .eq("id", order.customer_id)
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    order.vehicle_id
-      ? supabase
-          .from("vehicles")
-          .select("*")
-          .eq("id", order.vehicle_id)
-          .eq("user_id", user.id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    getShopInfo(),
-  ]);
+  const [{ data: customerData }, vehicleResult, shop, catsRes] =
+    await Promise.all([
+      supabase
+        .from("customers")
+        .select("*")
+        .eq("id", order.customer_id)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      order.vehicle_id
+        ? supabase
+            .from("vehicles")
+            .select("*")
+            .eq("id", order.vehicle_id)
+            .eq("user_id", user.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      getShopInfo(),
+      // 業務カテゴリ: 削除済み含む全件（過去明細が削除済みカテゴリを参照していても表示できるように）
+      supabase
+        .from("work_item_categories")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("display_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]);
   const customer = customerData as Customer | null;
   const vehicle = vehicleResult.data as Vehicle | null;
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
   const [logoUrl, stampUrl] = await Promise.all([
     getShopAssetSignedUrl(shop.logo_path),
@@ -90,6 +104,7 @@ export async function GET(
       shop={shop}
       logoBuffer={logoBuffer}
       stampBuffer={stampBuffer}
+      allCategories={allCategories}
     />,
   );
 

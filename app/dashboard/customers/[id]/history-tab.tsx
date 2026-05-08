@@ -28,8 +28,8 @@ type HistoryRow = {
 
 function summarizeItems(items: OrderItem[]): string {
   if (!items || items.length === 0) return "—";
-  if (items.length === 1) return items[0].name;
-  return `${items[0].name} 他${items.length - 1}件`;
+  if (items.length === 1) return items[0].work_name;
+  return `${items[0].work_name} 他${items.length - 1}件`;
 }
 
 export default async function HistoryTab({

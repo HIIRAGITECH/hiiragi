@@ -3,7 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import DeleteButton from "@/lib/components/delete-button";
-import type { Customer, Order, Vehicle } from "@/lib/types";
+import type {
+  Customer,
+  Order,
+  Vehicle,
+  WorkItemCategory,
+  WorkMenuItem,
+  WorkMenuSet,
+} from "@/lib/types";
 import { formatDate } from "@/lib/format";
 import {
   archiveOrderFormAction,
@@ -38,7 +45,14 @@ export default async function OrderDetailPage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
-  const [{ data: customerData }, vehicleResult] = await Promise.all([
+  const [
+    { data: customerData },
+    vehicleResult,
+    menusRes,
+    setsRes,
+    setItemsRes,
+    catsRes,
+  ] = await Promise.all([
     supabase
       .from("customers")
       .select("*")
@@ -53,10 +67,59 @@ export default async function OrderDetailPage(
           .eq("user_id", user!.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // 明細フォームの「メニューから追加」picker 用（非表示は除外）
+    supabase
+      .from("work_menu_items")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    // 明細フォームの「セットから追加」picker 用（非表示セットは除外）
+    supabase
+      .from("work_menu_sets")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("work_menu_set_items")
+      .select("set_id, menu_item_id, position")
+      .order("position", { ascending: true }),
+    // 業務カテゴリ（明細フォームでセクション分け／カテゴリ選択に使う）
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   const customer = customerData as Customer | null;
   const vehicle = vehicleResult.data as Vehicle | null;
+  const allMenus = (menusRes.data ?? []) as WorkMenuItem[];
+  const allSets = (setsRes.data ?? []) as WorkMenuSet[];
+  const allSetItems = (setItemsRes.data ?? []) as {
+    set_id: string;
+    menu_item_id: string;
+    position: number;
+  }[];
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+  // セットを「中身を menu 解決済み配列で持つ」形にして渡す
+  const menuMap = new Map(allMenus.map((m) => [m.id, m]));
+  const allSetsWithItems = allSets.map((s) => ({
+    set: s,
+    items: allSetItems
+      .filter((l) => l.set_id === s.id)
+      .map((l) => {
+        const menu = menuMap.get(l.menu_item_id);
+        return menu ? { menu, position: l.position } : null;
+      })
+      .filter((x): x is { menu: WorkMenuItem; position: number } => !!x)
+      .sort((a, b) => a.position - b.position),
+  }));
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
@@ -201,6 +264,9 @@ export default async function OrderDetailPage(
             initialEstimateNotes={order.estimate_notes}
             initialInvoiceNotes={order.invoice_notes}
             initialPhotoFolderUrl={order.photo_folder_url}
+            allMenus={allMenus}
+            allSetsWithItems={allSetsWithItems}
+            allCategories={allCategories}
           />
         </div>
       </section>

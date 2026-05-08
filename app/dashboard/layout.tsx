@@ -45,6 +45,24 @@ export default async function DashboardLayout({
                 受注管理
               </Link>
               <Link
+                href="/dashboard/work-menus"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                作業メニュー
+              </Link>
+              <Link
+                href="/dashboard/work-menu-sets"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                作業セット
+              </Link>
+              <Link
+                href="/dashboard/work-item-categories"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                カテゴリ管理
+              </Link>
+              <Link
                 href="/dashboard/sales"
                 className="hover:text-zinc-900 dark:hover:text-zinc-50"
               >

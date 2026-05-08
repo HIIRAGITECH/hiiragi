@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getShopAssetSignedUrl, getShopInfo } from "@/lib/shop";
-import type { Customer, Order, Vehicle } from "@/lib/types";
+import type { Customer, Order, Vehicle, WorkItemCategory } from "@/lib/types";
 import PrintableDocument from "../printable-document";
 import PrintButton from "../print-button";
 import PdfButton from "../pdf-button";
@@ -31,24 +31,33 @@ export default async function EstimatePage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
-  const [{ data: customerData }, vehicleResult, shop] = await Promise.all([
-    supabase
-      .from("customers")
-      .select("*")
-      .eq("id", order.customer_id)
-      .eq("user_id", user!.id)
-      .maybeSingle(),
-    order.vehicle_id
-      ? supabase
-          .from("vehicles")
-          .select("*")
-          .eq("id", order.vehicle_id)
-          .eq("user_id", user!.id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    getShopInfo(),
-  ]);
+  const [{ data: customerData }, vehicleResult, shop, catsRes] =
+    await Promise.all([
+      supabase
+        .from("customers")
+        .select("*")
+        .eq("id", order.customer_id)
+        .eq("user_id", user!.id)
+        .maybeSingle(),
+      order.vehicle_id
+        ? supabase
+            .from("vehicles")
+            .select("*")
+            .eq("id", order.vehicle_id)
+            .eq("user_id", user!.id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      getShopInfo(),
+      // 業務カテゴリ: 削除済みも含めて全件（過去明細が削除済みカテゴリを参照しても表示できるように）
+      supabase
+        .from("work_item_categories")
+        .select("*")
+        .eq("user_id", user!.id)
+        .order("display_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]);
   const vehicleData = vehicleResult.data;
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
   const [logoUrl, stampUrl] = await Promise.all([
     getShopAssetSignedUrl(shop.logo_path),
@@ -87,6 +96,7 @@ export default async function EstimatePage(
           shop={shop}
           logoUrl={logoUrl}
           stampUrl={stampUrl}
+          allCategories={allCategories}
         />
       </div>
     </>

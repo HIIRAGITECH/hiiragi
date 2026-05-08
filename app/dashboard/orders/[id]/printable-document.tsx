@@ -5,8 +5,10 @@ import type {
   OrderItem,
   ShopInfo,
   Vehicle,
+  WorkItemCategory,
 } from "@/lib/types";
 import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import { groupItemsByCategory } from "@/lib/orders/sections";
 import { formatDate, formatYen } from "@/lib/format";
 
 function hasBankInfo(b: BankInfo | undefined): b is BankInfo {
@@ -32,6 +34,8 @@ type Props = {
   // 既存呼び出し側との後方互換のため Props 型には残すが、引数で destructure はしない。
   logoUrl?: string | null;
   stampUrl: string | null;
+  // 業務カテゴリ一覧（display_order 昇順、削除済みも含む）。
+  allCategories: WorkItemCategory[];
 };
 
 export default function PrintableDocument({
@@ -41,6 +45,7 @@ export default function PrintableDocument({
   vehicle,
   shop,
   stampUrl,
+  allCategories,
 }: Props) {
   const allItems = order.items ?? [];
   const totals = calculateTotals(
@@ -48,13 +53,11 @@ export default function PrintableDocument({
     order.discount_amount,
     order.deposit_amount,
   );
-  const normalItems = allItems.filter((i) => i.type !== "shaken");
-  const shakenTaxableItems = allItems.filter(
-    (i) => i.type === "shaken" && !i.tax_free,
-  );
-  const shakenTaxFreeItems = allItems.filter(
-    (i) => i.type === "shaken" && i.tax_free === true,
-  );
+  const sections = groupItemsByCategory(allItems, allCategories);
+  // 集計表用の 2 区分小計
+  const taxableSubtotalAll =
+    totals.sections.normal.subtotal + totals.sections.shakenTaxable.subtotal;
+  const shakenNonTaxSubtotal = totals.sections.shakenTaxFree.subtotal;
   const title = type === "estimate" ? "見積書" : "請求書";
   const today = new Date().toISOString().slice(0, 10);
 
@@ -161,55 +164,42 @@ export default function PrintableDocument({
         </div>
       </section>
 
-      {/* 明細（セクション別）*/}
+      {/* 明細: 業務カテゴリ単位で分割。display_order 昇順、orphan 末尾。
+          showBreakdown は税区分で判定（shaken_non_tax のみ単価表示、それ以外は工賃/部品代の内訳表示）。 */}
       {allItems.length === 0 ? (
         <div className="mb-6 border-y-2 border-black px-2 py-6 text-center text-xs text-zinc-500">
           明細がありません。
         </div>
       ) : (
         <>
-          {normalItems.length > 0 && (
-            <ItemsSection
-              title="整備費用"
-              items={normalItems}
-              showBreakdown
-            />
-          )}
-          {shakenTaxableItems.length > 0 && (
-            <ItemsSection
-              title="車検費用（課税）"
-              items={shakenTaxableItems}
-              showBreakdown
-            />
-          )}
-          {shakenTaxFreeItems.length > 0 && (
-            <ItemsSection
-              title="車検費用（非課税）"
-              items={shakenTaxFreeItems}
-              showBreakdown={false}
-            />
-          )}
+          {sections.map((s) => {
+            const isShakenNonTax = s.items.every(
+              (it) => it.tax_category === "shaken_non_tax",
+            );
+            return (
+              <ItemsSection
+                key={s.key}
+                title={s.isDeleted ? `（削除済み）${s.name}` : s.name}
+                items={s.items}
+                showBreakdown={!isShakenNonTax}
+              />
+            );
+          })}
         </>
       )}
 
-      {/* 合計 */}
+      {/* 合計: 税区分2分類でシンプルに集計 */}
       <div className="mb-6 ml-auto w-72 text-xs">
-        {totals.sections.normal.subtotal > 0 && (
+        {taxableSubtotalAll > 0 && (
           <TotalsRow
-            label="整備小計"
-            value={formatYen(totals.sections.normal.subtotal)}
+            label="整備等小計"
+            value={formatYen(taxableSubtotalAll)}
           />
         )}
-        {totals.sections.shakenTaxable.subtotal > 0 && (
+        {shakenNonTaxSubtotal > 0 && (
           <TotalsRow
-            label="車検課税小計"
-            value={formatYen(totals.sections.shakenTaxable.subtotal)}
-          />
-        )}
-        {totals.sections.shakenTaxFree.subtotal > 0 && (
-          <TotalsRow
-            label="車検非課税小計"
-            value={formatYen(totals.sections.shakenTaxFree.subtotal)}
+            label="車検法定費用小計"
+            value={formatYen(shakenNonTaxSubtotal)}
           />
         )}
         {totals.discount > 0 && (
@@ -386,33 +376,56 @@ function ItemsSection({
           </tr>
         </thead>
         <tbody>
-          {items.map((it, i) => (
-            <tr key={i} className="border-b border-zinc-500 align-top">
-              <td className="px-2 py-1 break-words">{it.name}</td>
-              <td className="px-2 py-1 text-right">{it.quantity}</td>
-              {showBreakdown ? (
-                <>
-                  <td className="px-2 py-1 text-right">
-                    {it.labor_cost !== undefined
-                      ? formatYen(it.labor_cost)
-                      : "—"}
-                  </td>
-                  <td className="px-2 py-1 text-right">
-                    {it.parts_cost !== undefined
-                      ? formatYen(it.parts_cost)
-                      : "—"}
-                  </td>
-                </>
-              ) : (
-                <td className="px-2 py-1 text-right">
-                  {formatYen(it.unit_price)}
+          {items.map((it, i) => {
+            const partName =
+              it.part_name && it.part_name.trim() !== ""
+                ? it.part_name
+                : null;
+            const note =
+              it.note && it.note.trim() !== "" ? it.note : null;
+            // 数量・金額列を最上段（work_name 行）に揃えるため、各 td に明示的に
+            // align-top を付ける（vertical-align は td 単位のため tr 上では効かない）。
+            return (
+              <tr
+                key={i}
+                className="border-b border-zinc-500 [&>td]:align-top"
+              >
+                <td className="px-2 py-1 break-words">
+                  <div>{it.work_name}</div>
+                  {partName && (
+                    <div className="ml-3 break-words">{partName}</div>
+                  )}
+                  {note && (
+                    <div className="ml-3 break-words text-[10px] text-zinc-500">
+                      ※{note}
+                    </div>
+                  )}
                 </td>
-              )}
-              <td className="px-2 py-1 text-right">
-                {formatYen(rowSubtotal(it))}
-              </td>
-            </tr>
-          ))}
+                <td className="px-2 py-1 text-right">{it.quantity}</td>
+                {showBreakdown ? (
+                  <>
+                    <td className="px-2 py-1 text-right">
+                      {it.labor_cost !== undefined
+                        ? formatYen(it.labor_cost)
+                        : "—"}
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      {it.parts_cost !== undefined
+                        ? formatYen(it.parts_cost)
+                        : "—"}
+                    </td>
+                  </>
+                ) : (
+                  <td className="px-2 py-1 text-right">
+                    {formatYen(it.unit_price)}
+                  </td>
+                )}
+                <td className="px-2 py-1 text-right">
+                  {formatYen(rowSubtotal(it))}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>
