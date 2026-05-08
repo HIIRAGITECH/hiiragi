@@ -10,6 +10,7 @@ import {
 } from "@react-pdf/renderer";
 import { formatDate, formatYen } from "@/lib/format";
 import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import { groupItemsByCategory } from "@/lib/orders/sections";
 import type {
   BankInfo,
   Customer,
@@ -17,6 +18,7 @@ import type {
   OrderItem,
   ShopInfo,
   Vehicle,
+  WorkItemCategory,
 } from "@/lib/types";
 import { registerJapaneseFont } from "./fonts";
 
@@ -33,6 +35,9 @@ interface InvoiceDocumentProps {
   // 事前 fetch 済みのバイナリ。fail-soft（取得失敗時は null で省略表示）。
   logoBuffer: Buffer | null;
   stampBuffer: Buffer | null;
+  // 業務カテゴリ一覧（display_order 昇順、削除済みも含む）。
+  // 過去明細が削除済みカテゴリを参照していても表示できるよう全件渡す前提。
+  allCategories: WorkItemCategory[];
 }
 
 const COLORS = {
@@ -311,11 +316,6 @@ const styles = StyleSheet.create({
   notesBody: { fontSize: 9 },
 });
 
-function categorize(it: OrderItem): "maintenance" | "shakenTaxable" | "shakenTaxFree" {
-  if (it.type === "shaken") return it.tax_free ? "shakenTaxFree" : "shakenTaxable";
-  return "maintenance";
-}
-
 function hasBankInfo(b: BankInfo | undefined): b is BankInfo {
   if (!b) return false;
   return [b.bank_name, b.branch_name, b.account_number, b.account_holder].some(
@@ -439,6 +439,7 @@ export function InvoiceDocument({
   shop,
   logoBuffer,
   stampBuffer,
+  allCategories,
 }: InvoiceDocumentProps) {
   const allItems = order.items ?? [];
   const totals = calculateTotals(
@@ -446,6 +447,12 @@ export function InvoiceDocument({
     order.discount_amount,
     order.deposit_amount,
   );
+  // 業務カテゴリ単位のセクション（display_order 順、orphan 末尾）。
+  const sections = groupItemsByCategory(allItems, allCategories);
+  // 集計表用の 2 区分小計（旧 calculateTotals の値を流用、math は変わらない）。
+  const taxableSubtotalAll =
+    totals.sections.normal.subtotal + totals.sections.shakenTaxable.subtotal;
+  const shakenNonTaxSubtotal = totals.sections.shakenTaxFree.subtotal;
 
   const title = documentType === "estimate" ? "見積書" : "請求書";
   const lead =
@@ -461,16 +468,6 @@ export function InvoiceDocument({
       ? totals.balance
       : totals.total;
   const today = new Date().toISOString().slice(0, 10);
-
-  const maintenanceItems = allItems.filter(
-    (i) => categorize(i) === "maintenance",
-  );
-  const shakenTaxableItems = allItems.filter(
-    (i) => categorize(i) === "shakenTaxable",
-  );
-  const shakenTaxFreeItems = allItems.filter(
-    (i) => categorize(i) === "shakenTaxFree",
-  );
 
   const bank = shop.bank_info;
   const showBank = documentType === "invoice" && hasBankInfo(bank);
@@ -602,44 +599,33 @@ export function InvoiceDocument({
           </View>
         </View>
 
-        {/* 明細 */}
+        {/* 明細: 業務カテゴリ単位で分割。display_order 昇順、orphan 末尾。 */}
         {allItems.length === 0 ? (
           <Text style={styles.emptyMessage}>明細がありません。</Text>
         ) : (
           <>
-            {maintenanceItems.length > 0 && (
-              <ItemsSection title="整備費用" items={maintenanceItems} />
-            )}
-            {shakenTaxableItems.length > 0 && (
-              <ItemsSection title="車検費用（課税）" items={shakenTaxableItems} />
-            )}
-            {shakenTaxFreeItems.length > 0 && (
+            {sections.map((s) => (
               <ItemsSection
-                title="車検費用（非課税）"
-                items={shakenTaxFreeItems}
+                key={s.key}
+                title={s.isDeleted ? `（削除済み）${s.name}` : s.name}
+                items={s.items}
               />
-            )}
+            ))}
           </>
         )}
 
-        {/* 合計 */}
+        {/* 合計: 税区分2分類でシンプルに集計 */}
         <View style={styles.totalsWrap}>
-          {totals.sections.normal.subtotal > 0 && (
+          {taxableSubtotalAll > 0 && (
             <TotalsRow
-              label="整備小計"
-              value={formatYen(totals.sections.normal.subtotal)}
+              label="整備等小計"
+              value={formatYen(taxableSubtotalAll)}
             />
           )}
-          {totals.sections.shakenTaxable.subtotal > 0 && (
+          {shakenNonTaxSubtotal > 0 && (
             <TotalsRow
-              label="車検課税小計"
-              value={formatYen(totals.sections.shakenTaxable.subtotal)}
-            />
-          )}
-          {totals.sections.shakenTaxFree.subtotal > 0 && (
-            <TotalsRow
-              label="車検非課税小計"
-              value={formatYen(totals.sections.shakenTaxFree.subtotal)}
+              label="車検法定費用小計"
+              value={formatYen(shakenNonTaxSubtotal)}
             />
           )}
           {totals.discount > 0 && (
