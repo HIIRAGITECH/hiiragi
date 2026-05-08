@@ -48,21 +48,80 @@ export type EstimateStatus = (typeof ESTIMATE_STATUSES)[number];
 export const INVOICE_STATUSES = ["未請求", "請求済", "入金済"] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
+// 作業メニューカテゴリ。明細マスター (work_menu_items) と OrderItem で共有する。
+//   normal           = 通常（整備）
+//   shaken           = 車検（課税）
+//   shaken_tax_free  = 車検（非課税）
+export const WORK_CATEGORIES = [
+  "normal",
+  "shaken",
+  "shaken_tax_free",
+] as const;
+export type WorkCategory = (typeof WORK_CATEGORIES)[number];
+
+// 受注明細（orders.items jsonb 配列の 1 要素）
+//
 // type 省略時は 'normal'、tax_free 省略時は false として扱う。
-// labor_cost / parts_cost は1個あたりの工賃・部品代。両方省略時は unit_price のみが有効な
-// 既存データ（単価のみの明細）として扱う。両方を利用する場合は、UI 側で
+// labor_cost / parts_cost は 1 個あたりの工賃・部品代。両方省略時は unit_price のみが
+// 有効な既存データ（単価のみの明細）として扱う。両方を利用する場合は、UI 側で
 //   unit_price = (labor_cost ?? 0) + (parts_cost ?? 0)
 // が成立するよう保持する。この不変条件を型では強制しない（既存データとの後方互換のため）。
 // 金額計算 (calculateTotals / rowSubtotal) は unit_price のみを参照するので、
 // labor_cost / parts_cost は表示と編集用途のみ。
+//
+// 2026-05 のスキーマ更新で:
+//   - name → work_name にリネーム（DB 側 jsonb キーも一括 rename 済み）
+//   - part_name / note / source_menu_id を追加
+//     (source_menu_id は work_menu_items への参照。jsonb 内のため DB レベル FK は無し)
 export type OrderItem = {
-  name: string;
+  work_name: string;
+  part_name?: string | null;
+  note?: string | null;
+  source_menu_id?: string | null;
   quantity: number;
   unit_price: number;
   type?: "normal" | "shaken";
   tax_free?: boolean;
   labor_cost?: number;
   parts_cost?: number;
+};
+
+// 作業メニュー（work_menu_items テーブルの 1 行）
+export type WorkMenuItem = {
+  id: string;
+  user_id: string;
+  work_name: string;
+  part_name: string | null;
+  category: WorkCategory;
+  default_quantity: number;
+  default_unit_price: number;
+  default_labor_cost: number;
+  default_parts_cost: number;
+  tax_free: boolean;
+  display_order: number;
+  memo: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 作業セット（work_menu_sets テーブルの 1 行）
+export type WorkMenuSet = {
+  id: string;
+  user_id: string;
+  name: string;
+  memo: string | null;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+// 作業セットの中身（work_menu_set_items テーブルの 1 行）
+export type WorkMenuSetItem = {
+  id: string;
+  set_id: string;
+  menu_item_id: string;
+  position: number;
+  created_at: string;
 };
 
 export type Order = {

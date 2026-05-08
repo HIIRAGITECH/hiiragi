@@ -285,3 +285,121 @@ CREATE POLICY orders_owner_update ON orders
                               WITH CHECK (user_id = auth.uid());
 CREATE POLICY orders_owner_delete ON orders
   FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- =============================================================
+-- 作業メニュー（マスター）と作業セット（テンプレート）2026-05 追加
+-- =============================================================
+
+CREATE TABLE IF NOT EXISTS work_menu_items (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  work_name           text NOT NULL,
+  part_name           text,
+  category            text NOT NULL CHECK (category IN ('normal','shaken','shaken_tax_free')),
+  default_quantity    numeric NOT NULL DEFAULT 1,
+  default_unit_price  numeric NOT NULL DEFAULT 0,
+  default_labor_cost  numeric NOT NULL DEFAULT 0,
+  default_parts_cost  numeric NOT NULL DEFAULT 0,
+  tax_free            boolean NOT NULL DEFAULT false,
+  display_order       integer NOT NULL DEFAULT 0,
+  memo                text,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS work_menu_items_user_order_idx
+  ON work_menu_items(user_id, display_order);
+CREATE INDEX IF NOT EXISTS work_menu_items_user_category_idx
+  ON work_menu_items(user_id, category);
+
+DROP TRIGGER IF EXISTS work_menu_items_touch_updated_at ON work_menu_items;
+CREATE TRIGGER work_menu_items_touch_updated_at
+  BEFORE UPDATE ON work_menu_items
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+ALTER TABLE work_menu_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS work_menu_items_owner_select ON work_menu_items;
+DROP POLICY IF EXISTS work_menu_items_owner_insert ON work_menu_items;
+DROP POLICY IF EXISTS work_menu_items_owner_update ON work_menu_items;
+DROP POLICY IF EXISTS work_menu_items_owner_delete ON work_menu_items;
+CREATE POLICY work_menu_items_owner_select ON work_menu_items
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY work_menu_items_owner_insert ON work_menu_items
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY work_menu_items_owner_update ON work_menu_items
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
+                              WITH CHECK (user_id = auth.uid());
+CREATE POLICY work_menu_items_owner_delete ON work_menu_items
+  FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+
+CREATE TABLE IF NOT EXISTS work_menu_sets (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id        uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name           text NOT NULL,
+  memo           text,
+  display_order  integer NOT NULL DEFAULT 0,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  updated_at     timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS work_menu_sets_user_order_idx
+  ON work_menu_sets(user_id, display_order);
+
+DROP TRIGGER IF EXISTS work_menu_sets_touch_updated_at ON work_menu_sets;
+CREATE TRIGGER work_menu_sets_touch_updated_at
+  BEFORE UPDATE ON work_menu_sets
+  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
+
+ALTER TABLE work_menu_sets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS work_menu_sets_owner_select ON work_menu_sets;
+DROP POLICY IF EXISTS work_menu_sets_owner_insert ON work_menu_sets;
+DROP POLICY IF EXISTS work_menu_sets_owner_update ON work_menu_sets;
+DROP POLICY IF EXISTS work_menu_sets_owner_delete ON work_menu_sets;
+CREATE POLICY work_menu_sets_owner_select ON work_menu_sets
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY work_menu_sets_owner_insert ON work_menu_sets
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY work_menu_sets_owner_update ON work_menu_sets
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
+                              WITH CHECK (user_id = auth.uid());
+CREATE POLICY work_menu_sets_owner_delete ON work_menu_sets
+  FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+
+CREATE TABLE IF NOT EXISTS work_menu_set_items (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  set_id        uuid NOT NULL REFERENCES work_menu_sets(id)  ON DELETE CASCADE,
+  menu_item_id  uuid NOT NULL REFERENCES work_menu_items(id) ON DELETE RESTRICT,
+  position      integer NOT NULL DEFAULT 0,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS work_menu_set_items_set_pos_idx
+  ON work_menu_set_items(set_id, position);
+
+ALTER TABLE work_menu_set_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS work_menu_set_items_owner_select ON work_menu_set_items;
+DROP POLICY IF EXISTS work_menu_set_items_owner_insert ON work_menu_set_items;
+DROP POLICY IF EXISTS work_menu_set_items_owner_update ON work_menu_set_items;
+DROP POLICY IF EXISTS work_menu_set_items_owner_delete ON work_menu_set_items;
+CREATE POLICY work_menu_set_items_owner_select ON work_menu_set_items
+  FOR SELECT TO authenticated USING (
+    EXISTS (SELECT 1 FROM work_menu_sets s
+            WHERE s.id = set_id AND s.user_id = auth.uid())
+  );
+CREATE POLICY work_menu_set_items_owner_insert ON work_menu_set_items
+  FOR INSERT TO authenticated WITH CHECK (
+    EXISTS (SELECT 1 FROM work_menu_sets s
+            WHERE s.id = set_id AND s.user_id = auth.uid())
+  );
+CREATE POLICY work_menu_set_items_owner_update ON work_menu_set_items
+  FOR UPDATE TO authenticated USING (
+    EXISTS (SELECT 1 FROM work_menu_sets s
+            WHERE s.id = set_id AND s.user_id = auth.uid())
+  ) WITH CHECK (
+    EXISTS (SELECT 1 FROM work_menu_sets s
+            WHERE s.id = set_id AND s.user_id = auth.uid())
+  );
+CREATE POLICY work_menu_set_items_owner_delete ON work_menu_set_items
+  FOR DELETE TO authenticated USING (
+    EXISTS (SELECT 1 FROM work_menu_sets s
+            WHERE s.id = set_id AND s.user_id = auth.uid())
+  );

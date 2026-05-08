@@ -388,7 +388,7 @@ function ItemsSection({
         <tbody>
           {items.map((it, i) => (
             <tr key={i} className="border-b border-zinc-500 align-top">
-              <td className="px-2 py-1 break-words">{it.name}</td>
+              <td className="px-2 py-1 break-words">{it.work_name}</td>
               <td className="px-2 py-1 text-right">{it.quantity}</td>
               {showBreakdown ? (
                 <>

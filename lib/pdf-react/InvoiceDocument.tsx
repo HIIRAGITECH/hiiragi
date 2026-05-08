@@ -354,7 +354,7 @@ function ItemsSection({ title, items }: ItemsSectionProps) {
             style={styles.tableRow}
             wrap={false}
           >
-            <Text style={styles.colName}>{sanitizeText(it.name)}</Text>
+            <Text style={styles.colName}>{sanitizeText(it.work_name)}</Text>
             <Text style={styles.colQty}>{it.quantity}</Text>
             {showBreakdown ? (
               <>

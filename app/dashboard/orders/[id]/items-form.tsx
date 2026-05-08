@@ -34,7 +34,7 @@ function hasBreakdown(r: ItemRow): boolean {
 
 function toRow(i: OrderItem): ItemRow {
   return {
-    name: i.name,
+    name: i.work_name,
     quantity: String(i.quantity),
     labor_cost: i.labor_cost !== undefined ? String(i.labor_cost) : "",
     parts_cost: i.parts_cost !== undefined ? String(i.parts_cost) : "",
@@ -48,7 +48,7 @@ function toItem(r: ItemRow): OrderItem {
     const labor = Number(r.labor_cost) || 0;
     const parts = Number(r.parts_cost) || 0;
     const item: OrderItem = {
-      name: r.name,
+      work_name: r.name,
       quantity,
       unit_price: labor + parts,
     };
@@ -57,7 +57,7 @@ function toItem(r: ItemRow): OrderItem {
     return item;
   }
   return {
-    name: r.name,
+    work_name: r.name,
     quantity,
     unit_price: Number(r.unit_price) || 0,
   };
@@ -159,7 +159,7 @@ export default function ItemsForm({
     Number(deposit) || 0,
   );
 
-  const itemsToSave = allItems.filter((i) => i.name.trim() !== "");
+  const itemsToSave = allItems.filter((i) => i.work_name.trim() !== "");
 
   const shakenFilledCount =
     shakenTaxableRows.filter((r) => r.name.trim() !== "").length +

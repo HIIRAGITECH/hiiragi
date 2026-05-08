@@ -132,14 +132,15 @@ function parseItems(json: string): OrderItem[] | null {
     if (!Array.isArray(raw)) return null;
     const items: OrderItem[] = [];
     for (const r of raw) {
-      const name = typeof r?.name === "string" ? r.name.trim() : "";
+      const work_name =
+        typeof r?.work_name === "string" ? r.work_name.trim() : "";
       const quantity = Number(r?.quantity);
       const unit_price = Number(r?.unit_price);
-      if (!name) continue; // 品名空の行はスキップ
+      if (!work_name) continue; // 品名空の行はスキップ
       if (!Number.isFinite(quantity) || quantity < 0) return null;
       if (!Number.isFinite(unit_price) || unit_price < 0) return null;
       const item: OrderItem = {
-        name,
+        work_name,
         quantity,
         unit_price: Math.round(unit_price),
       };
@@ -156,6 +157,21 @@ function parseItems(json: string): OrderItem[] | null {
         const n = Number(r.parts_cost);
         if (!Number.isFinite(n) || n < 0) return null;
         item.parts_cost = Math.round(n);
+      }
+      // 2026-05 追加フィールド: 入力 UI が将来生やしたときに保存される値を取りこぼさない
+      // ようパススルーする（trim、空文字は null）。Step 1 時点で UI からは入らないが
+      // インポート/移行ツール経由で投入されるケースに備える。
+      if (typeof r?.part_name === "string") {
+        const v = r.part_name.trim();
+        item.part_name = v === "" ? null : v;
+      }
+      if (typeof r?.note === "string") {
+        const v = r.note.trim();
+        item.note = v === "" ? null : v;
+      }
+      if (typeof r?.source_menu_id === "string") {
+        const v = r.source_menu_id.trim();
+        item.source_menu_id = v === "" ? null : v;
       }
       items.push(item);
     }
