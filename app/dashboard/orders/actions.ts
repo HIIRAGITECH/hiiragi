@@ -426,6 +426,10 @@ export async function updateInvoiceStatus(
   revalidatePath("/dashboard/orders");
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath("/dashboard/sales");
+  // 入金管理（ダッシュボード + 未回収一覧）も再生成。請求済 → 入金済 への変更で
+  // 未回収一覧から行が消える、ダッシュボードの件数バッジが更新される。
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/payments");
   return undefined;
 }
 
