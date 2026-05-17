@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { calculateTotals } from "@/lib/orders/totals";
+import { TAX_RATE, calculateTotals } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
 import type {
   EstimateStatus,
@@ -197,6 +197,18 @@ export default async function SalesPage({
   }
   const categorySumTotal = categoryRows.reduce((a, r) => a + r.subtotal, 0);
 
+  // ====================
+  // 消費税 / 請求合計（税込）
+  // ====================
+  // 値引きは業務的に課税対象（整備等）へ適用するのが妥当。
+  // 車検法定費用（自賠責・重量税・印紙代など）は値引きの対象外。
+  // discountTotal を taxableBucket からのみ控除し、その 10% を消費税とする。
+  // 端数は受注詳細の calculateTotals と同じ floor 揃え。
+  const taxableAfterDiscount = Math.max(0, taxableBucket - discountTotal);
+  const consumptionTax = Math.floor(taxableAfterDiscount * TAX_RATE);
+  // 請求合計 = 売上 + 前受金 + 消費税。サマリーカードの見た目通り足し算が成立する。
+  const totalWithTax = salesTotal + advanceTotal + consumptionTax;
+
   // 前後の月（ナビ用）
   const prev =
     month === 1
@@ -254,25 +266,31 @@ export default async function SalesPage({
         </p>
       )}
 
-      {/* サマリー */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      {/* サマリー: モバイル 2x2 / lg 以上で 1x4 */}
+      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <SummaryCard
           label="売上"
-          subLabel="作業完了 + 請求済"
+          subLabel="作業完了 + 請求済（税抜）"
           value={salesTotal}
           tone="green"
         />
         <SummaryCard
           label="前受金"
-          subLabel="作業未完了 + 請求済"
+          subLabel="作業未完了 + 請求済（税抜）"
           value={advanceTotal}
           tone="amber"
         />
         <SummaryCard
-          label="合計"
-          subLabel={`${enriched.length} 件`}
-          value={salesTotal + advanceTotal}
+          label="消費税"
+          subLabel="税率10%"
+          value={consumptionTax}
           tone="zinc"
+        />
+        <SummaryCard
+          label="請求合計"
+          subLabel={`税込 ・ ${enriched.length}件`}
+          value={totalWithTax}
+          tone="sky"
         />
       </div>
 
@@ -375,13 +393,41 @@ export default async function SalesPage({
                   </td>
                 </tr>
               </tbody>
-              <tfoot className="border-t border-zinc-200 dark:border-zinc-800">
-                <tr>
+              <tfoot>
+                {discountTotal > 0 && (
+                  <>
+                    <tr className="border-t border-zinc-200 dark:border-zinc-800">
+                      <td className="px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300">
+                        小計
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                        {formatYen(taxableBucket + shakenNonTaxBucket)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300">
+                        値引き合計
+                      </td>
+                      <td className="px-4 py-2 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                        − {formatYen(discountTotal)}
+                      </td>
+                    </tr>
+                  </>
+                )}
+                <tr
+                  className={
+                    discountTotal > 0
+                      ? "border-t-2 border-zinc-900 dark:border-zinc-50"
+                      : "border-t border-zinc-200 dark:border-zinc-800"
+                  }
+                >
                   <td className="px-4 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                     合計
                   </td>
                   <td className="px-4 py-2 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                    {formatYen(taxableBucket + shakenNonTaxBucket)}
+                    {formatYen(
+                      taxableBucket + shakenNonTaxBucket - discountTotal,
+                    )}
                   </td>
                 </tr>
               </tfoot>
@@ -392,7 +438,7 @@ export default async function SalesPage({
 
       {enriched.length > 0 && (
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          ※ いずれも税抜の金額です。業務カテゴリ別の合計は値引きを反映済みで、サマリー（売上＋前受金）と一致します。税区分別の小計は値引き前のため差があります。
+          ※ 業務カテゴリ別・税区分別はいずれも税抜の金額で、値引きを反映した「合計」がサマリーの「売上 + 前受金」と一致します。税込の請求額はサマリーの「請求合計」をご確認ください。
         </p>
       )}
 
@@ -479,17 +525,19 @@ function SummaryCard({
   label: string;
   subLabel: string;
   value: number;
-  tone: "green" | "amber" | "zinc";
+  tone: "green" | "amber" | "zinc" | "sky";
 }) {
   const toneClass = {
     green: "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/20",
     amber: "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20",
     zinc: "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900",
+    sky: "border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/20",
   }[tone];
   const labelTone = {
     green: "text-green-700 dark:text-green-300",
     amber: "text-amber-700 dark:text-amber-300",
     zinc: "text-zinc-600 dark:text-zinc-400",
+    sky: "text-sky-700 dark:text-sky-300",
   }[tone];
 
   return (
