@@ -132,9 +132,16 @@ export default async function SalesPage({
   const subtotalsByCategoryId = new Map<string, number>();
   let taxableBucket = 0;
   let shakenNonTaxBucket = 0;
+  // 業務カテゴリ別「合計」をサマリーカード（売上 + 前受金）と一致させるための値引き合計。
+  // 受注ごとに min(items合計, max(0, discount_amount)) を取って積む。
+  // → enriched 側で使う Math.max(0, items合計 − discount) と同じ控除量になり、
+  //   categorySumTotal − discountTotal == salesTotal + advanceTotal が成立する。
+  let discountTotal = 0;
   for (const o of rows) {
+    let orderItemsSum = 0;
     for (const it of o.items ?? []) {
       const sub = Math.round((it.unit_price ?? 0) * (it.quantity ?? 0));
+      orderItemsSum += sub;
       // 業務カテゴリの解決
       let catId = it.item_category_id ?? "";
       if (!catId) {
@@ -151,6 +158,8 @@ export default async function SalesPage({
       if (isShakenNonTax) shakenNonTaxBucket += sub;
       else taxableBucket += sub;
     }
+    const rawDiscount = Math.max(0, o.discount_amount ?? 0);
+    discountTotal += Math.min(orderItemsSum, rawDiscount);
   }
 
   type CategoryRow = {
@@ -302,13 +311,39 @@ export default async function SalesPage({
                 )}
               </tbody>
               {categoryRows.length > 0 && (
-                <tfoot className="border-t border-zinc-200 dark:border-zinc-800">
-                  <tr>
+                <tfoot>
+                  {discountTotal > 0 && (
+                    <>
+                      <tr className="border-t border-zinc-200 dark:border-zinc-800">
+                        <td className="px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300">
+                          小計
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                          {formatYen(categorySumTotal)}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="px-4 py-2 text-sm text-zinc-700 dark:text-zinc-300">
+                          値引き合計
+                        </td>
+                        <td className="px-4 py-2 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                          − {formatYen(discountTotal)}
+                        </td>
+                      </tr>
+                    </>
+                  )}
+                  <tr
+                    className={
+                      discountTotal > 0
+                        ? "border-t-2 border-zinc-900 dark:border-zinc-50"
+                        : "border-t border-zinc-200 dark:border-zinc-800"
+                    }
+                  >
                     <td className="px-4 py-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
                       合計
                     </td>
                     <td className="px-4 py-2 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                      {formatYen(categorySumTotal)}
+                      {formatYen(categorySumTotal - discountTotal)}
                     </td>
                   </tr>
                 </tfoot>
@@ -357,7 +392,7 @@ export default async function SalesPage({
 
       {enriched.length > 0 && (
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          ※ いずれも税抜の金額です。カテゴリ別 / 税区分別の小計は値引き前、サマリーの売上 / 前受金は値引き反映後のため差があります。
+          ※ いずれも税抜の金額です。業務カテゴリ別の合計は値引きを反映済みで、サマリー（売上＋前受金）と一致します。税区分別の小計は値引き前のため差があります。
         </p>
       )}
 
