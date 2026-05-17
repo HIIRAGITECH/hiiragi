@@ -45,6 +45,12 @@ export default async function DashboardLayout({
                 受注管理
               </Link>
               <Link
+                href="/dashboard/payments"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                入金管理
+              </Link>
+              <Link
                 href="/dashboard/work-menus"
                 className="hover:text-zinc-900 dark:hover:text-zinc-50"
               >
