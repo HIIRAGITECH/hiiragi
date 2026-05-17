@@ -41,7 +41,7 @@ export default async function ArchivePage({
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, reception_date, work_status, estimate_status, invoice_status, invoiced_at, paid_at, is_archived, notes, items, discount_amount, customer:customers(id,name,name_kana), vehicle:vehicles(id,maker,model,plate_number)",
+      "id, reception_date, work_status, estimate_status, invoice_status, invoiced_at, paid_at, payment_due_date, invoice_subject, is_archived, notes, items, discount_amount, customer:customers(id,name,name_kana), vehicle:vehicles(id,maker,model,plate_number)",
     )
     .eq("user_id", user!.id)
     .eq("is_archived", true)

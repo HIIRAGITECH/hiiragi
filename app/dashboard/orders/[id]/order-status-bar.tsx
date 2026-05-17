@@ -31,6 +31,7 @@ type Props = {
   workStatus: WorkStatus;
   estimateStatus: EstimateStatus;
   invoiceStatus: InvoiceStatus;
+  invoiceSubject: string | null;
 };
 
 export default function OrderStatusBar({
@@ -38,11 +39,17 @@ export default function OrderStatusBar({
   workStatus,
   estimateStatus,
   invoiceStatus,
+  invoiceSubject,
 }: Props) {
   const [showPaymentDue, setShowPaymentDue] = useState(false);
 
-  async function applyInvoiced(dueDate: string) {
-    const result = await updateInvoiceStatus(orderId, "請求済", dueDate);
+  async function applyInvoiced(dueDate: string, subject: string | null) {
+    const result = await updateInvoiceStatus(
+      orderId,
+      "請求済",
+      dueDate,
+      subject,
+    );
     if (
       !result &&
       typeof window !== "undefined" &&
@@ -108,10 +115,11 @@ export default function OrderStatusBar({
         <PaymentDueModal
           orderId={orderId}
           defaultDate={calculateDefaultDueDate(new Date())}
+          defaultSubject={invoiceSubject}
           onClose={() => setShowPaymentDue(false)}
-          onConfirm={async (date) => {
+          onConfirm={async (date, subject) => {
             setShowPaymentDue(false);
-            await applyInvoiced(date);
+            await applyInvoiced(date, subject);
           }}
         />
       )}

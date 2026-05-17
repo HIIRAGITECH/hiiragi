@@ -6,7 +6,12 @@ import { createPortal } from "react-dom";
 type Props = {
   orderId: string;
   defaultDate: string; // YYYY-MM-DD
-  onConfirm: (date: string) => void | Promise<void>;
+  defaultSubject?: string | null; // 既存値があれば初期表示（未請求 → 請求済 再操作時など）
+  // 第2引数の subject は空文字または null の場合「未指定」として保存される。
+  onConfirm: (
+    date: string,
+    subject: string | null,
+  ) => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -33,10 +38,12 @@ export function calculateDefaultDueDate(invoicedAt: Date): string {
 export default function PaymentDueModal({
   orderId,
   defaultDate,
+  defaultSubject,
   onConfirm,
   onClose,
 }: Props) {
   const [date, setDate] = useState(defaultDate);
+  const [subject, setSubject] = useState(defaultSubject ?? "");
   const [pending, setPending] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -53,7 +60,8 @@ export default function PaymentDueModal({
     if (!date) return;
     setPending(true);
     try {
-      await onConfirm(date);
+      const trimmed = subject.trim();
+      await onConfirm(date, trimmed === "" ? null : trimmed);
     } finally {
       setPending(false);
     }
@@ -98,6 +106,25 @@ export default function PaymentDueModal({
           />
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             初期値は「翌月末日」です。
+          </p>
+        </div>
+
+        <div className="mt-4">
+          <label htmlFor="invoice_subject" className={labelClass}>
+            件名（任意）
+          </label>
+          <input
+            id="invoice_subject"
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            disabled={pending}
+            placeholder="例: 2026年4月分整備代金として"
+            className={inputClass}
+            maxLength={120}
+          />
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            請求書の合計金額の上に「件名: ◯◯」として表示します。未入力なら表示しません。
           </p>
         </div>
 

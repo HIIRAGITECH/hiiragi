@@ -132,6 +132,19 @@ export default function PrintableDocument({
         </div>
       </div>
 
+      {/* 件名（請求書のみ）: 合計金額の直上に「件名: ◯◯」として表示。
+          invoice_subject が null/空文字なら出さない。見積書には出さない。 */}
+      {type === "invoice" &&
+        order.invoice_subject &&
+        order.invoice_subject.trim() !== "" && (
+          <p className="mb-1 mt-3 text-sm text-zinc-800">
+            件名:{" "}
+            <span className="font-medium">
+              {order.invoice_subject.trim()}
+            </span>
+          </p>
+        )}
+
       {/* 請求/見積金額: 車両情報ボックスの直前に独立行で大きく表示。
           PDF 側 (InvoiceDocument の amountHeadline) と揃える。
           請求書 + 預かり金あり (deposit > 0) の場合は差引請求額を、
