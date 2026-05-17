@@ -93,11 +93,17 @@ export default async function SalesPage({
 
   // 売上計上ロジック
   // work_status='完了' なら売上、それ以外は前受金
+  //
+  // 表示金額は「items合計 − discount_amount」（税抜・値引き反映後）。
+  // calculateTotals の section 別ロジックでは値引きが整備セクションを超えた分が
+  // 反映されない（車検整備中心の受注に値引きを設定したケース等）ので、ここでは
+  // フラットに引いて「実際の請求額に近い金額」を出す。0 未満になる場合は 0。
   const enriched = rows.map((o) => {
     const totals = calculateTotals(o.items ?? [], o.discount_amount, 0);
+    const total = Math.max(0, totals.subtotal - totals.discount);
     return {
       ...o,
-      total: totals.total,
+      total,
       isComplete: o.work_status === "完了",
     };
   });
@@ -351,7 +357,7 @@ export default async function SalesPage({
 
       {enriched.length > 0 && (
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          ※ カテゴリ別 / 税区分別の小計は税抜・値引き前の金額です。サマリーの売上 / 前受金（税込・値引き反映後）とは差があります。
+          ※ いずれも税抜の金額です。カテゴリ別 / 税区分別の小計は値引き前、サマリーの売上 / 前受金は値引き反映後のため差があります。
         </p>
       )}
 

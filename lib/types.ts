@@ -178,6 +178,7 @@ export type Order = {
   invoiced_at: string | null; // ISO timestamptz、売上計上の基準日
   paid_at: string | null; // ISO timestamptz、入金確認日
   payment_due_date: string | null; // YYYY-MM-DD、振込期限（請求書フッタ表示）
+  invoice_subject: string | null; // 請求書の件名（合計金額の上に表示、任意。見積書には出さない）
   is_archived: boolean;
   notes: string | null;          // 入荷時メモ（受注一覧でのみ表示、帳票には出さない）
   estimate_notes: string | null; // 見積書帳票の備考
@@ -231,6 +232,7 @@ export type OrderListRow = Pick<
   | "invoiced_at"
   | "paid_at"
   | "payment_due_date"
+  | "invoice_subject"
   | "is_archived"
   | "notes"
 > & {

@@ -135,12 +135,30 @@ const styles = StyleSheet.create({
   customerHonor: { fontSize: 11, marginTop: 2 },
   // 顧客名の下に出す住所・電話番号などの細字行
   customerLine: { fontSize: 9, marginTop: 1, color: COLORS.black },
+  // 件名（請求書のみ）: amountHeadline の直上に表示。
+  // 控えめなサイズ + 黒字でラベルは灰色。
+  invoiceSubject: {
+    fontSize: 10,
+    color: COLORS.black,
+    marginTop: 12,
+    marginBottom: 2,
+  },
+  invoiceSubjectLabel: {
+    color: COLORS.gray,
+  },
   // 車両情報ボックスの直前に独立行で表示する請求/見積金額。
   // 受け取った人が金額を一目で把握できるようにする。
+  // 件名がある場合は invoiceSubject 側で上余白を取るので、ここでは marginTop を 4 に詰める。
   amountHeadline: {
     fontSize: 14,
     fontWeight: "bold",
     marginTop: 12,
+    marginBottom: 4,
+  },
+  amountHeadlineCompact: {
+    fontSize: 14,
+    fontWeight: "bold",
+    marginTop: 2,
     marginBottom: 4,
   },
   lead: { fontSize: 8, color: COLORS.gray, marginTop: 6 },
@@ -565,8 +583,27 @@ export function InvoiceDocument({
           </View>
         </View>
 
+        {/* 件名（請求書のみ）: ご請求金額の直上に表示。
+            invoice_subject が null / 空文字なら出さない。見積書には出さない。 */}
+        {documentType === "invoice" &&
+        order.invoice_subject &&
+        order.invoice_subject.trim() !== "" ? (
+          <Text style={styles.invoiceSubject}>
+            <Text style={styles.invoiceSubjectLabel}>件名: </Text>
+            {sanitizeText(order.invoice_subject.trim())}
+          </Text>
+        ) : null}
+
         {/* ご請求金額: 車両情報ボックスの直前に独立行で表示。左寄せ・本文 14pt bold */}
-        <Text style={styles.amountHeadline}>
+        <Text
+          style={
+            documentType === "invoice" &&
+            order.invoice_subject &&
+            order.invoice_subject.trim() !== ""
+              ? styles.amountHeadlineCompact
+              : styles.amountHeadline
+          }
+        >
           {amountLabel}: {formatYen(headlineAmount)}
         </Text>
 

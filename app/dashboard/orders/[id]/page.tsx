@@ -144,6 +144,7 @@ export default async function OrderDetailPage(
                 workStatus={order.work_status}
                 estimateStatus={order.estimate_status}
                 invoiceStatus={order.invoice_status}
+                invoiceSubject={order.invoice_subject}
               />
             </div>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">

@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS orders (
   invoiced_at       timestamptz, -- 請求書発行日（売上計上の基準日）
   paid_at           timestamptz, -- 入金確認日
   payment_due_date  date,        -- 振込期限（請求書フッタ表示用、任意）
+  invoice_subject   text,        -- 請求書の件名（合計金額の上に表示、任意。見積書には出さない）
   is_archived       boolean NOT NULL DEFAULT false,
   notes             text,                 -- 入荷時メモ（受注一覧表示用、帳票には出さない）
   estimate_notes    text,                 -- 見積書 PDF / プレビュー の備考（顧客向け）

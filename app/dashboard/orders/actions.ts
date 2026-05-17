@@ -352,13 +352,17 @@ export async function updateEstimateStatus(
 }
 
 // invoice_status の更新。
-// '請求済' なら invoiced_at を初回 now() に。任意で payment_due_date を保存可能。
+// '請求済' なら invoiced_at を初回 now() に。任意で payment_due_date / invoice_subject を保存可能。
 // '入金済' なら paid_at を初回 now() に（invoiced_at が未設定なら同時に埋める）。
-// '未請求' に戻す場合は invoiced_at / paid_at / payment_due_date をすべて null にリセット。
+// '未請求' に戻す場合は invoiced_at / paid_at / payment_due_date / invoice_subject をすべて null にリセット。
+//
+// 第3引数 paymentDueDate / 第4引数 invoiceSubject は省略可能。
+// undefined を渡した場合は既存値を保持する（後方互換）。空文字 "" を渡した場合は null にクリア。
 export async function updateInvoiceStatus(
   id: string,
   next: InvoiceStatus,
   paymentDueDate?: string, // YYYY-MM-DD（請求済への変更時のみ意味あり）
+  invoiceSubject?: string | null, // 件名（請求済への変更時のみ意味あり）
 ): Promise<{ error: string } | undefined> {
   if (!(INVOICE_STATUSES as readonly string[]).includes(next)) {
     return { error: "不正なステータスです。" };
@@ -371,7 +375,7 @@ export async function updateInvoiceStatus(
 
   const { data: current } = await supabase
     .from("orders")
-    .select("invoiced_at, paid_at, payment_due_date")
+    .select("invoiced_at, paid_at, payment_due_date, invoice_subject")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -381,16 +385,25 @@ export async function updateInvoiceStatus(
   let paid_at: string | null = current?.paid_at ?? null;
   let payment_due_date: string | null =
     (current?.payment_due_date as string | null | undefined) ?? null;
+  let invoice_subject: string | null =
+    (current?.invoice_subject as string | null | undefined) ?? null;
 
   if (next === "未請求") {
     invoiced_at = null;
     paid_at = null;
     payment_due_date = null;
+    invoice_subject = null;
   } else if (next === "請求済") {
     if (!invoiced_at) invoiced_at = nowIso;
     paid_at = null;
     if (paymentDueDate !== undefined) {
       payment_due_date = paymentDueDate || null;
+    }
+    if (invoiceSubject !== undefined) {
+      invoice_subject =
+        typeof invoiceSubject === "string" && invoiceSubject.trim() !== ""
+          ? invoiceSubject.trim()
+          : null;
     }
   } else if (next === "入金済") {
     if (!invoiced_at) invoiced_at = nowIso;
@@ -404,6 +417,7 @@ export async function updateInvoiceStatus(
       invoiced_at,
       paid_at,
       payment_due_date,
+      invoice_subject,
     })
     .eq("id", id)
     .eq("user_id", user.id);

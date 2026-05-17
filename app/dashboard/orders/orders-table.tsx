@@ -59,8 +59,17 @@ export default function OrdersTable({ rows }: Props) {
   const [paymentDueFor, setPaymentDueFor] = useState<string | null>(null);
 
   // 「請求済」確定後の共通処理: invoice 更新 + アーカイブ提案
-  async function applyInvoiced(orderId: string, dueDate: string) {
-    const result = await updateInvoiceStatus(orderId, "請求済", dueDate);
+  async function applyInvoiced(
+    orderId: string,
+    dueDate: string,
+    subject: string | null,
+  ) {
+    const result = await updateInvoiceStatus(
+      orderId,
+      "請求済",
+      dueDate,
+      subject,
+    );
     if (
       !result &&
       typeof window !== "undefined" &&
@@ -256,11 +265,14 @@ export default function OrdersTable({ rows }: Props) {
         <PaymentDueModal
           orderId={paymentDueFor}
           defaultDate={calculateDefaultDueDate(new Date())}
+          defaultSubject={
+            rows.find((r) => r.id === paymentDueFor)?.invoice_subject ?? null
+          }
           onClose={() => setPaymentDueFor(null)}
-          onConfirm={async (date) => {
+          onConfirm={async (date, subject) => {
             const orderId = paymentDueFor;
             setPaymentDueFor(null);
-            await applyInvoiced(orderId, date);
+            await applyInvoiced(orderId, date, subject);
           }}
         />
       )}
