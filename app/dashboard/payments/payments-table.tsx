@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import PaymentConfirmModal from "@/lib/components/payment-confirm-modal";
 import SearchInput from "@/lib/components/search-input";
 import { formatYen } from "@/lib/format";
-import type { PaymentStatus } from "@/lib/payments/classify";
+import { getTodayJst, type PaymentStatus } from "@/lib/payments/classify";
 import { updateInvoiceStatus } from "@/app/dashboard/orders/actions";
 
 export type PaymentRow = {
@@ -86,6 +87,10 @@ export default function PaymentsTable({ rows }: Props) {
   const [query, setQuery] = useState("");
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  // 入金確認モーダル対象の orderId（null = モーダル非表示）
+  const [paymentConfirmFor, setPaymentConfirmFor] = useState<string | null>(
+    null,
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -96,16 +101,16 @@ export default function PaymentsTable({ rows }: Props) {
 
   const isSearching = query.trim().length > 0;
 
-  async function handleMarkPaid(id: string) {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(`受注「${id}」を入金済に変更しますか？`)
-    ) {
-      return;
-    }
+  async function applyPaid(id: string, paidAt: string) {
     setPendingId(id);
     try {
-      const result = await updateInvoiceStatus(id, "入金済");
+      const result = await updateInvoiceStatus(
+        id,
+        "入金済",
+        undefined,
+        undefined,
+        paidAt,
+      );
       if (result?.error) {
         window.alert(result.error);
         return;
@@ -199,7 +204,7 @@ export default function PaymentsTable({ rows }: Props) {
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
-                      onClick={() => handleMarkPaid(r.id)}
+                      onClick={() => setPaymentConfirmFor(r.id)}
                       disabled={pendingId === r.id}
                       className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     >
@@ -212,6 +217,19 @@ export default function PaymentsTable({ rows }: Props) {
           </table>
         )}
       </div>
+
+      {paymentConfirmFor && (
+        <PaymentConfirmModal
+          orderId={paymentConfirmFor}
+          defaultDate={getTodayJst()}
+          onClose={() => setPaymentConfirmFor(null)}
+          onConfirm={async (paidAt) => {
+            const orderId = paymentConfirmFor;
+            setPaymentConfirmFor(null);
+            await applyPaid(orderId, paidAt);
+          }}
+        />
+      )}
     </>
   );
 }
