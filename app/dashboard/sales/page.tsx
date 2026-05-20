@@ -137,8 +137,20 @@ export default async function SalesPage({
   // → enriched 側で使う Math.max(0, items合計 − discount) と同じ控除量になり、
   //   categorySumTotal − discountTotal == salesTotal + advanceTotal が成立する。
   let discountTotal = 0;
+  // 入金済 / 請求済（未入金）の per-group 集計。キャッシュフロー把握用。
+  // 同じ flat 計算式（max(0, items合計 − discount) + floor(課税対象 × 10%）)
+  // をグループ単位で再計算する。請求合計（全体）とグループ合計は端数誤差なく一致する。
+  let paidTaxable = 0;
+  let paidTaxExcl = 0;
+  let paidDiscount = 0;
+  let paidCount = 0;
+  let unpaidTaxable = 0;
+  let unpaidTaxExcl = 0;
+  let unpaidDiscount = 0;
+  let unpaidCount = 0;
   for (const o of rows) {
     let orderItemsSum = 0;
+    let orderTaxableSum = 0;
     for (const it of o.items ?? []) {
       const sub = Math.round((it.unit_price ?? 0) * (it.quantity ?? 0));
       orderItemsSum += sub;
@@ -156,10 +168,27 @@ export default async function SalesPage({
         it.tax_category === "shaken_non_tax" ||
         (it.tax_category == null && it.tax_free === true);
       if (isShakenNonTax) shakenNonTaxBucket += sub;
-      else taxableBucket += sub;
+      else {
+        taxableBucket += sub;
+        orderTaxableSum += sub;
+      }
     }
     const rawDiscount = Math.max(0, o.discount_amount ?? 0);
-    discountTotal += Math.min(orderItemsSum, rawDiscount);
+    const effectiveDiscount = Math.min(orderItemsSum, rawDiscount);
+    const orderTaxExcl = Math.max(0, orderItemsSum - rawDiscount);
+    discountTotal += effectiveDiscount;
+
+    if (o.invoice_status === "入金済") {
+      paidCount += 1;
+      paidTaxable += orderTaxableSum;
+      paidTaxExcl += orderTaxExcl;
+      paidDiscount += effectiveDiscount;
+    } else if (o.invoice_status === "請求済") {
+      unpaidCount += 1;
+      unpaidTaxable += orderTaxableSum;
+      unpaidTaxExcl += orderTaxExcl;
+      unpaidDiscount += effectiveDiscount;
+    }
   }
 
   type CategoryRow = {
@@ -208,6 +237,16 @@ export default async function SalesPage({
   const consumptionTax = Math.floor(taxableAfterDiscount * TAX_RATE);
   // 請求合計 = 売上 + 前受金 + 消費税。サマリーカードの見た目通り足し算が成立する。
   const totalWithTax = salesTotal + advanceTotal + consumptionTax;
+
+  // キャッシュフロー内訳: 入金済 / 未入金（請求済）の税込合計。
+  // 全体と同じ flat 集計式で per-group 再計算するので端数誤差なく
+  // paidWithTax + unpaidWithTax == totalWithTax が成立する（rows は 請求済 + 入金済 だけ）。
+  const paidTaxAfter = Math.max(0, paidTaxable - paidDiscount);
+  const paidTax = Math.floor(paidTaxAfter * TAX_RATE);
+  const paidWithTax = paidTaxExcl + paidTax;
+  const unpaidTaxAfter = Math.max(0, unpaidTaxable - unpaidDiscount);
+  const unpaidTax = Math.floor(unpaidTaxAfter * TAX_RATE);
+  const unpaidWithTax = unpaidTaxExcl + unpaidTax;
 
   // 前後の月（ナビ用）
   const prev =
@@ -293,6 +332,54 @@ export default async function SalesPage({
           tone="sky"
         />
       </div>
+
+      {/* キャッシュフロー内訳: 請求合計の入金済 / 未入金（請求済）への分解。
+          未入金は /dashboard/payments へリンクして詳細確認できるようにする。 */}
+      {enriched.length > 0 && (
+        <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50/60 px-5 py-3 dark:border-sky-900 dark:bg-sky-950/15">
+          <p className="text-xs font-semibold uppercase tracking-wider text-sky-700 dark:text-sky-300">
+            請求合計の内訳（キャッシュフロー）
+          </p>
+          <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-sm text-zinc-700 dark:text-zinc-300">
+                うち入金済
+              </dt>
+              <dd className="text-sm font-medium text-zinc-900 dark:text-zinc-50">
+                {formatYen(paidWithTax)}
+                <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  （{paidCount}件）
+                </span>
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <dt className="text-sm text-zinc-700 dark:text-zinc-300">
+                うち未入金
+              </dt>
+              <dd className="text-sm font-medium">
+                {unpaidCount > 0 ? (
+                  <Link
+                    href="/dashboard/payments"
+                    className="text-sky-700 underline-offset-2 hover:underline dark:text-sky-300"
+                  >
+                    {formatYen(unpaidWithTax)}
+                    <span className="ml-1 text-xs">
+                      （{unpaidCount}件 →）
+                    </span>
+                  </Link>
+                ) : (
+                  <span className="text-zinc-900 dark:text-zinc-50">
+                    {formatYen(unpaidWithTax)}
+                    <span className="ml-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      （0件）
+                    </span>
+                  </span>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
 
       {/* カテゴリ別 / 税区分別 小計 */}
       {enriched.length > 0 && (

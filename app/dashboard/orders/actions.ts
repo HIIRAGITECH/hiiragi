@@ -354,15 +354,18 @@ export async function updateEstimateStatus(
 // invoice_status の更新。
 // '請求済' なら invoiced_at を初回 now() に。任意で payment_due_date / invoice_subject を保存可能。
 // '入金済' なら paid_at を初回 now() に（invoiced_at が未設定なら同時に埋める）。
+//   paidAt 引数（YYYY-MM-DD）を渡せば、その日付の JST 12:00 を paid_at として保存する。
+//   過去の入金日を後から記録できる（入金管理画面の入金確認モーダルから利用）。
 // '未請求' に戻す場合は invoiced_at / paid_at / payment_due_date / invoice_subject をすべて null にリセット。
 //
-// 第3引数 paymentDueDate / 第4引数 invoiceSubject は省略可能。
+// 第3引数 paymentDueDate / 第4引数 invoiceSubject / 第5引数 paidAt は省略可能。
 // undefined を渡した場合は既存値を保持する（後方互換）。空文字 "" を渡した場合は null にクリア。
 export async function updateInvoiceStatus(
   id: string,
   next: InvoiceStatus,
   paymentDueDate?: string, // YYYY-MM-DD（請求済への変更時のみ意味あり）
   invoiceSubject?: string | null, // 件名（請求済への変更時のみ意味あり）
+  paidAt?: string, // YYYY-MM-DD（入金済への変更時のみ意味あり）
 ): Promise<{ error: string } | undefined> {
   if (!(INVOICE_STATUSES as readonly string[]).includes(next)) {
     return { error: "不正なステータスです。" };
@@ -407,7 +410,14 @@ export async function updateInvoiceStatus(
     }
   } else if (next === "入金済") {
     if (!invoiced_at) invoiced_at = nowIso;
-    if (!paid_at) paid_at = nowIso;
+    if (paidAt !== undefined) {
+      // YYYY-MM-DD を JST 正午の timestamptz として保存。
+      // JST 正午アンカーにすることで、閲覧者のタイムゾーンが UTC ±14h の範囲内なら
+      // 同じ日付として表示される（時刻情報は捨てるが日付は安定）。
+      paid_at = paidAt ? `${paidAt}T12:00:00+09:00` : null;
+    } else if (!paid_at) {
+      paid_at = nowIso;
+    }
   }
 
   const { error } = await supabase
