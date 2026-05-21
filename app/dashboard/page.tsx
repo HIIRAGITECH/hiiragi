@@ -31,12 +31,13 @@ async function fetchPaymentSummary(): Promise<{
   } = await supabase.auth.getUser();
   if (!user) return { totalCount: 0, totalAmount: 0, overdueCount: 0 };
 
+  // 未回収（請求済かつ未入金）の集計。is_archived は受注一覧側の軸なので絞り込みに使わない
+  // → 未回収一覧（/dashboard/payments）と表示条件を揃え、アーカイブ済みも未回収としてカウント。
   const { data } = await supabase
     .from("orders")
     .select("payment_due_date, items, discount_amount, deposit_amount")
     .eq("user_id", user.id)
-    .eq("invoice_status", "請求済")
-    .eq("is_archived", false);
+    .eq("invoice_status", "請求済");
 
   const rows = (data ?? []) as PaymentFetchRow[];
   const todayJst = getTodayJst();

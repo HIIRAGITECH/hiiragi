@@ -19,6 +19,9 @@ export type PaymentRow = {
   status: PaymentStatus;
   // overdue → 超過日数、due_soon/on_track → 残り日数、no_due_date → 0
   days: number;
+  // 作業側（受注一覧）でアーカイブ済みかどうか。未回収一覧は invoice_status 軸で
+  // 独立に絞り込むが、アーカイブ済みであることはユーザーに視認させたいのでバッジで表示する。
+  is_archived: boolean;
 };
 
 type Props = {
@@ -174,20 +177,32 @@ export default function PaymentsTable({ rows }: Props) {
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-zinc-900 dark:text-zinc-50">
-                    {r.customer_name ? (
-                      r.customer_id ? (
-                        <Link
-                          href={`/dashboard/customers/${r.customer_id}`}
-                          className="hover:underline"
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span>
+                        {r.customer_name ? (
+                          r.customer_id ? (
+                            <Link
+                              href={`/dashboard/customers/${r.customer_id}`}
+                              className="hover:underline"
+                            >
+                              {r.customer_name}
+                            </Link>
+                          ) : (
+                            r.customer_name
+                          )
+                        ) : (
+                          "—"
+                        )}
+                      </span>
+                      {r.is_archived && (
+                        <span
+                          className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                          title="作業はアーカイブ済みですが、まだ入金されていません"
                         >
-                          {r.customer_name}
-                        </Link>
-                      ) : (
-                        r.customer_name
-                      )
-                    ) : (
-                      "—"
-                    )}
+                          📦 アーカイブ済
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {formatDateOnly(r.invoiced_at)}
