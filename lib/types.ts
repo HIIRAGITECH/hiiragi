@@ -199,6 +199,48 @@ export type Order = {
   updated_at: string;
 };
 
+// 部品マスター（在庫表）。Step 2 で新設。
+// show_in_detail=false の行は「間接材料」（Oリング等、明細に出さず工賃に算入）。
+// stock_quantity は server action（入庫・棚卸調整）でしか書き換えない不変条件にする。
+export type PartsInventory = {
+  id: string;
+  user_id: string;
+  name: string;
+  cost_price: number;
+  sale_price: number | null;
+  show_in_detail: boolean;
+  stock_quantity: number;
+  reorder_point: number;
+  supplier: string | null;
+  unit: string | null;
+  memo: string | null;
+  display_order: number;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 在庫移動の種別。
+//   in     = 入庫
+//   out    = 出庫（受注確定で減算する用途。Step 2 では未使用）
+//   adjust = 棚卸調整（差分を quantity に記録）
+export const MOVEMENT_TYPES = ["in", "out", "adjust"] as const;
+export type MovementType = (typeof MOVEMENT_TYPES)[number];
+
+// 在庫移動履歴。quantity は +/− 両方ありうる。
+// adjust の場合、quantity は「新しい在庫数 − 旧在庫数」（差分）を記録する。
+export type StockMovement = {
+  id: string;
+  user_id: string;
+  part_id: string;
+  movement_type: MovementType;
+  quantity: number;
+  related_order_id: string | null;
+  unit_cost: number | null;
+  memo: string | null;
+  created_at: string;
+};
+
 export const BANK_ACCOUNT_TYPES = ["普通", "当座"] as const;
 export type BankAccountType = (typeof BANK_ACCOUNT_TYPES)[number];
 

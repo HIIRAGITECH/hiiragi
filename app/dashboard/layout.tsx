@@ -63,6 +63,12 @@ export default async function DashboardLayout({
                 作業セット
               </Link>
               <Link
+                href="/dashboard/parts-inventory"
+                className="hover:text-zinc-900 dark:hover:text-zinc-50"
+              >
+                部品在庫
+              </Link>
+              <Link
                 href="/dashboard/work-item-categories"
                 className="hover:text-zinc-900 dark:hover:text-zinc-50"
               >
