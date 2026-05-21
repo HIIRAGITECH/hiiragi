@@ -8,7 +8,7 @@ import type {
   WorkMenuItem,
   WorkMenuSet,
 } from "@/lib/types";
-import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import { calculateProfit, calculateTotals, rowSubtotal } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
 import SearchInput from "@/lib/components/search-input";
 import { registerOrderItemAsMenu } from "../../work-menus/actions";
@@ -52,6 +52,9 @@ function legacyCategoryNameFromOldFields(item: OrderItem): string {
 function rowFromMenu(m: WorkMenuItem): ItemRow {
   const labor = m.default_labor_cost > 0 ? String(m.default_labor_cost) : "";
   const parts = m.default_parts_cost > 0 ? String(m.default_parts_cost) : "";
+  // 原価は 0 でも明細上で見えるようにする（空文字ではなく "0" を初期値に）。
+  const laborCp = m.labor_cost_price ?? 0;
+  const partsCp = m.parts_cost_price ?? 0;
   return {
     name: m.work_name,
     part_name: m.part_name ?? "",
@@ -63,6 +66,8 @@ function rowFromMenu(m: WorkMenuItem): ItemRow {
       labor !== "" || parts !== ""
         ? String((Number(labor) || 0) + (Number(parts) || 0))
         : String(m.default_unit_price ?? 0),
+    labor_cost_price: laborCp > 0 ? String(laborCp) : "",
+    parts_cost_price: partsCp > 0 ? String(partsCp) : "",
     source_menu_id: m.id,
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
@@ -81,6 +86,9 @@ type ItemRow = {
   labor_cost: string;
   parts_cost: string;
   unit_price: string;
+  // 原価（社内管理用）。空文字 = 未入力（0 として扱う）。粗利計算と DB 保存に使う。
+  labor_cost_price: string;
+  parts_cost_price: string;
   // 作業メニューマスターから挿入された場合のみセット。null/空文字は手入力扱い。
   source_menu_id: string;
   // 税区分（システム固定: 'taxable' | 'shaken_non_tax'）。
@@ -118,6 +126,15 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
     labor_cost: i.labor_cost !== undefined ? String(i.labor_cost) : "",
     parts_cost: i.parts_cost !== undefined ? String(i.parts_cost) : "",
     unit_price: String(i.unit_price),
+    // 原価: 既存データは migration で 0 にバックフィル済み。0 は空文字扱いで UI を散らかさない。
+    labor_cost_price:
+      i.labor_cost_price !== undefined && i.labor_cost_price > 0
+        ? String(i.labor_cost_price)
+        : "",
+    parts_cost_price:
+      i.parts_cost_price !== undefined && i.parts_cost_price > 0
+        ? String(i.parts_cost_price)
+        : "",
     source_menu_id: i.source_menu_id ?? "",
     tax_category: taxCategory,
     item_category_id: itemCategoryId,
@@ -152,6 +169,13 @@ function toItem(r: ItemRow, categoryName: string | null): OrderItem {
   if (r.part_name.trim() !== "") base.part_name = r.part_name.trim();
   if (r.note.trim() !== "") base.note = r.note.trim();
   if (r.source_menu_id !== "") base.source_menu_id = r.source_menu_id;
+  // 原価は空でなければ数値化、空なら省略（後方互換: 既存データは migration で 0 で埋まる）。
+  if (r.labor_cost_price !== "") {
+    base.labor_cost_price = Number(r.labor_cost_price) || 0;
+  }
+  if (r.parts_cost_price !== "") {
+    base.parts_cost_price = Number(r.parts_cost_price) || 0;
+  }
   // 新フィールド
   base.tax_category = r.tax_category;
   if (r.item_category_id) base.item_category_id = r.item_category_id;
@@ -176,6 +200,8 @@ const emptyRow = (
   labor_cost: "",
   parts_cost: "",
   unit_price: "0",
+  labor_cost_price: "",
+  parts_cost_price: "",
   source_menu_id: "",
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
@@ -377,6 +403,8 @@ export default function ItemsForm({
       default_unit_price: item.unit_price,
       default_labor_cost: item.labor_cost ?? 0,
       default_parts_cost: item.parts_cost ?? 0,
+      labor_cost_price: item.labor_cost_price ?? 0,
+      parts_cost_price: item.parts_cost_price ?? 0,
       tax_category: r.tax_category,
       item_category_id: r.item_category_id,
     })
@@ -415,6 +443,7 @@ export default function ItemsForm({
     Number(discount) || 0,
     Number(deposit) || 0,
   );
+  const profit = calculateProfit(allItems);
 
   const itemsToSave = allItems.filter((i) => i.work_name.trim() !== "");
 
@@ -538,6 +567,7 @@ export default function ItemsForm({
           </div>
         </div>
 
+        <div className="space-y-3">
         <dl className="space-y-1.5 rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-950">
           {totals.sections.normal.subtotal > 0 && (
             <Row
@@ -582,6 +612,34 @@ export default function ItemsForm({
             </>
           )}
         </dl>
+
+        {/* 粗利サマリー（社内管理用）。calculateProfit を使い、税抜・値引き前ベースで集計。
+            ⚠️ 見積書・請求書 PDF には出さない。 */}
+        <dl className="space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+          <div className="mb-1 flex items-baseline justify-between">
+            <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+              粗利サマリー
+            </h4>
+            <span className="text-[10px] text-amber-700 dark:text-amber-400">
+              社内管理用
+            </span>
+          </div>
+          <Row label="売上合計" value={formatYen(profit.revenue)} />
+          <Row label="原価合計" value={formatYen(profit.cost)} />
+          <Row
+            label="粗利"
+            value={formatYen(profit.profit)}
+            emphasize
+          />
+          <Row
+            label="粗利率"
+            value={`${profit.profitRatePercent.toFixed(1)}%`}
+          />
+          <p className="pt-1 text-[10px] text-amber-700 dark:text-amber-400">
+            ※ 売上は税抜・値引き前の明細小計合計です。見積書・請求書には表示されません。
+          </p>
+        </dl>
+        </div>
       </div>
 
       {/* 整備写真フォルダ URL / 帳票備考: 同じフォームで保存される。
@@ -893,44 +951,92 @@ function ItemTableEditor({
                   ☆
                 </button>
 
-                {/* 列2 下: 工賃（横ラベル + 入力） */}
-                <div className="flex items-center gap-2">
-                  <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
-                    工賃
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step={1}
-                    value={r.labor_cost}
-                    onChange={(e) =>
-                      update(i, { labor_cost: e.target.value })
-                    }
-                    placeholder="—"
-                    aria-label="工賃"
-                    className={`${cellInputClass} text-right`}
-                  />
+                {/* 列2 下: 工賃 + 工賃原価（縦並び） */}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      工賃
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      value={r.labor_cost}
+                      onChange={(e) =>
+                        update(i, { labor_cost: e.target.value })
+                      }
+                      placeholder="—"
+                      aria-label="工賃"
+                      className={`${cellInputClass} text-right`}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
+                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                    >
+                      原価
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      value={r.labor_cost_price}
+                      onChange={(e) =>
+                        update(i, { labor_cost_price: e.target.value })
+                      }
+                      placeholder="—"
+                      aria-label="工賃原価（社内管理用）"
+                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                      className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
+                    />
+                  </div>
                 </div>
 
-                {/* 列3 下: 部品代（横ラベル + 入力） */}
-                <div className="flex items-center gap-2">
-                  <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
-                    部品代
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step={1}
-                    value={r.parts_cost}
-                    onChange={(e) =>
-                      update(i, { parts_cost: e.target.value })
-                    }
-                    placeholder="—"
-                    aria-label="部品代"
-                    className={`${cellInputClass} text-right`}
-                  />
+                {/* 列3 下: 部品代 + 部品代原価（縦並び） */}
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      部品代
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      value={r.parts_cost}
+                      onChange={(e) =>
+                        update(i, { parts_cost: e.target.value })
+                      }
+                      placeholder="—"
+                      aria-label="部品代"
+                      className={`${cellInputClass} text-right`}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
+                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                    >
+                      原価
+                    </span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      value={r.parts_cost_price}
+                      onChange={(e) =>
+                        update(i, { parts_cost_price: e.target.value })
+                      }
+                      placeholder="—"
+                      aria-label="部品代原価（社内管理用）"
+                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                      className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
+                    />
+                  </div>
                 </div>
 
                 {/* 列4 下: 空（数量2段目のスペーサ） */}

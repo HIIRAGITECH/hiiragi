@@ -112,6 +112,10 @@ export type OrderItem = {
   tax_free?: boolean;
   labor_cost?: number;
   parts_cost?: number;
+  // 原価（社内管理用）。粗利計算に使い、見積書・請求書PDFには出さない。
+  // 既存データは migration で 0 にバックフィル済み。未定義時は 0 として扱う。
+  labor_cost_price?: number;
+  parts_cost_price?: number;
   // Step 6-1 で追加。既存ロジックは未参照（旧 type/tax_free を使い続ける）。
   tax_category?: TaxCategory;
   item_category_id?: string | null;
@@ -132,6 +136,10 @@ export type WorkMenuItem = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用）。粗利計算に使い、PDF には出さない。
+  // NOT NULL DEFAULT 0 で追加済み。
+  labor_cost_price: number;
+  parts_cost_price: number;
   tax_free: boolean;
   display_order: number;
   memo: string | null;

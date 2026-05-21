@@ -197,6 +197,21 @@ export default function WorkMenuForm({
             defaultValue={initial?.default_labor_cost ?? 0}
             className={`${inputClass} text-right`}
           />
+          <label
+            htmlFor="labor_cost_price"
+            className="mt-2 mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
+          >
+            工賃 原価 <span className="text-[10px]">（社内管理用）</span>
+          </label>
+          <input
+            id="labor_cost_price"
+            name="labor_cost_price"
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={initial?.labor_cost_price ?? 0}
+            className={`${inputClass} text-right`}
+          />
         </div>
         <div>
           <label htmlFor="default_parts_cost" className={labelClass}>
@@ -211,8 +226,26 @@ export default function WorkMenuForm({
             defaultValue={initial?.default_parts_cost ?? 0}
             className={`${inputClass} text-right`}
           />
+          <label
+            htmlFor="parts_cost_price"
+            className="mt-2 mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
+          >
+            部品代 原価 <span className="text-[10px]">（社内管理用）</span>
+          </label>
+          <input
+            id="parts_cost_price"
+            name="parts_cost_price"
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={initial?.parts_cost_price ?? 0}
+            className={`${inputClass} text-right`}
+          />
         </div>
       </div>
+      <p className="-mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+        原価は粗利計算用です。見積書・請求書には表示されません。
+      </p>
 
       <div>
         <label htmlFor="memo" className={labelClass}>

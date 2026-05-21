@@ -200,6 +200,18 @@ function parseItems(
         if (!Number.isFinite(n) || n < 0) return null;
         item.parts_cost = Math.round(n);
       }
+      // 原価（社内管理用、粗利計算に使用）。未指定/空は省略（既存は migration で 0 埋め済み）。
+      // PDF・印刷物には出さないこと（InvoiceDocument / printable-document は labor_cost / parts_cost のみ参照）。
+      if (r?.labor_cost_price !== undefined && r?.labor_cost_price !== null) {
+        const n = Number(r.labor_cost_price);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.labor_cost_price = Math.round(n);
+      }
+      if (r?.parts_cost_price !== undefined && r?.parts_cost_price !== null) {
+        const n = Number(r.parts_cost_price);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.parts_cost_price = Math.round(n);
+      }
       if (typeof r?.part_name === "string") {
         const v = r.part_name.trim();
         item.part_name = v === "" ? null : v;

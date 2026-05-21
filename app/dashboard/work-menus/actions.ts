@@ -50,6 +50,9 @@ type Payload = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用、粗利計算に使用）
+  labor_cost_price: number;
+  parts_cost_price: number;
   memo: string | null;
   tax_category: TaxCategory;
   item_category_id: string;
@@ -72,6 +75,8 @@ function readPayload(formData: FormData): Payload | { error: string } {
     default_unit_price: pickNumber(formData, "default_unit_price", 0),
     default_labor_cost: pickNumber(formData, "default_labor_cost", 0),
     default_parts_cost: pickNumber(formData, "default_parts_cost", 0),
+    labor_cost_price: pickNumber(formData, "labor_cost_price", 0),
+    parts_cost_price: pickNumber(formData, "parts_cost_price", 0),
     memo: pickString(formData, "memo"),
     tax_category,
     item_category_id,
@@ -289,7 +294,7 @@ export async function duplicateWorkMenu(formData: FormData) {
   const { data: src } = await supabase
     .from("work_menu_items")
     .select(
-      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, tax_free, memo, tax_category, item_category_id",
+      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -335,6 +340,9 @@ export type RegisterMenuPayload = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用）。明細行から登録するときに引き継ぐ。
+  labor_cost_price: number;
+  parts_cost_price: number;
   tax_category: TaxCategory;
   item_category_id: string;
 };
@@ -389,6 +397,8 @@ export async function registerOrderItemAsMenu(
       default_unit_price: payload.default_unit_price,
       default_labor_cost: payload.default_labor_cost,
       default_parts_cost: payload.default_parts_cost,
+      labor_cost_price: payload.labor_cost_price,
+      parts_cost_price: payload.parts_cost_price,
       // 新フィールド
       tax_category: payload.tax_category,
       item_category_id: payload.item_category_id,
