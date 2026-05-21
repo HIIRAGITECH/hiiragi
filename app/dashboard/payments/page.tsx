@@ -20,6 +20,7 @@ type FetchRow = {
   items: OrderItem[] | null;
   discount_amount: number | null;
   deposit_amount: number | null;
+  is_archived: boolean | null;
   customer: { id: string; name: string } | null;
 };
 
@@ -29,14 +30,16 @@ export default async function PaymentsPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // 未回収一覧は「請求済（=入金されていない）」のみで絞る。
+  // is_archived は受注一覧（作業管理）側の軸であり、ここでは絞り込みに使わない。
+  // → アーカイブ済みでも未入金なら追跡し続けたい、という運用に対応する。
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, invoiced_at, payment_due_date, items, discount_amount, deposit_amount, customer:customers(id, name)",
+      "id, invoiced_at, payment_due_date, items, discount_amount, deposit_amount, is_archived, customer:customers(id, name)",
     )
     .eq("user_id", user!.id)
-    .eq("invoice_status", "請求済")
-    .eq("is_archived", false);
+    .eq("invoice_status", "請求済");
 
   const fetched = ((data ?? []) as unknown as FetchRow[]) ?? [];
 
@@ -59,6 +62,7 @@ export default async function PaymentsPage() {
       owed_amount: owed,
       status: cls.status,
       days: cls.days,
+      is_archived: o.is_archived ?? false,
     };
   });
 
