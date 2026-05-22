@@ -54,6 +54,33 @@ export default function PartForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
+          <label htmlFor="internal_code" className={labelClass}>
+            社内品番 <span className="text-xs text-zinc-500">（任意）</span>
+          </label>
+          <input
+            id="internal_code"
+            name="internal_code"
+            defaultValue={initial?.internal_code ?? ""}
+            className={inputClass}
+            placeholder="例: A-001"
+          />
+        </div>
+        <div>
+          <label htmlFor="external_code" className={labelClass}>
+            社外品番 <span className="text-xs text-zinc-500">（任意）</span>
+          </label>
+          <input
+            id="external_code"
+            name="external_code"
+            defaultValue={initial?.external_code ?? ""}
+            className={inputClass}
+            placeholder="例: 90915-YZZD4"
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
           <label htmlFor="cost_price" className={labelClass}>
             原価（仕入値） <span className="text-red-600">*</span>
           </label>

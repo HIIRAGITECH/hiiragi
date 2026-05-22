@@ -61,7 +61,9 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
     if (q) {
       const needle = normalize(q);
       list = list.filter((r) =>
-        normalize(`${r.name} ${r.supplier ?? ""}`).includes(needle),
+        normalize(
+          `${r.name} ${r.supplier ?? ""} ${r.internal_code ?? ""} ${r.external_code ?? ""}`,
+        ).includes(needle),
       );
     }
     return list;
@@ -126,7 +128,7 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
         <SearchInput
           value={query}
           onChange={setQuery}
-          placeholder="部品名・仕入先で検索"
+          placeholder="部品名・品番・仕入先で検索"
           className="w-full sm:w-80"
         />
       </div>
@@ -248,6 +250,13 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
                         <span className="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
                           非表示
                         </span>
+                      )}
+                      {(r.internal_code || r.external_code) && (
+                        <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                          {r.internal_code && <>社内: {r.internal_code}</>}
+                          {r.internal_code && r.external_code && " / "}
+                          {r.external_code && <>社外: {r.external_code}</>}
+                        </div>
                       )}
                       {r.supplier && (
                         <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
