@@ -140,6 +140,91 @@ function deriveLegacyCategory(
   return { category: "normal", tax_free: false };
 }
 
+// formData の indirect_materials_json をパースする。
+// 入力形式: [{ part_id: string, quantity: number }, ...]
+// 不正な要素はスキップ、quantity <= 0 もスキップ。
+function parseIndirectMaterials(
+  formData: FormData,
+): { part_id: string; quantity: number }[] {
+  const raw = formData.get("indirect_materials_json");
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const out: { part_id: string; quantity: number }[] = [];
+    const seen = new Set<string>();
+    for (const e of arr) {
+      const pid =
+        typeof e?.part_id === "string" ? e.part_id.trim() : "";
+      const q = Number(e?.quantity);
+      if (!pid || seen.has(pid)) continue;
+      if (!Number.isFinite(q) || q <= 0) continue;
+      seen.add(pid);
+      out.push({ part_id: pid, quantity: q });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// 指定 user_id が所有する parts_inventory のうち、引数の id 群と一致するものに絞り込む。
+// 戻り値は part_id Set。RLS 経由で確認できる範囲のみ返す。
+async function filterOwnedPartIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  partIds: string[],
+): Promise<Set<string>> {
+  if (partIds.length === 0) return new Set();
+  const { data } = await supabase
+    .from("parts_inventory")
+    .select("id")
+    .eq("user_id", userId)
+    .in("id", partIds);
+  return new Set((data ?? []).map((r) => r.id as string));
+}
+
+// menu_item_id に紐づく既存の間接材料を全削除し、entries で全件再挿入する。
+// シンプルさを優先し差分計算はしない。RLS は親メニュー所有者で動作。
+async function replaceIndirectMaterials(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  menuItemId: string,
+  entries: { part_id: string; quantity: number }[],
+): Promise<{ error: string } | undefined> {
+  // 所有部品のみ受け付ける（他テナント・存在しない id は無視）。
+  const owned = await filterOwnedPartIds(
+    supabase,
+    userId,
+    entries.map((e) => e.part_id),
+  );
+  const valid = entries.filter((e) => owned.has(e.part_id));
+
+  const { error: delErr } = await supabase
+    .from("work_menu_indirect_materials")
+    .delete()
+    .eq("menu_item_id", menuItemId);
+  if (delErr) {
+    return { error: `間接材料の更新に失敗しました: ${delErr.message}` };
+  }
+
+  if (valid.length === 0) return undefined;
+
+  const { error: insErr } = await supabase
+    .from("work_menu_indirect_materials")
+    .insert(
+      valid.map((e) => ({
+        menu_item_id: menuItemId,
+        part_id: e.part_id,
+        quantity: e.quantity,
+      })),
+    );
+  if (insErr) {
+    return { error: `間接材料の更新に失敗しました: ${insErr.message}` };
+  }
+  return undefined;
+}
+
 // 業務カテゴリの存在確認 + 名前取得（旧 category 派生用）。
 async function resolveCategoryName(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -199,14 +284,33 @@ export async function createWorkMenu(
   const nextOrder =
     typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
 
-  const { error } = await supabase.from("work_menu_items").insert({
-    ...result,
-    category: legacy.category,
-    tax_free: legacy.tax_free,
-    display_order: nextOrder,
-    user_id: user.id,
-  });
-  if (error) return { error: `登録に失敗しました: ${error.message}` };
+  // 1) work_menu_items を挿入し id を取得
+  const { data: inserted, error } = await supabase
+    .from("work_menu_items")
+    .insert({
+      ...result,
+      category: legacy.category,
+      tax_free: legacy.tax_free,
+      display_order: nextOrder,
+      user_id: user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) {
+    return { error: `登録に失敗しました: ${error?.message ?? "unknown"}` };
+  }
+
+  // 2) 間接材料リストがあれば紐付け（Step 5）
+  const indirect = parseIndirectMaterials(formData);
+  if (indirect.length > 0) {
+    const r = await replaceIndirectMaterials(
+      supabase,
+      user.id,
+      inserted.id as string,
+      indirect,
+    );
+    if (r && "error" in r) return r;
+  }
 
   revalidatePath("/dashboard/work-menus");
   redirect("/dashboard/work-menus");
@@ -252,6 +356,11 @@ export async function updateWorkMenu(
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  // 間接材料は毎回 delete + insert で差し替える（Step 5、シンプルさ優先）。
+  const indirect = parseIndirectMaterials(formData);
+  const r = await replaceIndirectMaterials(supabase, user.id, id, indirect);
+  if (r && "error" in r) return r;
 
   revalidatePath("/dashboard/work-menus");
   redirect("/dashboard/work-menus");
@@ -383,6 +492,23 @@ export async function duplicateWorkMenu(formData: FormData) {
     })
     .select("id")
     .single();
+
+  // 間接材料も複製（コピー元メニューに紐づくエントリをそのまま新メニューに付け直す）。
+  if (inserted?.id) {
+    const { data: srcIndirect } = await supabase
+      .from("work_menu_indirect_materials")
+      .select("part_id, quantity")
+      .eq("menu_item_id", id);
+    if (srcIndirect && srcIndirect.length > 0) {
+      await supabase.from("work_menu_indirect_materials").insert(
+        srcIndirect.map((e) => ({
+          menu_item_id: inserted.id as string,
+          part_id: e.part_id as string,
+          quantity: Number(e.quantity ?? 0),
+        })),
+      );
+    }
+  }
 
   revalidatePath("/dashboard/work-menus");
   if (inserted?.id) {

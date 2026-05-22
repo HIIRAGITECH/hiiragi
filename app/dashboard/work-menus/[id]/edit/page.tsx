@@ -23,7 +23,7 @@ export default async function EditWorkMenuPage(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [menuRes, catsRes, partsRes] = await Promise.all([
+  const [menuRes, catsRes, partsRes, indirectRes] = await Promise.all([
     supabase
       .from("work_menu_items")
       .select("*")
@@ -44,12 +44,21 @@ export default async function EditWorkMenuPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    // このメニューに紐づく標準間接材料（RLS で親メニュー所有者のみ取得可）。
+    supabase
+      .from("work_menu_indirect_materials")
+      .select("part_id, quantity")
+      .eq("menu_item_id", id),
   ]);
 
   if (!menuRes.data) notFound();
   const initial = menuRes.data as WorkMenuItem;
   let allCategories = (catsRes.data ?? []) as WorkItemCategory[];
   let allParts = (partsRes.data ?? []) as PartsInventory[];
+  const initialIndirect = (indirectRes.data ?? []).map((r) => ({
+    part_id: r.part_id as string,
+    quantity: Number(r.quantity ?? 0),
+  }));
 
   // 編集対象の linked_part_id が非表示部品 / 別所有を指す場合に備えて、対象行を別途取得して
   // フォームの選択肢に合流させる（select の初期値が消えると意図せぬ手入力扱いになるため）。
@@ -65,6 +74,21 @@ export default async function EditWorkMenuPage(
       .maybeSingle();
     if (orphanPart) {
       allParts = [...allParts, orphanPart as PartsInventory];
+    }
+  }
+
+  // 間接材料リストが非表示部品を参照しているケースに備えて、orphan も合流させる。
+  const missingIndirectIds = initialIndirect
+    .map((e) => e.part_id)
+    .filter((pid) => !allParts.some((p) => p.id === pid));
+  if (missingIndirectIds.length > 0) {
+    const { data: orphans } = await supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("user_id", user!.id)
+      .in("id", missingIndirectIds);
+    if (orphans && orphans.length > 0) {
+      allParts = [...allParts, ...(orphans as PartsInventory[])];
     }
   }
 
@@ -107,6 +131,7 @@ export default async function EditWorkMenuPage(
           initial={initial}
           allCategories={allCategories}
           allParts={allParts}
+          initialIndirectMaterials={initialIndirect}
           submitLabel="更新する"
           cancelHref="/dashboard/work-menus"
         />

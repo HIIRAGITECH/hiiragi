@@ -29,7 +29,8 @@ export default function StockDeductionSection({
   const [preview, setPreview] = useState<
     | null
     | {
-        rows: StockDeductionPreviewRow[];
+        direct: StockDeductionPreviewRow[];
+        indirect: StockDeductionPreviewRow[];
       }
   >(null);
   const [busy, setBusy] = useState(false);
@@ -44,7 +45,7 @@ export default function StockDeductionSection({
       setError(res.error);
       return;
     }
-    setPreview({ rows: res.rows });
+    setPreview({ direct: res.direct, indirect: res.indirect });
   }
 
   async function handleConfirmDeduct() {
@@ -128,7 +129,8 @@ export default function StockDeductionSection({
 
       {preview && (
         <DeductionConfirmModal
-          rows={preview.rows}
+          direct={preview.direct}
+          indirect={preview.indirect}
           busy={busy}
           onCancel={() => setPreview(null)}
           onConfirm={handleConfirmDeduct}
@@ -139,18 +141,22 @@ export default function StockDeductionSection({
 }
 
 function DeductionConfirmModal({
-  rows,
+  direct,
+  indirect,
   busy,
   onCancel,
   onConfirm,
 }: {
-  rows: StockDeductionPreviewRow[];
+  direct: StockDeductionPreviewRow[];
+  indirect: StockDeductionPreviewRow[];
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const hasShortage = rows.some((r) => r.next_stock < 0);
-  const empty = rows.length === 0;
+  const hasShortage =
+    direct.some((r) => r.next_stock < 0) ||
+    indirect.some((r) => r.next_stock < 0);
+  const empty = direct.length === 0 && indirect.length === 0;
 
   return (
     <div
@@ -174,54 +180,23 @@ function DeductionConfirmModal({
             （明細が部品マスターにリンクされていません）
           </p>
         ) : (
-          <>
-            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-              対象は部品マスターにリンクされた明細のみです。間接材料は含みません。
-            </p>
-            <ul className="mt-3 divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-              {rows.map((r) => {
-                const shortage = r.next_stock < 0;
-                return (
-                  <li
-                    key={r.part_id}
-                    className={`px-3 py-2 text-sm ${
-                      shortage
-                        ? "bg-amber-50 dark:bg-amber-950/20"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-zinc-900 dark:text-zinc-50">
-                        {r.part_name}
-                        {r.deleted && (
-                          <span className="ml-2 rounded bg-zinc-200 px-1 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
-                            非表示
-                          </span>
-                        )}
-                      </span>
-                      <span className="font-mono text-zinc-700 dark:text-zinc-300">
-                        −{r.quantity}
-                        {r.unit ? r.unit : ""}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                      在庫 {r.current_stock} → {r.next_stock}
-                      {shortage && (
-                        <span className="ml-2 font-medium text-amber-700 dark:text-amber-300">
-                          ⚠️ 在庫不足
-                        </span>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+          <div className="mt-3 max-h-[55vh] space-y-3 overflow-y-auto">
+            {direct.length > 0 && (
+              <PreviewSection title="【明細の部品】" rows={direct} />
+            )}
+            {indirect.length > 0 && (
+              <PreviewSection
+                title="【間接材料】"
+                rows={indirect}
+                hint="明細・PDFには表示されません。在庫だけ減らします。"
+              />
+            )}
             {hasShortage && (
-              <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
                 ⚠️ 一部の部品で在庫が不足します。マイナス在庫として記録され、後で棚卸調整できます。
               </p>
             )}
-          </>
+          </div>
         )}
 
         <div className="mt-5 flex justify-end gap-2">
@@ -243,6 +218,65 @@ function DeductionConfirmModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PreviewSection({
+  title,
+  rows,
+  hint,
+}: {
+  title: string;
+  rows: StockDeductionPreviewRow[];
+  hint?: string;
+}) {
+  return (
+    <div>
+      <h4 className="mb-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+        {title}
+      </h4>
+      {hint && (
+        <p className="mb-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+          {hint}
+        </p>
+      )}
+      <ul className="divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+        {rows.map((r) => {
+          const shortage = r.next_stock < 0;
+          return (
+            <li
+              key={r.part_id}
+              className={`px-3 py-2 text-sm ${
+                shortage ? "bg-amber-50 dark:bg-amber-950/20" : ""
+              }`}
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-zinc-900 dark:text-zinc-50">
+                  {r.part_name}
+                  {r.deleted && (
+                    <span className="ml-2 rounded bg-zinc-200 px-1 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                      非表示
+                    </span>
+                  )}
+                </span>
+                <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                  −{r.quantity}
+                  {r.unit ? r.unit : ""}
+                </span>
+              </div>
+              <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                在庫 {r.current_stock} → {r.next_stock}
+                {shortage && (
+                  <span className="ml-2 font-medium text-amber-700 dark:text-amber-300">
+                    ⚠️ 在庫不足
+                  </span>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

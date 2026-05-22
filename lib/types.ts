@@ -123,6 +123,21 @@ export type OrderItem = {
   // 在庫減算（Step 4）でこの id を使って parts_inventory.stock_quantity を減らす。
   // 手入力メニュー由来の明細は null。受注明細を直接マスターに紐づける UI は将来検討。
   linked_part_id?: string | null;
+  // Step 5 で追加。間接材料のスナップショット。メニュー追加時にコピーする。
+  //   part_id    : parts_inventory.id
+  //   quantity   : メニュー1単位あたりの使用量（在庫減算は entry.quantity * 明細 quantity）
+  //   cost_price : スナップショット時の部品原価（粗利計算と固定化のため）
+  // 見積書・請求書には絶対に表示しない。在庫減算と粗利計算にのみ使用。
+  indirect_materials?: IndirectMaterialEntry[];
+};
+
+// 間接材料スナップショット（受注明細に埋め込み）。
+// 値はメニュー登録時の部品マスターから時点コピー。これにより後でマスターが
+// 変わってもこの明細の在庫減算量・粗利計算は固定される。
+export type IndirectMaterialEntry = {
+  part_id: string;
+  quantity: number;
+  cost_price: number;
 };
 
 // 作業メニュー（work_menu_items テーブルの 1 行）
@@ -160,6 +175,17 @@ export type WorkMenuItem = {
   linked_part_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// メニューに紐づく標準間接材料（work_menu_indirect_materials の 1 行）。
+// 1メニュー : N 部品。受注で「メニューから追加」した時点で各エントリの
+// cost_price をスナップショットし、OrderItem.indirect_materials に焼き付ける。
+export type WorkMenuIndirectMaterial = {
+  id: string;
+  menu_item_id: string;
+  part_id: string;
+  quantity: number;
+  created_at: string;
 };
 
 // 作業セット（work_menu_sets テーブルの 1 行）

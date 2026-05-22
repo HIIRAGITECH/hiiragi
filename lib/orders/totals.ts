@@ -125,10 +125,21 @@ export type ProfitSummary = {
   profitRatePercent: number;
 };
 
+// 1 明細あたりの原価。
+//   = (labor_cost_price + parts_cost_price + 間接材料原価合計) × quantity
+// 間接材料は Step 5 の案ア（工賃原価に合算）に従い、ここで合算する。
+// 間接材料原価合計 = Σ(indirect_materials[i].cost_price × indirect_materials[i].quantity)
+// （1 単位あたりの原価。明細 quantity 倍は外側で掛ける）
 function rowCost(item: OrderItem): number {
   const labor = item.labor_cost_price ?? 0;
   const parts = item.parts_cost_price ?? 0;
-  return Math.round((item.quantity ?? 0) * (labor + parts));
+  let indirectPerUnit = 0;
+  if (Array.isArray(item.indirect_materials)) {
+    for (const e of item.indirect_materials) {
+      indirectPerUnit += (e.cost_price ?? 0) * (e.quantity ?? 0);
+    }
+  }
+  return Math.round((item.quantity ?? 0) * (labor + parts + indirectPerUnit));
 }
 
 export function calculateProfit(items: OrderItem[]): ProfitSummary {

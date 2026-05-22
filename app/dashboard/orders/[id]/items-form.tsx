@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import type {
+  IndirectMaterialEntry,
   OrderItem,
   TaxCategory,
   WorkItemCategory,
@@ -37,6 +38,9 @@ type Props = {
   // 受注の在庫引き状態。true のとき明細編集に対して取消→引き直し案内を出す。
   // Step 4 で追加。デフォルト false で後方互換。
   stockDeducted?: boolean;
+  // メニュー id → 標準間接材料スナップショット候補（Step 5）。
+  // メニュー追加・セット追加時に明細へコピーする。空オブジェクトで省略可能。
+  indirectByMenu?: Record<string, IndirectMaterialEntry[]>;
 };
 
 // カテゴリ名から推奨される税区分を返す。
@@ -52,7 +56,10 @@ function legacyCategoryNameFromOldFields(item: OrderItem): string {
 }
 
 // マスターのデフォルト値から ItemRow を作る
-function rowFromMenu(m: WorkMenuItem): ItemRow {
+function rowFromMenu(
+  m: WorkMenuItem,
+  indirectByMenu: Record<string, IndirectMaterialEntry[]>,
+): ItemRow {
   const labor = m.default_labor_cost > 0 ? String(m.default_labor_cost) : "";
   const parts = m.default_parts_cost > 0 ? String(m.default_parts_cost) : "";
   // 原価は 0 でも明細上で見えるようにする（空文字ではなく "0" を初期値に）。
@@ -75,6 +82,9 @@ function rowFromMenu(m: WorkMenuItem): ItemRow {
     // メニューが部品マスターにリンクされていれば、明細にも引き継ぐ。
     // Step 4 で受注確定時に当該部品の在庫を減らす特定子になる。
     linked_part_id: m.linked_part_id ?? "",
+    // 間接材料はメニュー登録時の cost_price を含めてスナップショット（Step 5）。
+    // 以後マスターが変わってもこの明細では固定値で在庫減算 / 粗利計算する。
+    indirect_materials: indirectByMenu[m.id] ?? [],
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
   };
@@ -100,6 +110,9 @@ type ItemRow = {
   // 部品マスター（parts_inventory）への直接リンク。空文字 = 手入力 / 在庫管理対象外。
   // メニュー経由で伝播するが、受注明細フォームから直接編集する UI は今は持たない。
   linked_part_id: string;
+  // 間接材料スナップショット（Step 5）。メニュー追加時にコピー、フォームから直接編集はしない。
+  // 在庫減算と粗利計算でのみ使用。明細表示・PDF には出さない。
+  indirect_materials: IndirectMaterialEntry[];
   // 税区分（システム固定: 'taxable' | 'shaken_non_tax'）。
   tax_category: TaxCategory;
   // 業務カテゴリ id。空文字 = 未設定（互換目的、通常は必ず設定される）。
@@ -146,6 +159,9 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
         : "",
     source_menu_id: i.source_menu_id ?? "",
     linked_part_id: i.linked_part_id ?? "",
+    indirect_materials: Array.isArray(i.indirect_materials)
+      ? i.indirect_materials
+      : [],
     tax_category: taxCategory,
     item_category_id: itemCategoryId,
   };
@@ -181,6 +197,10 @@ function toItem(r: ItemRow, categoryName: string | null): OrderItem {
   if (r.source_menu_id !== "") base.source_menu_id = r.source_menu_id;
   // 部品マスターリンク（Step 3 で追加）。空文字は手入力扱いで省略する。
   if (r.linked_part_id !== "") base.linked_part_id = r.linked_part_id;
+  // 間接材料スナップショット（Step 5）。空配列は省略して jsonb を肥大化させない。
+  if (r.indirect_materials.length > 0) {
+    base.indirect_materials = r.indirect_materials;
+  }
   // 原価は空でなければ数値化、空なら省略（後方互換: 既存データは migration で 0 で埋まる）。
   if (r.labor_cost_price !== "") {
     base.labor_cost_price = Number(r.labor_cost_price) || 0;
@@ -216,6 +236,7 @@ const emptyRow = (
   parts_cost_price: "",
   source_menu_id: "",
   linked_part_id: "",
+  indirect_materials: [],
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
 });
@@ -263,6 +284,7 @@ export default function ItemsForm({
   allSetsWithItems,
   allCategories,
   stockDeducted = false,
+  indirectByMenu = {},
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -360,7 +382,7 @@ export default function ItemsForm({
     // メニューに item_category_id が無い極稀ケースは「整備」相当に振る。
     const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
     const rows = menus.map((m) => {
-      const row = rowFromMenu(m);
+      const row = rowFromMenu(m, indirectByMenu);
       if (!row.item_category_id) row.item_category_id = fallbackId;
       return row;
     });
@@ -371,7 +393,7 @@ export default function ItemsForm({
   function handleSetPickerConfirm(set: SetWithItems) {
     const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
     const rows = set.items.map((x) => {
-      const row = rowFromMenu(x.menu);
+      const row = rowFromMenu(x.menu, indirectByMenu);
       if (!row.item_category_id) row.item_category_id = fallbackId;
       return row;
     });

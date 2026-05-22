@@ -21,8 +21,17 @@ type Props = {
   // 部品マスター（deleted_at IS NULL のアクティブ行のみ、display_order 順）。
   // initial.linked_part_id が非アクティブを指すケースもあり、その時は親で合流させて渡す。
   allParts: PartsInventory[];
+  // 初期の間接材料リスト（編集時のみ。新規時は []）。
+  // part_id は parts_inventory に存在する想定。
+  initialIndirectMaterials?: { part_id: string; quantity: number }[];
   submitLabel: string;
   cancelHref: string;
+};
+
+// 間接材料のフォーム内表現。
+type IndirectRow = {
+  part_id: string;
+  quantity: string; // input value（数字に変換するのは送信時）
 };
 
 const inputClass =
@@ -48,6 +57,7 @@ export default function WorkMenuForm({
   initial,
   allCategories,
   allParts,
+  initialIndirectMaterials = [],
   submitLabel,
   cancelHref,
 }: Props) {
@@ -116,6 +126,59 @@ export default function WorkMenuForm({
   // Step 3 では選択肢から除外する方針。ここではガード表示のみ。
   const selectedPartIsIndirect =
     selectedPart !== null && selectedPart.show_in_detail === false;
+
+  // 間接材料: メニューの標準使用量。送信時は JSON 文字列にして 1 個の hidden input にまとめる。
+  const [indirectRows, setIndirectRows] = useState<IndirectRow[]>(() =>
+    initialIndirectMaterials.map((m) => ({
+      part_id: m.part_id,
+      quantity: String(m.quantity),
+    })),
+  );
+  // 追加用ドロップダウンの選択値。
+  const [addPartId, setAddPartId] = useState<string>("");
+
+  // 既に追加済みの part_id は二重登録を避けて選択肢から除外する。
+  const selectablePartsForIndirect = useMemo(() => {
+    const taken = new Set(indirectRows.map((r) => r.part_id));
+    return allParts.filter((p) => !taken.has(p.id));
+  }, [allParts, indirectRows]);
+
+  function addIndirect() {
+    if (!addPartId) return;
+    setIndirectRows((prev) => [...prev, { part_id: addPartId, quantity: "1" }]);
+    setAddPartId("");
+  }
+
+  function removeIndirect(partId: string) {
+    setIndirectRows((prev) => prev.filter((r) => r.part_id !== partId));
+  }
+
+  function updateIndirectQty(partId: string, qty: string) {
+    setIndirectRows((prev) =>
+      prev.map((r) => (r.part_id === partId ? { ...r, quantity: qty } : r)),
+    );
+  }
+
+  // 送信用 JSON。サーバー側でパース・検証する。
+  const indirectMaterialsJson = useMemo(
+    () =>
+      JSON.stringify(
+        indirectRows
+          .map((r) => ({
+            part_id: r.part_id,
+            quantity: Number(r.quantity) || 0,
+          }))
+          .filter((e) => e.quantity > 0),
+      ),
+    [indirectRows],
+  );
+
+  // 表示用: part_id → 部品行 のマップ。
+  const partsById = useMemo(() => {
+    const m = new Map<string, PartsInventory>();
+    for (const p of allParts) m.set(p.id, p);
+    return m;
+  }, [allParts]);
 
   return (
     <form action={formAction} className="space-y-4">
@@ -424,6 +487,122 @@ export default function WorkMenuForm({
       <p className="-mt-2 text-xs text-zinc-500 dark:text-zinc-400">
         原価は粗利計算用です。見積書・請求書には表示されません。
       </p>
+
+      {/* 標準間接材料セクション（Step 5）。明細に出さず、在庫減算と粗利計算にだけ使う。 */}
+      <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="mb-1 flex items-baseline justify-between">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            標準間接材料 <span className="text-xs text-zinc-500">（任意・複数可）</span>
+          </span>
+          <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+            社内管理用
+          </span>
+        </div>
+        <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
+          明細に出さず工賃に含む部品（Oリング・グリス等）です。受注確定で在庫が
+          <span className="px-0.5 font-mono">標準使用量 × 明細数量</span>
+          減ります。見積書・請求書には表示されません。
+        </p>
+
+        {indirectRows.length > 0 && (
+          <ul className="mb-3 divide-y divide-zinc-200 rounded-md border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+            {indirectRows.map((r) => {
+              const p = partsById.get(r.part_id);
+              return (
+                <li
+                  key={r.part_id}
+                  className="flex items-center gap-3 px-3 py-2 text-sm"
+                >
+                  <span className="flex-1 text-zinc-900 dark:text-zinc-50">
+                    {p?.name ?? "（不明な部品）"}
+                    {p?.show_in_detail === false && (
+                      <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
+                        間接材料
+                      </span>
+                    )}
+                    {p?.deleted_at != null && (
+                      <span className="ml-1.5 rounded bg-zinc-200 px-1 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                        非表示
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                    ×
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.1"
+                    value={r.quantity}
+                    onChange={(e) =>
+                      updateIndirectQty(r.part_id, e.target.value)
+                    }
+                    aria-label="標準使用量"
+                    className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1 text-right text-sm dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+                  />
+                  {p?.unit && (
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {p.unit}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeIndirect(r.part_id)}
+                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                  >
+                    削除
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {allParts.length === 0 ? (
+          <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            部品マスターが未登録です。
+            <Link
+              href="/dashboard/parts-inventory/new"
+              className="ml-1 underline-offset-2 hover:underline"
+            >
+              部品在庫から登録
+            </Link>
+            してください。
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={addPartId}
+              onChange={(e) => setAddPartId(e.target.value)}
+              className={`${inputClass} max-w-md`}
+            >
+              <option value="">（部品を選択）</option>
+              {selectablePartsForIndirect.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                  {p.show_in_detail === false ? "（間接材料）" : ""}
+                  {p.unit ? ` [${p.unit}]` : ""}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={addIndirect}
+              disabled={!addPartId}
+              className="rounded-md border border-dashed border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
+            >
+              ＋ 間接材料を追加
+            </button>
+          </div>
+        )}
+
+        <input
+          type="hidden"
+          name="indirect_materials_json"
+          value={indirectMaterialsJson}
+        />
+      </div>
 
       <div>
         <label htmlFor="memo" className={labelClass}>

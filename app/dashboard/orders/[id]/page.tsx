@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import DeleteButton from "@/lib/components/delete-button";
 import type {
   Customer,
+  IndirectMaterialEntry,
   Order,
+  PartsInventory,
   Vehicle,
   WorkItemCategory,
   WorkMenuItem,
@@ -53,6 +55,8 @@ export default async function OrderDetailPage(
     setsRes,
     setItemsRes,
     catsRes,
+    partsRes,
+    indirectRes,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -96,6 +100,17 @@ export default async function OrderDetailPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    // 部品マスター: メニュー追加時の間接材料スナップショットで cost_price を引くために必要。
+    // 削除済みもスナップショットの原価を取りたいので含める。
+    supabase
+      .from("parts_inventory")
+      .select("id, cost_price")
+      .eq("user_id", user!.id),
+    // 間接材料: ユーザーの全メニューに紐づくエントリを一括取得。
+    // RLS（親メニュー所有チェック）で他人のものは弾かれる。
+    supabase
+      .from("work_menu_indirect_materials")
+      .select("menu_item_id, part_id, quantity"),
   ]);
 
   const customer = customerData as Customer | null;
@@ -108,6 +123,32 @@ export default async function OrderDetailPage(
     position: number;
   }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+
+  // メニュー id → 間接材料スナップショット候補のマップ。
+  // part_id ごとに parts_inventory.cost_price を引いてスナップ用配列を構築する。
+  // メニュー追加時にこの配列をそのまま OrderItem.indirect_materials へコピーする。
+  const partsCostMap = new Map<string, number>();
+  for (const p of (partsRes.data ?? []) as Pick<
+    PartsInventory,
+    "id" | "cost_price"
+  >[]) {
+    partsCostMap.set(p.id, Number(p.cost_price ?? 0));
+  }
+  const indirectByMenu: Record<string, IndirectMaterialEntry[]> = {};
+  for (const e of (indirectRes.data ?? []) as {
+    menu_item_id: string;
+    part_id: string;
+    quantity: number;
+  }[]) {
+    const mid = e.menu_item_id;
+    if (!indirectByMenu[mid]) indirectByMenu[mid] = [];
+    indirectByMenu[mid].push({
+      part_id: e.part_id,
+      quantity: Number(e.quantity ?? 0),
+      cost_price: partsCostMap.get(e.part_id) ?? 0,
+    });
+  }
+
   // セットを「中身を menu 解決済み配列で持つ」形にして渡す
   const menuMap = new Map(allMenus.map((m) => [m.id, m]));
   const allSetsWithItems = allSets.map((s) => ({
@@ -270,6 +311,7 @@ export default async function OrderDetailPage(
             allSetsWithItems={allSetsWithItems}
             allCategories={allCategories}
             stockDeducted={order.stock_deducted}
+            indirectByMenu={indirectByMenu}
           />
         </div>
       </section>

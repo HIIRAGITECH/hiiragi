@@ -229,6 +229,29 @@ function parseItems(
         const v = r.linked_part_id.trim();
         item.linked_part_id = v === "" ? null : v;
       }
+      // Step 5: 間接材料スナップショット。part_id/quantity/cost_price の配列で受け取る。
+      // 不正な要素はスキップ、quantity<=0 や cost_price<0 もスキップ。
+      // 不正値で全体を null にすると既存処理（数量/単価 < 0 で null 返却）と紛らわしいため、
+      // ここでは弾けるものを弾いて配列をそのまま渡す。
+      if (Array.isArray(r?.indirect_materials)) {
+        const out: {
+          part_id: string;
+          quantity: number;
+          cost_price: number;
+        }[] = [];
+        const seen = new Set<string>();
+        for (const e of r.indirect_materials) {
+          const pid = typeof e?.part_id === "string" ? e.part_id.trim() : "";
+          const qty = Number(e?.quantity);
+          const cp = Number(e?.cost_price);
+          if (!pid || seen.has(pid)) continue;
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          if (!Number.isFinite(cp) || cp < 0) continue;
+          seen.add(pid);
+          out.push({ part_id: pid, quantity: qty, cost_price: cp });
+        }
+        if (out.length > 0) item.indirect_materials = out;
+      }
       items.push(item);
     }
     return items;
@@ -517,12 +540,15 @@ export type StockDeductionPreviewRow = {
   deleted: boolean;       // 部品が非表示化されている
 };
 
+// 直接部品（linked_part_id）と間接材料（indirect_materials）を別セクションで返す。
+// UI モーダルが「明細の部品」「間接材料」と分けて表示できるようにするため。
 export type StockDeductionPreview =
   | { error: string }
   | {
       already_deducted: boolean;
       stock_deducted_at: string | null;
-      rows: StockDeductionPreviewRow[];
+      direct: StockDeductionPreviewRow[];
+      indirect: StockDeductionPreviewRow[];
     };
 
 export async function getStockDeductionPreview(
@@ -545,34 +571,53 @@ export async function getStockDeductionPreview(
   if (!order) return { error: "受注が見つかりません。" };
 
   const items = (order.items ?? []) as OrderItem[];
-  // part_id ごとに数量を合算。
-  const agg = new Map<string, number>();
+  // 直接部品: linked_part_id ごとに数量合算。
+  // 間接材料: 各明細の indirect_materials[*].quantity * 明細 quantity を part_id ごとに合算。
+  const directAgg = new Map<string, number>();
+  const indirectAgg = new Map<string, number>();
   for (const it of items) {
-    const pid = it.linked_part_id;
-    if (!pid) continue;
-    const qty = Number(it.quantity ?? 0);
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-    agg.set(pid, (agg.get(pid) ?? 0) + qty);
+    const lineQty = Number(it.quantity ?? 0);
+    if (!Number.isFinite(lineQty) || lineQty <= 0) continue;
+    if (it.linked_part_id) {
+      directAgg.set(
+        it.linked_part_id,
+        (directAgg.get(it.linked_part_id) ?? 0) + lineQty,
+      );
+    }
+    if (Array.isArray(it.indirect_materials)) {
+      for (const e of it.indirect_materials) {
+        if (!e?.part_id) continue;
+        const q = Number(e.quantity ?? 0) * lineQty;
+        if (!Number.isFinite(q) || q <= 0) continue;
+        indirectAgg.set(e.part_id, (indirectAgg.get(e.part_id) ?? 0) + q);
+      }
+    }
   }
 
-  if (agg.size === 0) {
+  const allPartIds = Array.from(
+    new Set([...directAgg.keys(), ...indirectAgg.keys()]),
+  );
+
+  if (allPartIds.length === 0) {
     return {
       already_deducted: !!order.stock_deducted,
       stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
-      rows: [],
+      direct: [],
+      indirect: [],
     };
   }
 
-  const partIds = Array.from(agg.keys());
   const { data: parts } = await supabase
     .from("parts_inventory")
     .select("id, name, stock_quantity, unit, deleted_at")
     .eq("user_id", user.id)
-    .in("id", partIds);
+    .in("id", allPartIds);
 
-  const rows: StockDeductionPreviewRow[] = partIds.map((pid) => {
+  function buildRow(
+    pid: string,
+    qty: number,
+  ): StockDeductionPreviewRow {
     const p = parts?.find((x) => x.id === pid);
-    const qty = agg.get(pid) ?? 0;
     const current = Number(p?.stock_quantity ?? 0);
     return {
       part_id: pid,
@@ -583,12 +628,18 @@ export async function getStockDeductionPreview(
       unit: (p?.unit as string | null) ?? null,
       deleted: p?.deleted_at != null,
     };
-  });
+  }
+
+  const direct: StockDeductionPreviewRow[] = [];
+  for (const [pid, qty] of directAgg) direct.push(buildRow(pid, qty));
+  const indirect: StockDeductionPreviewRow[] = [];
+  for (const [pid, qty] of indirectAgg) indirect.push(buildRow(pid, qty));
 
   return {
     already_deducted: !!order.stock_deducted,
     stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
-    rows,
+    direct,
+    indirect,
   };
 }
 
