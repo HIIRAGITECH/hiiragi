@@ -247,6 +247,8 @@ export type PartsInventory = {
   id: string;
   user_id: string;
   name: string;
+  internal_code: string | null;
+  external_code: string | null;
   cost_price: number;
   sale_price: number | null;
   show_in_detail: boolean;

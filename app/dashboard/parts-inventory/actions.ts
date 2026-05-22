@@ -37,6 +37,8 @@ function pickBool(formData: FormData, key: string): boolean {
 // フォーム共通のペイロード（編集時は initial_stock_quantity を読まない）。
 type PartPayload = {
   name: string;
+  internal_code: string | null;
+  external_code: string | null;
   cost_price: number;
   sale_price: number | null;
   show_in_detail: boolean;
@@ -51,6 +53,8 @@ function readPartPayload(formData: FormData): PartPayload | { error: string } {
   if (!name) return { error: "部品名は必須です。" };
   return {
     name,
+    internal_code: pickString(formData, "internal_code"),
+    external_code: pickString(formData, "external_code"),
     cost_price: pickNumber(formData, "cost_price", 0),
     sale_price: pickNullableNumber(formData, "sale_price"),
     show_in_detail: pickBool(formData, "show_in_detail"),
@@ -202,7 +206,7 @@ export async function duplicatePart(formData: FormData) {
   const { data: src } = await supabase
     .from("parts_inventory")
     .select(
-      "name, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo",
+      "name, internal_code, external_code, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo",
     )
     .eq("id", id)
     .eq("user_id", user.id)
