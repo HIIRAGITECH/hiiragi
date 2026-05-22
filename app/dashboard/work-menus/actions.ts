@@ -56,6 +56,9 @@ type Payload = {
   memo: string | null;
   tax_category: TaxCategory;
   item_category_id: string;
+  // 部品マスターリンク。'マスターから選ぶ' で部品を選んだ場合のみ非 null。
+  // 値は呼び出し側で parts_inventory の存在/所有を検証してから書き込む。
+  linked_part_id: string | null;
 };
 
 function readPayload(formData: FormData): Payload | { error: string } {
@@ -80,6 +83,41 @@ function readPayload(formData: FormData): Payload | { error: string } {
     memo: pickString(formData, "memo"),
     tax_category,
     item_category_id,
+    linked_part_id: pickString(formData, "linked_part_id"),
+  };
+}
+
+// 部品マスターの存在・所有・アクティブを確認。null を返したら手入力扱いに丸める。
+// 削除済み（deleted_at != null）の部品は新規にリンクさせない（既存リンクは別経路で扱う）。
+async function resolveLinkedPart(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  linkedPartId: string | null,
+): Promise<
+  | { ok: true; part: null }
+  | { ok: true; part: { id: string; name: string; sale_price: number | null; cost_price: number } }
+  | { error: string }
+> {
+  if (!linkedPartId) return { ok: true, part: null };
+  const { data } = await supabase
+    .from("parts_inventory")
+    .select("id, name, sale_price, cost_price, deleted_at")
+    .eq("id", linkedPartId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return { error: "選択した部品が見つかりません。" };
+  if (data.deleted_at !== null) {
+    return { error: "非表示の部品はリンクできません。" };
+  }
+  return {
+    ok: true,
+    part: {
+      id: data.id as string,
+      name: data.name as string,
+      sale_price:
+        typeof data.sale_price === "number" ? data.sale_price : null,
+      cost_price: Number(data.cost_price ?? 0),
+    },
   };
 }
 
@@ -138,6 +176,18 @@ export async function createWorkMenu(
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
+  // linked_part_id が指定されていれば検証してマスター値を反映（スナップショット）。
+  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
+  if ("error" in partRes) return partRes;
+  if (partRes.part) {
+    result.part_name = partRes.part.name;
+    result.default_parts_cost = partRes.part.sale_price ?? 0;
+    result.parts_cost_price = partRes.part.cost_price;
+    result.linked_part_id = partRes.part.id;
+  } else {
+    result.linked_part_id = null;
+  }
+
   // display_order は既存最大値 + 1（同 user_id 内）
   const { data: maxRow } = await supabase
     .from("work_menu_items")
@@ -179,6 +229,18 @@ export async function updateWorkMenu(
   const cat = await resolveCategoryName(supabase, user.id, result.item_category_id);
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
+
+  // 編集時もマスター選択なら最新値で上書き、手入力なら linked_part_id を null に戻す。
+  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
+  if ("error" in partRes) return partRes;
+  if (partRes.part) {
+    result.part_name = partRes.part.name;
+    result.default_parts_cost = partRes.part.sale_price ?? 0;
+    result.parts_cost_price = partRes.part.cost_price;
+    result.linked_part_id = partRes.part.id;
+  } else {
+    result.linked_part_id = null;
+  }
 
   const { error } = await supabase
     .from("work_menu_items")
@@ -294,7 +356,7 @@ export async function duplicateWorkMenu(formData: FormData) {
   const { data: src } = await supabase
     .from("work_menu_items")
     .select(
-      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id",
+      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id, linked_part_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -345,6 +407,8 @@ export type RegisterMenuPayload = {
   parts_cost_price: number;
   tax_category: TaxCategory;
   item_category_id: string;
+  // 明細行が linked_part_id を持っていればマスター登録時にも引き継ぐ。
+  linked_part_id?: string | null;
 };
 
 export type RegisterMenuResult =
@@ -388,6 +452,21 @@ export async function registerOrderItemAsMenu(
   const nextOrder =
     typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
 
+  // linked_part_id が指定されていれば検証。手入力 (null) はそのまま。
+  // 削除済み・他テナント所有 → エラー扱いではなく null に丸める（明細経由の登録なので
+  // 「リンクが取れなくてもマスター登録は完了させたい」運用を優先）。
+  let linked_part_id: string | null = null;
+  if (payload.linked_part_id) {
+    const partRes = await resolveLinkedPart(
+      supabase,
+      user.id,
+      payload.linked_part_id,
+    );
+    if ("ok" in partRes && partRes.part) {
+      linked_part_id = partRes.part.id;
+    }
+  }
+
   const { data: inserted, error } = await supabase
     .from("work_menu_items")
     .insert({
@@ -399,6 +478,7 @@ export async function registerOrderItemAsMenu(
       default_parts_cost: payload.default_parts_cost,
       labor_cost_price: payload.labor_cost_price,
       parts_cost_price: payload.parts_cost_price,
+      linked_part_id,
       // 新フィールド
       tax_category: payload.tax_category,
       item_category_id: payload.item_category_id,

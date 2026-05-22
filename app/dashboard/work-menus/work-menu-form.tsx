@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
+import { formatYen } from "@/lib/format";
 import type {
+  PartsInventory,
   TaxCategory,
   WorkItemCategory,
   WorkMenuItem,
@@ -16,12 +18,18 @@ type Props = {
   // initial.item_category_id が deleted_at 等で含まれない場合に備えて、
   // 親ページ側で initial のカテゴリも合流させて渡してもよい。
   allCategories: WorkItemCategory[];
+  // 部品マスター（deleted_at IS NULL のアクティブ行のみ、display_order 順）。
+  // initial.linked_part_id が非アクティブを指すケースもあり、その時は親で合流させて渡す。
+  allParts: PartsInventory[];
   submitLabel: string;
   cancelHref: string;
 };
 
 const inputClass =
   "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
+
+const readonlyClass =
+  "w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300";
 
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
@@ -33,10 +41,13 @@ function defaultTaxCategoryFor(name: string | undefined): TaxCategory {
   return name === "車検法定費用" ? "shaken_non_tax" : "taxable";
 }
 
+type PartsMode = "master" | "manual";
+
 export default function WorkMenuForm({
   action,
   initial,
   allCategories,
+  allParts,
   submitLabel,
   cancelHref,
 }: Props) {
@@ -68,6 +79,44 @@ export default function WorkMenuForm({
     setTaxCategory(defaultTaxCategoryFor(next?.name));
   }
 
+  // 部品モード: 編集時 initial.linked_part_id があれば 'master'、それ以外は 'manual'（新規も含む）。
+  const [partsMode, setPartsMode] = useState<PartsMode>(
+    initial?.linked_part_id ? "master" : "manual",
+  );
+
+  // マスターから選んだ部品 id（master モード時のみ意味あり）。
+  const [linkedPartId, setLinkedPartId] = useState<string>(
+    initial?.linked_part_id ?? "",
+  );
+
+  // 手入力モード時の部品名・部品代・部品代原価。
+  // master モードに切り替えても入力中の値は捨てない（戻したときに復元できる）。
+  const [manualPartName, setManualPartName] = useState<string>(
+    initial?.part_name ?? "",
+  );
+  const [manualPartsCost, setManualPartsCost] = useState<string>(
+    String(initial?.default_parts_cost ?? 0),
+  );
+  const [manualPartsCostPrice, setManualPartsCostPrice] = useState<string>(
+    String(initial?.parts_cost_price ?? 0),
+  );
+
+  const selectedPart = useMemo(
+    () => allParts.find((p) => p.id === linkedPartId) ?? null,
+    [allParts, linkedPartId],
+  );
+
+  // master モード用の表示値（読み取り専用）。選択前は空表示。
+  // sale_price が null の部品（間接材料）はリンク不可。UI 側で選択肢から除外する。
+  const masterPartName = selectedPart?.name ?? "";
+  const masterPartsCost = selectedPart?.sale_price ?? 0;
+  const masterPartsCostPrice = selectedPart?.cost_price ?? 0;
+
+  // master モードで「明細に出す」=false の部品が選ばれた場合の警告（間接材料は明細に乗らない）。
+  // Step 3 では選択肢から除外する方針。ここではガード表示のみ。
+  const selectedPartIsIndirect =
+    selectedPart !== null && selectedPart.show_in_detail === false;
+
   return (
     <form action={formAction} className="space-y-4">
       <div>
@@ -81,19 +130,6 @@ export default function WorkMenuForm({
           defaultValue={initial?.work_name ?? ""}
           className={inputClass}
           placeholder="例: エンジンオイル交換"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="part_name" className={labelClass}>
-          部品名 <span className="text-xs text-zinc-500">（任意）</span>
-        </label>
-        <input
-          id="part_name"
-          name="part_name"
-          defaultValue={initial?.part_name ?? ""}
-          className={inputClass}
-          placeholder="例: モチュール 300V 5W-40 4L"
         />
       </div>
 
@@ -155,6 +191,177 @@ export default function WorkMenuForm({
         </p>
       </div>
 
+      {/* 部品セクション: マスターから選ぶ / 手入力 の切り替え。
+          いずれのモードでも最終的に name="part_name" / "default_parts_cost" /
+          "parts_cost_price" / "linked_part_id" を formData に乗せて送信する。 */}
+      <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            部品 <span className="text-xs text-zinc-500">（任意）</span>
+          </span>
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm">
+            <input
+              type="radio"
+              name="parts_mode"
+              checked={partsMode === "master"}
+              onChange={() => setPartsMode("master")}
+            />
+            <span>マスターから選ぶ</span>
+          </label>
+          <label className="flex cursor-pointer items-center gap-1.5 text-sm">
+            <input
+              type="radio"
+              name="parts_mode"
+              checked={partsMode === "manual"}
+              onChange={() => setPartsMode("manual")}
+            />
+            <span>手入力</span>
+          </label>
+        </div>
+
+        {partsMode === "master" ? (
+          <div className="space-y-3">
+            {allParts.length === 0 ? (
+              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                部品マスターが未登録です。
+                <Link
+                  href="/dashboard/parts-inventory/new"
+                  className="ml-1 underline-offset-2 hover:underline"
+                >
+                  部品在庫から登録
+                </Link>
+                してください。
+              </p>
+            ) : (
+              <div>
+                <label htmlFor="linked_part_select" className={labelClass}>
+                  部品マスターを選択
+                </label>
+                <select
+                  id="linked_part_select"
+                  value={linkedPartId}
+                  onChange={(e) => setLinkedPartId(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">（未選択）</option>
+                  {allParts.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.show_in_detail === false ? "（間接材料）" : ""}
+                      {p.sale_price != null
+                        ? ` — 売価 ${formatYen(p.sale_price)}`
+                        : " — 売価なし"}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  選択した部品の名前・売価・原価が自動で入ります。マスターを変更すると次回の編集時に反映されます。
+                </p>
+                {selectedPartIsIndirect && (
+                  <p className="mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                    この部品は「間接材料」設定です。明細にはこのメニュー経由で表示されますが、運用上は工賃メニューへの紐付けを推奨します。
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <span className={labelClass}>部品名</span>
+                <div className={readonlyClass}>{masterPartName || "—"}</div>
+              </div>
+              <div>
+                <span className={labelClass}>部品代（売価）</span>
+                <div className={`${readonlyClass} text-right`}>
+                  {selectedPart ? formatYen(masterPartsCost) : "—"}
+                </div>
+              </div>
+              <div className="sm:col-span-2">
+                <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                  部品代 原価 <span className="text-[10px]">（社内管理用）</span>
+                </span>
+                <div className={`${readonlyClass} text-right`}>
+                  {selectedPart ? formatYen(masterPartsCostPrice) : "—"}
+                </div>
+              </div>
+            </div>
+
+            {/* 送信用の hidden フィールド。
+                未選択 (linkedPartId === "") の場合は空送信される。
+                サーバー側でその場合は手入力扱い（linked_part_id=null, 部品名/値は空/0）にする。 */}
+            <input type="hidden" name="linked_part_id" value={linkedPartId} />
+            <input
+              type="hidden"
+              name="part_name"
+              value={selectedPart ? masterPartName : ""}
+            />
+            <input
+              type="hidden"
+              name="default_parts_cost"
+              value={selectedPart ? masterPartsCost : 0}
+            />
+            <input
+              type="hidden"
+              name="parts_cost_price"
+              value={selectedPart ? masterPartsCostPrice : 0}
+            />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="part_name" className={labelClass}>
+                部品名
+              </label>
+              <input
+                id="part_name"
+                name="part_name"
+                value={manualPartName}
+                onChange={(e) => setManualPartName(e.target.value)}
+                className={inputClass}
+                placeholder="例: モチュール 300V 5W-40 4L"
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label htmlFor="default_parts_cost" className={labelClass}>
+                  部品代デフォルト
+                </label>
+                <input
+                  id="default_parts_cost"
+                  name="default_parts_cost"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={manualPartsCost}
+                  onChange={(e) => setManualPartsCost(e.target.value)}
+                  className={`${inputClass} text-right`}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="parts_cost_price"
+                  className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
+                >
+                  部品代 原価 <span className="text-[10px]">（社内管理用）</span>
+                </label>
+                <input
+                  id="parts_cost_price"
+                  name="parts_cost_price"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={manualPartsCostPrice}
+                  onChange={(e) => setManualPartsCostPrice(e.target.value)}
+                  className={`${inputClass} text-right`}
+                />
+              </div>
+            </div>
+            {/* 手入力モードでは linked_part_id を空にして送信 */}
+            <input type="hidden" name="linked_part_id" value="" />
+          </div>
+        )}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="default_quantity" className={labelClass}>
@@ -210,35 +417,6 @@ export default function WorkMenuForm({
             min={0}
             step={1}
             defaultValue={initial?.labor_cost_price ?? 0}
-            className={`${inputClass} text-right`}
-          />
-        </div>
-        <div>
-          <label htmlFor="default_parts_cost" className={labelClass}>
-            部品代デフォルト
-          </label>
-          <input
-            id="default_parts_cost"
-            name="default_parts_cost"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={initial?.default_parts_cost ?? 0}
-            className={`${inputClass} text-right`}
-          />
-          <label
-            htmlFor="parts_cost_price"
-            className="mt-2 mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
-          >
-            部品代 原価 <span className="text-[10px]">（社内管理用）</span>
-          </label>
-          <input
-            id="parts_cost_price"
-            name="parts_cost_price"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={initial?.parts_cost_price ?? 0}
             className={`${inputClass} text-right`}
           />
         </div>

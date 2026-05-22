@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
+import type {
+  PartsInventory,
+  WorkItemCategory,
+  WorkMenuItem,
+} from "@/lib/types";
 import WorkMenuForm from "../../work-menu-form";
 import { updateWorkMenu } from "../../actions";
 
@@ -19,7 +23,7 @@ export default async function EditWorkMenuPage(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [menuRes, catsRes] = await Promise.all([
+  const [menuRes, catsRes, partsRes] = await Promise.all([
     supabase
       .from("work_menu_items")
       .select("*")
@@ -33,11 +37,36 @@ export default async function EditWorkMenuPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   if (!menuRes.data) notFound();
   const initial = menuRes.data as WorkMenuItem;
   let allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+  let allParts = (partsRes.data ?? []) as PartsInventory[];
+
+  // 編集対象の linked_part_id が非表示部品 / 別所有を指す場合に備えて、対象行を別途取得して
+  // フォームの選択肢に合流させる（select の初期値が消えると意図せぬ手入力扱いになるため）。
+  if (
+    initial.linked_part_id &&
+    !allParts.some((p) => p.id === initial.linked_part_id)
+  ) {
+    const { data: orphanPart } = await supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("id", initial.linked_part_id)
+      .eq("user_id", user!.id)
+      .maybeSingle();
+    if (orphanPart) {
+      allParts = [...allParts, orphanPart as PartsInventory];
+    }
+  }
 
   // 編集対象の item_category_id がアクティブ一覧に無い（=削除済みカテゴリ）場合に
   // セレクトの選択肢から外れて初期値が変わってしまうのを防ぐ。
@@ -77,6 +106,7 @@ export default async function EditWorkMenuPage(
           action={action}
           initial={initial}
           allCategories={allCategories}
+          allParts={allParts}
           submitLabel="更新する"
           cancelHref="/dashboard/work-menus"
         />

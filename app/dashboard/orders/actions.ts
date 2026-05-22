@@ -224,6 +224,11 @@ function parseItems(
         const v = r.source_menu_id.trim();
         item.source_menu_id = v === "" ? null : v;
       }
+      // Step 3: 部品マスター直リンク。Step 4 で在庫減算の特定子に使用する。
+      if (typeof r?.linked_part_id === "string") {
+        const v = r.linked_part_id.trim();
+        item.linked_part_id = v === "" ? null : v;
+      }
       items.push(item);
     }
     return items;

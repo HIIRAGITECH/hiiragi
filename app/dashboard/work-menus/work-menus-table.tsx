@@ -286,7 +286,15 @@ export default function WorkMenusTable({
                       )}
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {r.part_name ?? "—"}
+                      <span>{r.part_name ?? "—"}</span>
+                      {r.linked_part_id && (
+                        <span
+                          className="ml-1.5 rounded bg-blue-100 px-1 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                          title="部品マスターにリンクされています（在庫管理対象）"
+                        >
+                          🔗 在庫
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-400">
                       <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">

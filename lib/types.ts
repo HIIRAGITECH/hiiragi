@@ -119,6 +119,10 @@ export type OrderItem = {
   // Step 6-1 で追加。既存ロジックは未参照（旧 type/tax_free を使い続ける）。
   tax_category?: TaxCategory;
   item_category_id?: string | null;
+  // Step 3 で追加。「メニュー → 部品マスター」リンクを明細にも伝播する。
+  // 在庫減算（Step 4）でこの id を使って parts_inventory.stock_quantity を減らす。
+  // 手入力メニュー由来の明細は null。受注明細を直接マスターに紐づける UI は将来検討。
+  linked_part_id?: string | null;
 };
 
 // 作業メニュー（work_menu_items テーブルの 1 行）
@@ -148,6 +152,12 @@ export type WorkMenuItem = {
   tax_category: TaxCategory;
   // ON DELETE SET NULL のため null になり得る。新規行は通常 not null で運用する。
   item_category_id: string | null;
+  // Step 3 で追加。部品マスター (parts_inventory) との紐付け。
+  //   null      = 手入力（後方互換、在庫管理対象外）
+  //   non-null  = 「マスターから選ぶ」モードで作成。部品名・売価・原価は登録時点のスナップショット。
+  // 在庫減算（Step 4）はこの id を使って当該行を特定する。
+  // 親部品が物理削除されると DB 側 ON DELETE SET NULL で null に戻り、手入力扱いになる。
+  linked_part_id: string | null;
   created_at: string;
   updated_at: string;
 };

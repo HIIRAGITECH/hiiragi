@@ -69,6 +69,9 @@ function rowFromMenu(m: WorkMenuItem): ItemRow {
     labor_cost_price: laborCp > 0 ? String(laborCp) : "",
     parts_cost_price: partsCp > 0 ? String(partsCp) : "",
     source_menu_id: m.id,
+    // メニューが部品マスターにリンクされていれば、明細にも引き継ぐ。
+    // Step 4 で受注確定時に当該部品の在庫を減らす特定子になる。
+    linked_part_id: m.linked_part_id ?? "",
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
   };
@@ -91,6 +94,9 @@ type ItemRow = {
   parts_cost_price: string;
   // 作業メニューマスターから挿入された場合のみセット。null/空文字は手入力扱い。
   source_menu_id: string;
+  // 部品マスター（parts_inventory）への直接リンク。空文字 = 手入力 / 在庫管理対象外。
+  // メニュー経由で伝播するが、受注明細フォームから直接編集する UI は今は持たない。
+  linked_part_id: string;
   // 税区分（システム固定: 'taxable' | 'shaken_non_tax'）。
   tax_category: TaxCategory;
   // 業務カテゴリ id。空文字 = 未設定（互換目的、通常は必ず設定される）。
@@ -136,6 +142,7 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
         ? String(i.parts_cost_price)
         : "",
     source_menu_id: i.source_menu_id ?? "",
+    linked_part_id: i.linked_part_id ?? "",
     tax_category: taxCategory,
     item_category_id: itemCategoryId,
   };
@@ -169,6 +176,8 @@ function toItem(r: ItemRow, categoryName: string | null): OrderItem {
   if (r.part_name.trim() !== "") base.part_name = r.part_name.trim();
   if (r.note.trim() !== "") base.note = r.note.trim();
   if (r.source_menu_id !== "") base.source_menu_id = r.source_menu_id;
+  // 部品マスターリンク（Step 3 で追加）。空文字は手入力扱いで省略する。
+  if (r.linked_part_id !== "") base.linked_part_id = r.linked_part_id;
   // 原価は空でなければ数値化、空なら省略（後方互換: 既存データは migration で 0 で埋まる）。
   if (r.labor_cost_price !== "") {
     base.labor_cost_price = Number(r.labor_cost_price) || 0;
@@ -203,6 +212,7 @@ const emptyRow = (
   labor_cost_price: "",
   parts_cost_price: "",
   source_menu_id: "",
+  linked_part_id: "",
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
 });
@@ -407,6 +417,8 @@ export default function ItemsForm({
       parts_cost_price: item.parts_cost_price ?? 0,
       tax_category: r.tax_category,
       item_category_id: r.item_category_id,
+      // 明細がリンクを持っていればマスター側にも引き継ぐ。
+      linked_part_id: r.linked_part_id !== "" ? r.linked_part_id : null,
     })
       .then((res) => {
         if ("error" in res) {
