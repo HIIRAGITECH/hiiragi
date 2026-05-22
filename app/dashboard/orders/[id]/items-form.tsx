@@ -34,6 +34,9 @@ type Props = {
   allSetsWithItems: SetWithItems[];
   // 業務カテゴリ（アクティブのみ、display_order 昇順）
   allCategories: WorkItemCategory[];
+  // 受注の在庫引き状態。true のとき明細編集に対して取消→引き直し案内を出す。
+  // Step 4 で追加。デフォルト false で後方互換。
+  stockDeducted?: boolean;
 };
 
 // カテゴリ名から推奨される税区分を返す。
@@ -259,6 +262,7 @@ export default function ItemsForm({
   allMenus,
   allSetsWithItems,
   allCategories,
+  stockDeducted = false,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -461,6 +465,11 @@ export default function ItemsForm({
 
   return (
     <form action={formAction} className="space-y-6">
+      {stockDeducted && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+          ⚠️ この受注は在庫引き済みです。明細を変更した場合は、一度「在庫引きを取り消す」してから引き直してください（自動では差分調整されません）。
+        </div>
+      )}
       <input
         type="hidden"
         name="items_json"

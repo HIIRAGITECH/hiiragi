@@ -21,6 +21,7 @@ import {
 } from "../actions";
 import ItemsForm from "./items-form";
 import OrderStatusBar from "./order-status-bar";
+import StockDeductionSection from "./stock-deduction-section";
 
 export const metadata: Metadata = {
   title: "受注詳細 | HIIRAGI",
@@ -268,9 +269,17 @@ export default async function OrderDetailPage(
             allMenus={allMenus}
             allSetsWithItems={allSetsWithItems}
             allCategories={allCategories}
+            stockDeducted={order.stock_deducted}
           />
         </div>
       </section>
+
+      {/* 在庫引き（Step 4）: 明細編集の後ろ、帳票出力の前に配置。 */}
+      <StockDeductionSection
+        orderId={order.id}
+        stockDeducted={order.stock_deducted}
+        stockDeductedAt={order.stock_deducted_at}
+      />
 
       {/* 整備写真フォルダの入力は ItemsForm 内に統合済み（「内容を保存」で一括保存）。 */}
 

@@ -497,6 +497,171 @@ export async function updateArchived(
   return undefined;
 }
 
+// ============================================
+// 在庫引き（Step 4）
+// ============================================
+// 受注詳細画面の「📦 在庫を引く」ボタンから呼ばれる。
+// 実体は PL/pgSQL の deduct_order_stock / reverse_order_stock_deduction RPC で、
+// 受注行・部品在庫・履歴を 1 トランザクションで更新する。
+//
+// プレビューは linked_part_id 付き明細を集計し、部品の現在在庫と引き後を返す。
+// 同じ part_id を複数明細が指す場合は数量を合算（在庫としては合計を引くため）。
+
+export type StockDeductionPreviewRow = {
+  part_id: string;
+  part_name: string;
+  current_stock: number;
+  quantity: number;       // 引く数量（正の値）
+  next_stock: number;     // 引き後在庫（負になり得る）
+  unit: string | null;
+  deleted: boolean;       // 部品が非表示化されている
+};
+
+export type StockDeductionPreview =
+  | { error: string }
+  | {
+      already_deducted: boolean;
+      stock_deducted_at: string | null;
+      rows: StockDeductionPreviewRow[];
+    };
+
+export async function getStockDeductionPreview(
+  orderId: string,
+): Promise<StockDeductionPreview> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, items, stock_deducted, stock_deducted_at")
+    .eq("id", orderId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!order) return { error: "受注が見つかりません。" };
+
+  const items = (order.items ?? []) as OrderItem[];
+  // part_id ごとに数量を合算。
+  const agg = new Map<string, number>();
+  for (const it of items) {
+    const pid = it.linked_part_id;
+    if (!pid) continue;
+    const qty = Number(it.quantity ?? 0);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+    agg.set(pid, (agg.get(pid) ?? 0) + qty);
+  }
+
+  if (agg.size === 0) {
+    return {
+      already_deducted: !!order.stock_deducted,
+      stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
+      rows: [],
+    };
+  }
+
+  const partIds = Array.from(agg.keys());
+  const { data: parts } = await supabase
+    .from("parts_inventory")
+    .select("id, name, stock_quantity, unit, deleted_at")
+    .eq("user_id", user.id)
+    .in("id", partIds);
+
+  const rows: StockDeductionPreviewRow[] = partIds.map((pid) => {
+    const p = parts?.find((x) => x.id === pid);
+    const qty = agg.get(pid) ?? 0;
+    const current = Number(p?.stock_quantity ?? 0);
+    return {
+      part_id: pid,
+      part_name: (p?.name as string) ?? "（不明な部品）",
+      current_stock: current,
+      quantity: qty,
+      next_stock: current - qty,
+      unit: (p?.unit as string | null) ?? null,
+      deleted: p?.deleted_at != null,
+    };
+  });
+
+  return {
+    already_deducted: !!order.stock_deducted,
+    stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
+    rows,
+  };
+}
+
+export async function deductStock(
+  orderId: string,
+): Promise<{ error: string } | { success: true; deducted_count: number }> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data, error } = await supabase.rpc("deduct_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) {
+    // PL/pgSQL の RAISE EXCEPTION を読みやすく整形。
+    if (error.message.includes("already deducted")) {
+      return { error: "この受注は既に在庫引き済みです。" };
+    }
+    if (error.message.includes("order not found")) {
+      return { error: "受注が見つかりません。" };
+    }
+    return { error: `在庫引きに失敗しました: ${error.message}` };
+  }
+
+  const deductedCount =
+    (data && typeof data === "object" && "deducted_count" in data
+      ? Number((data as { deducted_count: number }).deducted_count)
+      : 0) || 0;
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/parts-inventory");
+  return { success: true, deducted_count: deductedCount };
+}
+
+export async function reverseStockDeduction(
+  orderId: string,
+): Promise<{ error: string } | { success: true; reversed_count: number }> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data, error } = await supabase.rpc(
+    "reverse_order_stock_deduction",
+    { p_order_id: orderId },
+  );
+  if (error) {
+    if (error.message.includes("not deducted")) {
+      return { error: "この受注はまだ在庫引きしていません。" };
+    }
+    if (error.message.includes("order not found")) {
+      return { error: "受注が見つかりません。" };
+    }
+    return { error: `取り消しに失敗しました: ${error.message}` };
+  }
+
+  const reversedCount =
+    (data && typeof data === "object" && "reversed_count" in data
+      ? Number((data as { reversed_count: number }).reversed_count)
+      : 0) || 0;
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/parts-inventory");
+  return { success: true, reversed_count: reversedCount };
+}
+
 // 見積書を開く際に呼ぶ。estimate_status を「発行済」に更新してから印刷ページへ遷移する。
 // 既に「了承済」の場合は status を変更しない（後退させない）。
 export async function openEstimate(id: string) {
