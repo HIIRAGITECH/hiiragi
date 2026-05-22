@@ -112,9 +112,32 @@ export type OrderItem = {
   tax_free?: boolean;
   labor_cost?: number;
   parts_cost?: number;
+  // 原価（社内管理用）。粗利計算に使い、見積書・請求書PDFには出さない。
+  // 既存データは migration で 0 にバックフィル済み。未定義時は 0 として扱う。
+  labor_cost_price?: number;
+  parts_cost_price?: number;
   // Step 6-1 で追加。既存ロジックは未参照（旧 type/tax_free を使い続ける）。
   tax_category?: TaxCategory;
   item_category_id?: string | null;
+  // Step 3 で追加。「メニュー → 部品マスター」リンクを明細にも伝播する。
+  // 在庫減算（Step 4）でこの id を使って parts_inventory.stock_quantity を減らす。
+  // 手入力メニュー由来の明細は null。受注明細を直接マスターに紐づける UI は将来検討。
+  linked_part_id?: string | null;
+  // Step 5 で追加。間接材料のスナップショット。メニュー追加時にコピーする。
+  //   part_id    : parts_inventory.id
+  //   quantity   : メニュー1単位あたりの使用量（在庫減算は entry.quantity * 明細 quantity）
+  //   cost_price : スナップショット時の部品原価（粗利計算と固定化のため）
+  // 見積書・請求書には絶対に表示しない。在庫減算と粗利計算にのみ使用。
+  indirect_materials?: IndirectMaterialEntry[];
+};
+
+// 間接材料スナップショット（受注明細に埋め込み）。
+// 値はメニュー登録時の部品マスターから時点コピー。これにより後でマスターが
+// 変わってもこの明細の在庫減算量・粗利計算は固定される。
+export type IndirectMaterialEntry = {
+  part_id: string;
+  quantity: number;
+  cost_price: number;
 };
 
 // 作業メニュー（work_menu_items テーブルの 1 行）
@@ -132,6 +155,10 @@ export type WorkMenuItem = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用）。粗利計算に使い、PDF には出さない。
+  // NOT NULL DEFAULT 0 で追加済み。
+  labor_cost_price: number;
+  parts_cost_price: number;
   tax_free: boolean;
   display_order: number;
   memo: string | null;
@@ -140,8 +167,25 @@ export type WorkMenuItem = {
   tax_category: TaxCategory;
   // ON DELETE SET NULL のため null になり得る。新規行は通常 not null で運用する。
   item_category_id: string | null;
+  // Step 3 で追加。部品マスター (parts_inventory) との紐付け。
+  //   null      = 手入力（後方互換、在庫管理対象外）
+  //   non-null  = 「マスターから選ぶ」モードで作成。部品名・売価・原価は登録時点のスナップショット。
+  // 在庫減算（Step 4）はこの id を使って当該行を特定する。
+  // 親部品が物理削除されると DB 側 ON DELETE SET NULL で null に戻り、手入力扱いになる。
+  linked_part_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// メニューに紐づく標準間接材料（work_menu_indirect_materials の 1 行）。
+// 1メニュー : N 部品。受注で「メニューから追加」した時点で各エントリの
+// cost_price をスナップショットし、OrderItem.indirect_materials に焼き付ける。
+export type WorkMenuIndirectMaterial = {
+  id: string;
+  menu_item_id: string;
+  part_id: string;
+  quantity: number;
+  created_at: string;
 };
 
 // 作業セット（work_menu_sets テーブルの 1 行）
@@ -187,8 +231,55 @@ export type Order = {
   discount_amount: number;
   deposit_amount: number;
   photo_folder_url: string | null;
+  // Step 4 で追加。在庫引き済みフラグと実施日時。
+  //   stock_deducted=true で linked_part_id 付き明細の在庫が parts_inventory から減算済み。
+  //   取消すと false / null に戻る。明細編集時の「取消して引き直し」案内に使用。
+  stock_deducted: boolean;
+  stock_deducted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+// 部品マスター（在庫表）。Step 2 で新設。
+// show_in_detail=false の行は「間接材料」（Oリング等、明細に出さず工賃に算入）。
+// stock_quantity は server action（入庫・棚卸調整）でしか書き換えない不変条件にする。
+export type PartsInventory = {
+  id: string;
+  user_id: string;
+  name: string;
+  cost_price: number;
+  sale_price: number | null;
+  show_in_detail: boolean;
+  stock_quantity: number;
+  reorder_point: number;
+  supplier: string | null;
+  unit: string | null;
+  memo: string | null;
+  display_order: number;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// 在庫移動の種別。
+//   in     = 入庫
+//   out    = 出庫（受注確定で減算する用途。Step 2 では未使用）
+//   adjust = 棚卸調整（差分を quantity に記録）
+export const MOVEMENT_TYPES = ["in", "out", "adjust"] as const;
+export type MovementType = (typeof MOVEMENT_TYPES)[number];
+
+// 在庫移動履歴。quantity は +/− 両方ありうる。
+// adjust の場合、quantity は「新しい在庫数 − 旧在庫数」（差分）を記録する。
+export type StockMovement = {
+  id: string;
+  user_id: string;
+  part_id: string;
+  movement_type: MovementType;
+  quantity: number;
+  related_order_id: string | null;
+  unit_cost: number | null;
+  memo: string | null;
+  created_at: string;
 };
 
 export const BANK_ACCOUNT_TYPES = ["普通", "当座"] as const;

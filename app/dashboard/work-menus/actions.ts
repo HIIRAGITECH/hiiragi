@@ -50,9 +50,15 @@ type Payload = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用、粗利計算に使用）
+  labor_cost_price: number;
+  parts_cost_price: number;
   memo: string | null;
   tax_category: TaxCategory;
   item_category_id: string;
+  // 部品マスターリンク。'マスターから選ぶ' で部品を選んだ場合のみ非 null。
+  // 値は呼び出し側で parts_inventory の存在/所有を検証してから書き込む。
+  linked_part_id: string | null;
 };
 
 function readPayload(formData: FormData): Payload | { error: string } {
@@ -72,9 +78,46 @@ function readPayload(formData: FormData): Payload | { error: string } {
     default_unit_price: pickNumber(formData, "default_unit_price", 0),
     default_labor_cost: pickNumber(formData, "default_labor_cost", 0),
     default_parts_cost: pickNumber(formData, "default_parts_cost", 0),
+    labor_cost_price: pickNumber(formData, "labor_cost_price", 0),
+    parts_cost_price: pickNumber(formData, "parts_cost_price", 0),
     memo: pickString(formData, "memo"),
     tax_category,
     item_category_id,
+    linked_part_id: pickString(formData, "linked_part_id"),
+  };
+}
+
+// 部品マスターの存在・所有・アクティブを確認。null を返したら手入力扱いに丸める。
+// 削除済み（deleted_at != null）の部品は新規にリンクさせない（既存リンクは別経路で扱う）。
+async function resolveLinkedPart(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  linkedPartId: string | null,
+): Promise<
+  | { ok: true; part: null }
+  | { ok: true; part: { id: string; name: string; sale_price: number | null; cost_price: number } }
+  | { error: string }
+> {
+  if (!linkedPartId) return { ok: true, part: null };
+  const { data } = await supabase
+    .from("parts_inventory")
+    .select("id, name, sale_price, cost_price, deleted_at")
+    .eq("id", linkedPartId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data) return { error: "選択した部品が見つかりません。" };
+  if (data.deleted_at !== null) {
+    return { error: "非表示の部品はリンクできません。" };
+  }
+  return {
+    ok: true,
+    part: {
+      id: data.id as string,
+      name: data.name as string,
+      sale_price:
+        typeof data.sale_price === "number" ? data.sale_price : null,
+      cost_price: Number(data.cost_price ?? 0),
+    },
   };
 }
 
@@ -95,6 +138,91 @@ function deriveLegacyCategory(
     return { category: "shaken", tax_free: false };
   }
   return { category: "normal", tax_free: false };
+}
+
+// formData の indirect_materials_json をパースする。
+// 入力形式: [{ part_id: string, quantity: number }, ...]
+// 不正な要素はスキップ、quantity <= 0 もスキップ。
+function parseIndirectMaterials(
+  formData: FormData,
+): { part_id: string; quantity: number }[] {
+  const raw = formData.get("indirect_materials_json");
+  if (typeof raw !== "string" || raw.trim() === "") return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    const out: { part_id: string; quantity: number }[] = [];
+    const seen = new Set<string>();
+    for (const e of arr) {
+      const pid =
+        typeof e?.part_id === "string" ? e.part_id.trim() : "";
+      const q = Number(e?.quantity);
+      if (!pid || seen.has(pid)) continue;
+      if (!Number.isFinite(q) || q <= 0) continue;
+      seen.add(pid);
+      out.push({ part_id: pid, quantity: q });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// 指定 user_id が所有する parts_inventory のうち、引数の id 群と一致するものに絞り込む。
+// 戻り値は part_id Set。RLS 経由で確認できる範囲のみ返す。
+async function filterOwnedPartIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  partIds: string[],
+): Promise<Set<string>> {
+  if (partIds.length === 0) return new Set();
+  const { data } = await supabase
+    .from("parts_inventory")
+    .select("id")
+    .eq("user_id", userId)
+    .in("id", partIds);
+  return new Set((data ?? []).map((r) => r.id as string));
+}
+
+// menu_item_id に紐づく既存の間接材料を全削除し、entries で全件再挿入する。
+// シンプルさを優先し差分計算はしない。RLS は親メニュー所有者で動作。
+async function replaceIndirectMaterials(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  menuItemId: string,
+  entries: { part_id: string; quantity: number }[],
+): Promise<{ error: string } | undefined> {
+  // 所有部品のみ受け付ける（他テナント・存在しない id は無視）。
+  const owned = await filterOwnedPartIds(
+    supabase,
+    userId,
+    entries.map((e) => e.part_id),
+  );
+  const valid = entries.filter((e) => owned.has(e.part_id));
+
+  const { error: delErr } = await supabase
+    .from("work_menu_indirect_materials")
+    .delete()
+    .eq("menu_item_id", menuItemId);
+  if (delErr) {
+    return { error: `間接材料の更新に失敗しました: ${delErr.message}` };
+  }
+
+  if (valid.length === 0) return undefined;
+
+  const { error: insErr } = await supabase
+    .from("work_menu_indirect_materials")
+    .insert(
+      valid.map((e) => ({
+        menu_item_id: menuItemId,
+        part_id: e.part_id,
+        quantity: e.quantity,
+      })),
+    );
+  if (insErr) {
+    return { error: `間接材料の更新に失敗しました: ${insErr.message}` };
+  }
+  return undefined;
 }
 
 // 業務カテゴリの存在確認 + 名前取得（旧 category 派生用）。
@@ -133,6 +261,18 @@ export async function createWorkMenu(
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
+  // linked_part_id が指定されていれば検証してマスター値を反映（スナップショット）。
+  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
+  if ("error" in partRes) return partRes;
+  if (partRes.part) {
+    result.part_name = partRes.part.name;
+    result.default_parts_cost = partRes.part.sale_price ?? 0;
+    result.parts_cost_price = partRes.part.cost_price;
+    result.linked_part_id = partRes.part.id;
+  } else {
+    result.linked_part_id = null;
+  }
+
   // display_order は既存最大値 + 1（同 user_id 内）
   const { data: maxRow } = await supabase
     .from("work_menu_items")
@@ -144,14 +284,33 @@ export async function createWorkMenu(
   const nextOrder =
     typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
 
-  const { error } = await supabase.from("work_menu_items").insert({
-    ...result,
-    category: legacy.category,
-    tax_free: legacy.tax_free,
-    display_order: nextOrder,
-    user_id: user.id,
-  });
-  if (error) return { error: `登録に失敗しました: ${error.message}` };
+  // 1) work_menu_items を挿入し id を取得
+  const { data: inserted, error } = await supabase
+    .from("work_menu_items")
+    .insert({
+      ...result,
+      category: legacy.category,
+      tax_free: legacy.tax_free,
+      display_order: nextOrder,
+      user_id: user.id,
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) {
+    return { error: `登録に失敗しました: ${error?.message ?? "unknown"}` };
+  }
+
+  // 2) 間接材料リストがあれば紐付け（Step 5）
+  const indirect = parseIndirectMaterials(formData);
+  if (indirect.length > 0) {
+    const r = await replaceIndirectMaterials(
+      supabase,
+      user.id,
+      inserted.id as string,
+      indirect,
+    );
+    if (r && "error" in r) return r;
+  }
 
   revalidatePath("/dashboard/work-menus");
   redirect("/dashboard/work-menus");
@@ -175,6 +334,18 @@ export async function updateWorkMenu(
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
+  // 編集時もマスター選択なら最新値で上書き、手入力なら linked_part_id を null に戻す。
+  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
+  if ("error" in partRes) return partRes;
+  if (partRes.part) {
+    result.part_name = partRes.part.name;
+    result.default_parts_cost = partRes.part.sale_price ?? 0;
+    result.parts_cost_price = partRes.part.cost_price;
+    result.linked_part_id = partRes.part.id;
+  } else {
+    result.linked_part_id = null;
+  }
+
   const { error } = await supabase
     .from("work_menu_items")
     .update({
@@ -185,6 +356,11 @@ export async function updateWorkMenu(
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  // 間接材料は毎回 delete + insert で差し替える（Step 5、シンプルさ優先）。
+  const indirect = parseIndirectMaterials(formData);
+  const r = await replaceIndirectMaterials(supabase, user.id, id, indirect);
+  if (r && "error" in r) return r;
 
   revalidatePath("/dashboard/work-menus");
   redirect("/dashboard/work-menus");
@@ -289,7 +465,7 @@ export async function duplicateWorkMenu(formData: FormData) {
   const { data: src } = await supabase
     .from("work_menu_items")
     .select(
-      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, tax_free, memo, tax_category, item_category_id",
+      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id, linked_part_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)
@@ -317,6 +493,23 @@ export async function duplicateWorkMenu(formData: FormData) {
     .select("id")
     .single();
 
+  // 間接材料も複製（コピー元メニューに紐づくエントリをそのまま新メニューに付け直す）。
+  if (inserted?.id) {
+    const { data: srcIndirect } = await supabase
+      .from("work_menu_indirect_materials")
+      .select("part_id, quantity")
+      .eq("menu_item_id", id);
+    if (srcIndirect && srcIndirect.length > 0) {
+      await supabase.from("work_menu_indirect_materials").insert(
+        srcIndirect.map((e) => ({
+          menu_item_id: inserted.id as string,
+          part_id: e.part_id as string,
+          quantity: Number(e.quantity ?? 0),
+        })),
+      );
+    }
+  }
+
   revalidatePath("/dashboard/work-menus");
   if (inserted?.id) {
     redirect(`/dashboard/work-menus/${inserted.id}/edit`);
@@ -335,8 +528,13 @@ export type RegisterMenuPayload = {
   default_unit_price: number;
   default_labor_cost: number;
   default_parts_cost: number;
+  // 原価（社内管理用）。明細行から登録するときに引き継ぐ。
+  labor_cost_price: number;
+  parts_cost_price: number;
   tax_category: TaxCategory;
   item_category_id: string;
+  // 明細行が linked_part_id を持っていればマスター登録時にも引き継ぐ。
+  linked_part_id?: string | null;
 };
 
 export type RegisterMenuResult =
@@ -380,6 +578,21 @@ export async function registerOrderItemAsMenu(
   const nextOrder =
     typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
 
+  // linked_part_id が指定されていれば検証。手入力 (null) はそのまま。
+  // 削除済み・他テナント所有 → エラー扱いではなく null に丸める（明細経由の登録なので
+  // 「リンクが取れなくてもマスター登録は完了させたい」運用を優先）。
+  let linked_part_id: string | null = null;
+  if (payload.linked_part_id) {
+    const partRes = await resolveLinkedPart(
+      supabase,
+      user.id,
+      payload.linked_part_id,
+    );
+    if ("ok" in partRes && partRes.part) {
+      linked_part_id = partRes.part.id;
+    }
+  }
+
   const { data: inserted, error } = await supabase
     .from("work_menu_items")
     .insert({
@@ -389,6 +602,9 @@ export async function registerOrderItemAsMenu(
       default_unit_price: payload.default_unit_price,
       default_labor_cost: payload.default_labor_cost,
       default_parts_cost: payload.default_parts_cost,
+      labor_cost_price: payload.labor_cost_price,
+      parts_cost_price: payload.parts_cost_price,
+      linked_part_id,
       // 新フィールド
       tax_category: payload.tax_category,
       item_category_id: payload.item_category_id,

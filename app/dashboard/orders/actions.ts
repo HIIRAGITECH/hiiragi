@@ -200,6 +200,18 @@ function parseItems(
         if (!Number.isFinite(n) || n < 0) return null;
         item.parts_cost = Math.round(n);
       }
+      // 原価（社内管理用、粗利計算に使用）。未指定/空は省略（既存は migration で 0 埋め済み）。
+      // PDF・印刷物には出さないこと（InvoiceDocument / printable-document は labor_cost / parts_cost のみ参照）。
+      if (r?.labor_cost_price !== undefined && r?.labor_cost_price !== null) {
+        const n = Number(r.labor_cost_price);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.labor_cost_price = Math.round(n);
+      }
+      if (r?.parts_cost_price !== undefined && r?.parts_cost_price !== null) {
+        const n = Number(r.parts_cost_price);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.parts_cost_price = Math.round(n);
+      }
       if (typeof r?.part_name === "string") {
         const v = r.part_name.trim();
         item.part_name = v === "" ? null : v;
@@ -211,6 +223,34 @@ function parseItems(
       if (typeof r?.source_menu_id === "string") {
         const v = r.source_menu_id.trim();
         item.source_menu_id = v === "" ? null : v;
+      }
+      // Step 3: 部品マスター直リンク。Step 4 で在庫減算の特定子に使用する。
+      if (typeof r?.linked_part_id === "string") {
+        const v = r.linked_part_id.trim();
+        item.linked_part_id = v === "" ? null : v;
+      }
+      // Step 5: 間接材料スナップショット。part_id/quantity/cost_price の配列で受け取る。
+      // 不正な要素はスキップ、quantity<=0 や cost_price<0 もスキップ。
+      // 不正値で全体を null にすると既存処理（数量/単価 < 0 で null 返却）と紛らわしいため、
+      // ここでは弾けるものを弾いて配列をそのまま渡す。
+      if (Array.isArray(r?.indirect_materials)) {
+        const out: {
+          part_id: string;
+          quantity: number;
+          cost_price: number;
+        }[] = [];
+        const seen = new Set<string>();
+        for (const e of r.indirect_materials) {
+          const pid = typeof e?.part_id === "string" ? e.part_id.trim() : "";
+          const qty = Number(e?.quantity);
+          const cp = Number(e?.cost_price);
+          if (!pid || seen.has(pid)) continue;
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          if (!Number.isFinite(cp) || cp < 0) continue;
+          seen.add(pid);
+          out.push({ part_id: pid, quantity: qty, cost_price: cp });
+        }
+        if (out.length > 0) item.indirect_materials = out;
       }
       items.push(item);
     }
@@ -478,6 +518,199 @@ export async function updateArchived(
   revalidatePath("/dashboard/orders/archive");
   revalidatePath(`/dashboard/orders/${id}`);
   return undefined;
+}
+
+// ============================================
+// 在庫引き（Step 4）
+// ============================================
+// 受注詳細画面の「📦 在庫を引く」ボタンから呼ばれる。
+// 実体は PL/pgSQL の deduct_order_stock / reverse_order_stock_deduction RPC で、
+// 受注行・部品在庫・履歴を 1 トランザクションで更新する。
+//
+// プレビューは linked_part_id 付き明細を集計し、部品の現在在庫と引き後を返す。
+// 同じ part_id を複数明細が指す場合は数量を合算（在庫としては合計を引くため）。
+
+export type StockDeductionPreviewRow = {
+  part_id: string;
+  part_name: string;
+  current_stock: number;
+  quantity: number;       // 引く数量（正の値）
+  next_stock: number;     // 引き後在庫（負になり得る）
+  unit: string | null;
+  deleted: boolean;       // 部品が非表示化されている
+};
+
+// 直接部品（linked_part_id）と間接材料（indirect_materials）を別セクションで返す。
+// UI モーダルが「明細の部品」「間接材料」と分けて表示できるようにするため。
+export type StockDeductionPreview =
+  | { error: string }
+  | {
+      already_deducted: boolean;
+      stock_deducted_at: string | null;
+      direct: StockDeductionPreviewRow[];
+      indirect: StockDeductionPreviewRow[];
+    };
+
+export async function getStockDeductionPreview(
+  orderId: string,
+): Promise<StockDeductionPreview> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, items, stock_deducted, stock_deducted_at")
+    .eq("id", orderId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!order) return { error: "受注が見つかりません。" };
+
+  const items = (order.items ?? []) as OrderItem[];
+  // 直接部品: linked_part_id ごとに数量合算。
+  // 間接材料: 各明細の indirect_materials[*].quantity * 明細 quantity を part_id ごとに合算。
+  const directAgg = new Map<string, number>();
+  const indirectAgg = new Map<string, number>();
+  for (const it of items) {
+    const lineQty = Number(it.quantity ?? 0);
+    if (!Number.isFinite(lineQty) || lineQty <= 0) continue;
+    if (it.linked_part_id) {
+      directAgg.set(
+        it.linked_part_id,
+        (directAgg.get(it.linked_part_id) ?? 0) + lineQty,
+      );
+    }
+    if (Array.isArray(it.indirect_materials)) {
+      for (const e of it.indirect_materials) {
+        if (!e?.part_id) continue;
+        const q = Number(e.quantity ?? 0) * lineQty;
+        if (!Number.isFinite(q) || q <= 0) continue;
+        indirectAgg.set(e.part_id, (indirectAgg.get(e.part_id) ?? 0) + q);
+      }
+    }
+  }
+
+  const allPartIds = Array.from(
+    new Set([...directAgg.keys(), ...indirectAgg.keys()]),
+  );
+
+  if (allPartIds.length === 0) {
+    return {
+      already_deducted: !!order.stock_deducted,
+      stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
+      direct: [],
+      indirect: [],
+    };
+  }
+
+  const { data: parts } = await supabase
+    .from("parts_inventory")
+    .select("id, name, stock_quantity, unit, deleted_at")
+    .eq("user_id", user.id)
+    .in("id", allPartIds);
+
+  function buildRow(
+    pid: string,
+    qty: number,
+  ): StockDeductionPreviewRow {
+    const p = parts?.find((x) => x.id === pid);
+    const current = Number(p?.stock_quantity ?? 0);
+    return {
+      part_id: pid,
+      part_name: (p?.name as string) ?? "（不明な部品）",
+      current_stock: current,
+      quantity: qty,
+      next_stock: current - qty,
+      unit: (p?.unit as string | null) ?? null,
+      deleted: p?.deleted_at != null,
+    };
+  }
+
+  const direct: StockDeductionPreviewRow[] = [];
+  for (const [pid, qty] of directAgg) direct.push(buildRow(pid, qty));
+  const indirect: StockDeductionPreviewRow[] = [];
+  for (const [pid, qty] of indirectAgg) indirect.push(buildRow(pid, qty));
+
+  return {
+    already_deducted: !!order.stock_deducted,
+    stock_deducted_at: (order.stock_deducted_at as string | null) ?? null,
+    direct,
+    indirect,
+  };
+}
+
+export async function deductStock(
+  orderId: string,
+): Promise<{ error: string } | { success: true; deducted_count: number }> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data, error } = await supabase.rpc("deduct_order_stock", {
+    p_order_id: orderId,
+  });
+  if (error) {
+    // PL/pgSQL の RAISE EXCEPTION を読みやすく整形。
+    if (error.message.includes("already deducted")) {
+      return { error: "この受注は既に在庫引き済みです。" };
+    }
+    if (error.message.includes("order not found")) {
+      return { error: "受注が見つかりません。" };
+    }
+    return { error: `在庫引きに失敗しました: ${error.message}` };
+  }
+
+  const deductedCount =
+    (data && typeof data === "object" && "deducted_count" in data
+      ? Number((data as { deducted_count: number }).deducted_count)
+      : 0) || 0;
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/parts-inventory");
+  return { success: true, deducted_count: deductedCount };
+}
+
+export async function reverseStockDeduction(
+  orderId: string,
+): Promise<{ error: string } | { success: true; reversed_count: number }> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const { data, error } = await supabase.rpc(
+    "reverse_order_stock_deduction",
+    { p_order_id: orderId },
+  );
+  if (error) {
+    if (error.message.includes("not deducted")) {
+      return { error: "この受注はまだ在庫引きしていません。" };
+    }
+    if (error.message.includes("order not found")) {
+      return { error: "受注が見つかりません。" };
+    }
+    return { error: `取り消しに失敗しました: ${error.message}` };
+  }
+
+  const reversedCount =
+    (data && typeof data === "object" && "reversed_count" in data
+      ? Number((data as { reversed_count: number }).reversed_count)
+      : 0) || 0;
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/parts-inventory");
+  return { success: true, reversed_count: reversedCount };
 }
 
 // 見積書を開く際に呼ぶ。estimate_status を「発行済」に更新してから印刷ページへ遷移する。

@@ -112,3 +112,44 @@ export function calculateTotals(
 }
 
 export { rowSubtotal };
+
+// 原価・粗利の集計（社内管理用）。
+// 売上は税抜・値引き前の明細小計合計（calculateTotals().subtotal と同じ定義）。
+// 原価は (labor_cost_price + parts_cost_price) × quantity の合計。
+// PDF・印刷物には絶対に表示しないこと。
+export type ProfitSummary = {
+  revenue: number; // 売上合計（税抜・値引き前）
+  cost: number;    // 原価合計
+  profit: number;  // 粗利 = revenue − cost
+  // 粗利率 (%)。売上 0 のとき 0 を返す。
+  profitRatePercent: number;
+};
+
+// 1 明細あたりの原価。
+//   = (labor_cost_price + parts_cost_price + 間接材料原価合計) × quantity
+// 間接材料は Step 5 の案ア（工賃原価に合算）に従い、ここで合算する。
+// 間接材料原価合計 = Σ(indirect_materials[i].cost_price × indirect_materials[i].quantity)
+// （1 単位あたりの原価。明細 quantity 倍は外側で掛ける）
+function rowCost(item: OrderItem): number {
+  const labor = item.labor_cost_price ?? 0;
+  const parts = item.parts_cost_price ?? 0;
+  let indirectPerUnit = 0;
+  if (Array.isArray(item.indirect_materials)) {
+    for (const e of item.indirect_materials) {
+      indirectPerUnit += (e.cost_price ?? 0) * (e.quantity ?? 0);
+    }
+  }
+  return Math.round((item.quantity ?? 0) * (labor + parts + indirectPerUnit));
+}
+
+export function calculateProfit(items: OrderItem[]): ProfitSummary {
+  let revenue = 0;
+  let cost = 0;
+  for (const it of items) {
+    revenue += rowSubtotal(it);
+    cost += rowCost(it);
+  }
+  const profit = revenue - cost;
+  const profitRatePercent = revenue > 0 ? (profit / revenue) * 100 : 0;
+  return { revenue, cost, profit, profitRatePercent };
+}

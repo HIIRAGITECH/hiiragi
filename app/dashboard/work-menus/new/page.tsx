@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { WorkItemCategory } from "@/lib/types";
+import type { PartsInventory, WorkItemCategory } from "@/lib/types";
 import WorkMenuForm from "../work-menu-form";
 import { createWorkMenu } from "../actions";
 
@@ -15,15 +15,25 @@ export default async function NewWorkMenuPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // アクティブな業務カテゴリのみ選択肢に出す。
-  const { data } = await supabase
-    .from("work_item_categories")
-    .select("*")
-    .eq("user_id", user!.id)
-    .is("deleted_at", null)
-    .order("display_order", { ascending: true })
-    .order("created_at", { ascending: true });
-  const allCategories = (data ?? []) as WorkItemCategory[];
+  // アクティブな業務カテゴリ + アクティブな部品マスターを取得。
+  const [catsRes, partsRes] = await Promise.all([
+    supabase
+      .from("work_item_categories")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
+  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+  const allParts = (partsRes.data ?? []) as PartsInventory[];
 
   return (
     <>
@@ -43,6 +53,7 @@ export default async function NewWorkMenuPage() {
         <WorkMenuForm
           action={createWorkMenu}
           allCategories={allCategories}
+          allParts={allParts}
           submitLabel="登録する"
           cancelHref="/dashboard/work-menus"
         />
