@@ -31,24 +31,33 @@ export default async function NewVehiclePage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href={`/dashboard/customers/${customer.id}`}
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← {customer.name} の詳細に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          車両 新規登録
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/customers" className="hover:underline">
+              顧客管理
+            </Link>{" "}
+            ／{" "}
+            <Link
+              href={`/dashboard/customers/${customer.id}`}
+              className="hover:underline"
+            >
+              {customer.name}
+            </Link>{" "}
+            ／ 車両を追加
+          </div>
+          <h1>車両を新規登録</h1>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <VehicleForm
-          action={action}
-          submitLabel="登録する"
-          cancelHref={`/dashboard/customers/${customer.id}`}
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <VehicleForm
+            action={action}
+            submitLabel="登録する"
+            cancelHref={`/dashboard/customers/${customer.id}`}
+          />
+        </div>
       </div>
     </>
   );

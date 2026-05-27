@@ -33,25 +33,34 @@ export default async function EditCustomerPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href={`/dashboard/customers/${customer.id}`}
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 顧客詳細に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          顧客 編集（{customer.id}）
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/customers" className="hover:underline">
+              顧客管理
+            </Link>{" "}
+            ／{" "}
+            <Link
+              href={`/dashboard/customers/${customer.id}`}
+              className="hover:underline"
+            >
+              {customer.name}
+            </Link>{" "}
+            ／ 編集
+          </div>
+          <h1>顧客情報を編集</h1>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <CustomerForm
-          action={action}
-          initial={customer}
-          submitLabel="更新する"
-          cancelHref={`/dashboard/customers/${customer.id}`}
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <CustomerForm
+            action={action}
+            initial={customer}
+            submitLabel="更新する"
+            cancelHref={`/dashboard/customers/${customer.id}`}
+          />
+        </div>
       </div>
     </>
   );

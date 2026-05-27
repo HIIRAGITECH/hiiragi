@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { Customer } from "@/lib/types";
-import SearchInput from "@/lib/components/search-input";
 import Tooltip from "@/lib/components/tooltip";
 
 function normalize(s: string): string {
@@ -24,7 +23,6 @@ type Props = {
 
 export default function CustomersTable({ rows }: Props) {
   const [query, setQuery] = useState("");
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -35,139 +33,91 @@ export default function CustomersTable({ rows }: Props) {
 
   const isSearching = query.trim().length > 0;
 
-  function toggleExpanded(id: string) {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
   return (
     <>
-      <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+      {/* 検索バー */}
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+        <div className="wos-search max-w-[480px]">
+          <span className="wos-ico">⌕</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="顧客名・フリガナ・電話番号・メモで検索…"
+          />
+        </div>
+        <span className="text-xs text-[var(--color-ink-light)] tracking-widest">
           {isSearching
-            ? `${rows.length} 件中 ${filtered.length} 件表示`
-            : `登録件数: ${rows.length} 件`}
-        </p>
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="顧客を検索（名前・電話・メモ等）"
-          className="w-full sm:w-80"
-        />
+            ? `${rows.length} 件中 ${filtered.length} 件`
+            : `登録件数 ${rows.length} 件`}
+        </span>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            {isSearching
-              ? "該当する顧客が見つかりません。"
-              : "顧客が登録されていません。"}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">顧客ID</th>
-                <th className="px-4 py-3 font-medium">氏名</th>
-                <th className="px-4 py-3 font-medium">フリガナ</th>
-                <th className="px-4 py-3 font-medium">電話番号</th>
-                <th className="px-4 py-3 font-medium">メール</th>
-                <th className="px-4 py-3 font-medium">メモ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {filtered.map((c) => {
-                const expanded = expandedIds.has(c.id);
-                const hasNotes = !!c.notes && c.notes.trim() !== "";
-                return (
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          {filtered.length === 0 ? (
+            <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
+              {isSearching
+                ? "該当する顧客が見つかりません。"
+                : "顧客が登録されていません。"}
+            </div>
+          ) : (
+            <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
+              <thead>
+                <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
+                  <th className="wos-th w-[12%]">顧客ID</th>
+                  <th className="wos-th w-[18%]">氏名</th>
+                  <th className="wos-th w-[16%]">フリガナ</th>
+                  <th className="wos-th w-[15%]">電話番号</th>
+                  <th className="wos-th w-[18%]">メールアドレス</th>
+                  <th className="wos-th">メモ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c, i) => (
                   <tr
                     key={c.id}
-                    className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                    className="border-b border-[var(--color-line)] hover:bg-[var(--color-cream)] transition-colors"
+                    style={{
+                      background:
+                        i % 2 === 1 ? "var(--color-cream)" : "transparent",
+                    }}
                   >
-                    <td className="px-4 py-3 align-top font-mono text-xs text-zinc-700 dark:text-zinc-300">
+                    <td className="wos-td">
                       <Link
                         href={`/dashboard/customers/${c.id}`}
-                        className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
+                        className="wos-serif-num text-base hover:underline"
                       >
-                        {c.id}
+                        {c.id.slice(0, 8)}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 align-top text-zinc-900 dark:text-zinc-50">
+                    <td className="wos-td">
                       <Link
                         href={`/dashboard/customers/${c.id}`}
-                        className="hover:underline"
+                        className="font-semibold text-[var(--color-ink)] hover:underline"
                       >
-                        {c.name}
+                        {c.name} 様
                       </Link>
                     </td>
-                    <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {c.name_kana ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {c.phone ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {c.email ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      {hasNotes ? (
-                        <NotesCell
-                          notes={c.notes as string}
-                          expanded={expanded}
-                          onToggle={() => toggleExpanded(c.id)}
-                        />
+                    <td className="wos-td muted">{c.name_kana ?? "—"}</td>
+                    <td className="wos-td num">{c.phone ?? "—"}</td>
+                    <td className="wos-td muted">{c.email ?? "—"}</td>
+                    <td className="wos-td muted max-w-xs">
+                      {c.notes ? (
+                        <Tooltip content={c.notes} className="block w-full">
+                          <span className="block truncate">{c.notes}</span>
+                        </Tooltip>
                       ) : (
-                        <span>—</span>
+                        "—"
                       )}
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </>
-  );
-}
-
-function NotesCell({
-  notes,
-  expanded,
-  onToggle,
-}: {
-  notes: string;
-  expanded: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="max-w-xs">
-      <Tooltip content={notes} className="block w-full">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          aria-label={expanded ? "メモを閉じる" : "メモを開く"}
-          className="block w-full cursor-pointer text-left"
-        >
-          <span className="block truncate">{notes}</span>
-        </button>
-      </Tooltip>
-      <div
-        className={`grid overflow-hidden transition-[grid-template-rows] duration-200 ${
-          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-        }`}
-      >
-        <div className="overflow-hidden">
-          <p className="mt-2 whitespace-pre-wrap break-words border-t border-zinc-200 pt-2 text-xs leading-relaxed text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
-            {notes}
-          </p>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
-    </div>
+    </>
   );
 }

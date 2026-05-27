@@ -37,46 +37,52 @@ export default async function CustomerDetailPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/customers"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 顧客一覧に戻る
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-              {customer.name}
-            </h2>
-            <p className="mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
-              {customer.id}
-            </p>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/customers" className="hover:underline">
+              顧客管理
+            </Link>{" "}
+            ／ 顧客詳細
           </div>
-          <div className="flex gap-2">
-            <Link
-              href={`/dashboard/customers/${customer.id}/edit`}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              編集
-            </Link>
-            <DeleteButton
-              action={deleteCustomer}
-              hidden={{ id: customer.id }}
-              confirmMessage={`顧客「${customer.name}」を削除します。紐づく車両もすべて削除されます。よろしいですか？`}
-              label="削除"
-            />
+          <h1>{customer.name} 様</h1>
+          <div className="wos-gloss">
+            <span className="wos-serif-num">{customer.id.slice(0, 8)}</span>
+            {customer.name_kana && (
+              <span className="ml-3 text-[var(--color-ink-light)]">
+                {customer.name_kana}
+              </span>
+            )}
           </div>
+        </div>
+        <div className="wos-actions">
+          <Link
+            href={`/dashboard/customers/${customer.id}/edit`}
+            className="wos-btn-ghost wos-btn-sm"
+          >
+            編集
+          </Link>
+          <DeleteButton
+            action={deleteCustomer}
+            hidden={{ id: customer.id }}
+            confirmMessage={`顧客「${customer.name}」を削除します。紐づく車両もすべて削除されます。よろしいですか？`}
+            label="削除"
+            className="wos-btn-danger wos-btn-sm"
+          />
         </div>
       </div>
 
       <TabNav active={tab} customerId={customer.id} />
 
-      {tab === "history" ? (
-        <HistoryTab customerId={customer.id} userId={user!.id} />
-      ) : (
-        <InfoTab customer={customer} userId={user!.id} />
-      )}
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          {tab === "history" ? (
+            <HistoryTab customerId={customer.id} userId={user!.id} />
+          ) : (
+            <InfoTab customer={customer} userId={user!.id} />
+          )}
+        </div>
+      </div>
     </>
   );
 }
@@ -88,24 +94,24 @@ function TabNav({
   active: TabKey;
   customerId: string;
 }) {
-  const baseClass =
-    "px-1 pb-2 text-sm transition-colors border-b-2 -mb-px";
-  const activeClass =
-    "border-zinc-900 font-medium text-zinc-900 dark:border-zinc-50 dark:text-zinc-50";
-  const inactiveClass =
-    "border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50";
+  const base =
+    "px-5 py-3 text-sm font-medium tracking-wider transition-colors border-b-2 -mb-px";
+  const activeCls =
+    "border-[var(--color-accent)] text-[var(--color-ink)]";
+  const inactiveCls =
+    "border-transparent text-[var(--color-ink-mid)] hover:text-[var(--color-ink)]";
 
   return (
-    <nav className="flex gap-6 border-b border-zinc-200 dark:border-zinc-800">
+    <nav className="flex border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8">
       <Link
         href={`/dashboard/customers/${customerId}`}
-        className={`${baseClass} ${active === "info" ? activeClass : inactiveClass}`}
+        className={`${base} ${active === "info" ? activeCls : inactiveCls}`}
       >
         基本情報
       </Link>
       <Link
         href={`/dashboard/customers/${customerId}?tab=history`}
-        className={`${baseClass} ${active === "history" ? activeClass : inactiveClass}`}
+        className={`${base} ${active === "history" ? activeCls : inactiveCls}`}
       >
         整備履歴
       </Link>
@@ -131,16 +137,15 @@ async function InfoTab({
   const vehicles = (vehicleData ?? []) as Vehicle[];
 
   return (
-    <>
-      <section className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="mb-4 text-base font-semibold text-zinc-900 dark:text-zinc-50">
-          基本情報
-        </h3>
-        <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+    <div className="flex flex-col gap-8">
+      <section className="wos-card">
+        <div className="wos-sec-label mb-4">基本情報</div>
+        <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+          <Field label="氏名" value={customer.name} />
           <Field label="フリガナ" value={customer.name_kana} />
-          <Field label="電話番号" value={customer.phone} />
+          <Field label="電話番号" value={customer.phone} num />
           <Field label="メールアドレス" value={customer.email} />
-          <Field label="郵便番号" value={customer.postal_code} />
+          <Field label="郵便番号" value={customer.postal_code} num />
           <Field
             label="住所"
             value={customer.address}
@@ -155,82 +160,73 @@ async function InfoTab({
         </dl>
       </section>
 
-      <section className="mt-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-            保有車両（{vehicles.length} 台）
-          </h3>
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <div className="wos-sec-label">
+            保有車両<span className="wos-ct">{vehicles.length}台</span>
+          </div>
           <Link
             href={`/dashboard/customers/${customer.id}/vehicles/new`}
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="wos-btn wos-btn-sm"
           >
             ＋ 車両を追加
           </Link>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-          {vehicles.length === 0 ? (
-            <div className="px-6 py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
-              登録されている車両はありません。
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-                <tr>
-                  <th className="px-4 py-3 font-medium">車両ID</th>
-                  <th className="px-4 py-3 font-medium">ナンバー</th>
-                  <th className="px-4 py-3 font-medium">メーカー</th>
-                  <th className="px-4 py-3 font-medium">車種</th>
-                  <th className="px-4 py-3 font-medium">年式</th>
-                  <th className="px-4 py-3 text-right font-medium">操作</th>
+        {vehicles.length === 0 ? (
+          <div className="wos-card text-center py-10 text-sm text-[var(--color-ink-light)]">
+            登録されている車両はありません。
+          </div>
+        ) : (
+          <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
+            <thead>
+              <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
+                <th className="wos-th">ナンバー</th>
+                <th className="wos-th">メーカー</th>
+                <th className="wos-th">車種</th>
+                <th className="wos-th">年式</th>
+                <th className="wos-th right">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vehicles.map((v) => (
+                <tr
+                  key={v.id}
+                  className="border-b border-[var(--color-line)]"
+                >
+                  <td className="wos-td font-semibold text-[var(--color-ink)]">
+                    {v.plate_number ?? "—"}
+                  </td>
+                  <td className="wos-td muted">{v.maker ?? "—"}</td>
+                  <td className="wos-td">{v.model ?? "—"}</td>
+                  <td className="wos-td num">{v.model_year ?? "—"}</td>
+                  <td className="wos-td right">
+                    <div className="inline-flex gap-2">
+                      <Link
+                        href={`/dashboard/customers/${customer.id}/vehicles/${v.id}/edit`}
+                        className="wos-btn-ghost wos-btn-xs"
+                      >
+                        編集
+                      </Link>
+                      <DeleteButton
+                        action={deleteVehicle}
+                        hidden={{
+                          customer_id: customer.id,
+                          vehicle_id: v.id,
+                        }}
+                        confirmMessage={`車両「${v.plate_number ?? v.id}」を削除します。よろしいですか？`}
+                        label="削除"
+                        className="wos-btn-danger wos-btn-xs"
+                      />
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                {vehicles.map((v) => (
-                  <tr key={v.id}>
-                    <td className="px-4 py-3 font-mono text-xs text-zinc-700 dark:text-zinc-300">
-                      {v.id}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-900 dark:text-zinc-50">
-                      {v.plate_number ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {v.maker ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {v.model ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                      {v.model_year ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="inline-flex gap-2">
-                        <Link
-                          href={`/dashboard/customers/${customer.id}/vehicles/${v.id}/edit`}
-                          className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          編集
-                        </Link>
-                        <DeleteButton
-                          action={deleteVehicle}
-                          hidden={{
-                            customer_id: customer.id,
-                            vehicle_id: v.id,
-                          }}
-                          confirmMessage={`車両「${v.plate_number ?? v.id}」を削除します。よろしいですか？`}
-                          label="削除"
-                          className="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs text-red-700 transition-colors hover:bg-red-50 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/30"
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
-    </>
+    </div>
   );
 }
 
@@ -239,17 +235,28 @@ function Field({
   value,
   className,
   multiline,
+  num,
 }: {
   label: string;
   value: string | null;
   className?: string;
   multiline?: boolean;
+  num?: boolean;
 }) {
   return (
     <div className={className}>
-      <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt
+        className="text-xs font-medium text-[var(--color-ink-mid)]"
+        style={{ letterSpacing: "0.12em" }}
+      >
+        {label}
+      </dt>
       <dd
-        className={`mt-0.5 text-zinc-900 dark:text-zinc-100 ${multiline ? "whitespace-pre-wrap" : ""}`}
+        className={`mt-1 text-sm text-[var(--color-ink)] ${multiline ? "whitespace-pre-wrap" : ""}`}
+        style={{
+          fontFamily: num ? "var(--font-num)" : undefined,
+          fontVariantNumeric: num ? "tabular-nums" : undefined,
+        }}
       >
         {value ?? "—"}
       </dd>

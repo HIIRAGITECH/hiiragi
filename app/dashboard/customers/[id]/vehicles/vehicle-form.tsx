@@ -12,12 +12,6 @@ type Props = {
   cancelHref: string;
 };
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
-const labelClass =
-  "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
-
 export default function VehicleForm({
   action,
   initial,
@@ -30,46 +24,46 @@ export default function VehicleForm({
   );
 
   return (
-    <form action={formAction} className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <form action={formAction} className="wos-card space-y-5">
+      <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="plate_number" className={labelClass}>
+          <label htmlFor="plate_number" className="wos-label">
             車両ナンバー
           </label>
           <input
             id="plate_number"
             name="plate_number"
             defaultValue={initial?.plate_number ?? ""}
-            placeholder="品川 300 あ 12-34"
-            className={inputClass}
+            placeholder="湘南 し 11-04"
+            className="wos-input"
           />
         </div>
         <div>
-          <label htmlFor="maker" className={labelClass}>
+          <label htmlFor="maker" className="wos-label">
             メーカー
           </label>
           <input
             id="maker"
             name="maker"
             defaultValue={initial?.maker ?? ""}
-            placeholder="トヨタ"
-            className={inputClass}
+            placeholder="HONDA"
+            className="wos-input"
           />
         </div>
         <div>
-          <label htmlFor="model" className={labelClass}>
+          <label htmlFor="model" className="wos-label">
             車種
           </label>
           <input
             id="model"
             name="model"
             defaultValue={initial?.model ?? ""}
-            placeholder="プリウス"
-            className={inputClass}
+            placeholder="CBR1000RR-R"
+            className="wos-input"
           />
         </div>
         <div>
-          <label htmlFor="model_year" className={labelClass}>
+          <label htmlFor="model_year" className="wos-label">
             年式
           </label>
           <input
@@ -79,12 +73,12 @@ export default function VehicleForm({
             min={1900}
             max={2100}
             defaultValue={initial?.model_year ?? ""}
-            placeholder="2020"
-            className={inputClass}
+            placeholder="2023"
+            className="wos-input"
           />
         </div>
         <div>
-          <label htmlFor="color" className={labelClass}>
+          <label htmlFor="color" className="wos-label">
             色
           </label>
           <input
@@ -92,22 +86,22 @@ export default function VehicleForm({
             name="color"
             defaultValue={initial?.color ?? ""}
             placeholder="ホワイト"
-            className={inputClass}
+            className="wos-input"
           />
         </div>
         <div>
-          <label htmlFor="vin" className={labelClass}>
+          <label htmlFor="vin" className="wos-label">
             車台番号
           </label>
           <input
             id="vin"
             name="vin"
             defaultValue={initial?.vin ?? ""}
-            className={inputClass}
+            className="wos-input"
           />
         </div>
         <div className="sm:col-span-2">
-          <label htmlFor="notes" className={labelClass}>
+          <label htmlFor="notes" className="wos-label">
             メモ
           </label>
           <textarea
@@ -115,31 +109,25 @@ export default function VehicleForm({
             name="notes"
             rows={3}
             defaultValue={initial?.notes ?? ""}
-            className={inputClass}
+            className="wos-textarea"
           />
         </div>
       </div>
 
       {state?.error && (
-        <p
-          role="alert"
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-        >
+        <p role="alert" className="wos-alert warn">
           {state.error}
         </p>
       )}
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        <Link
-          href={cancelHref}
-          className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
           キャンセル
         </Link>
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="wos-btn wos-btn-sm"
         >
           {pending ? "保存中..." : submitLabel}
         </button>

@@ -24,27 +24,30 @@ export default async function CustomersPage() {
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          顧客一覧
-        </h2>
-        <Link
-          href="/dashboard/customers/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          ＋ 新規登録
-        </Link>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">顧客管理</div>
+          <h1>顧客一覧</h1>
+          <div className="wos-gloss">
+            登録件数 {customers.length} 件。氏名・カナ・電話・メモから検索できます。
+          </div>
+        </div>
+        <div className="wos-actions">
+          <Link href="/dashboard/customers/new" className="wos-btn wos-btn-sm">
+            ＋ 新規顧客を登録
+          </Link>
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          顧客一覧の取得に失敗しました: {error.message}
-        </p>
+        <div className="px-8 pt-4">
+          <p className="wos-alert warn">
+            顧客一覧の取得に失敗しました: {error.message}
+          </p>
+        </div>
       )}
 
-      <div className="mt-4">
-        <CustomersTable rows={customers} />
-      </div>
+      <CustomersTable rows={customers} />
     </>
   );
 }
