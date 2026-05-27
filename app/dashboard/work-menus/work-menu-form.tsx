@@ -34,14 +34,10 @@ type IndirectRow = {
   quantity: string; // input value（数字に変換するのは送信時）
 };
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
+const inputClass = "wos-input";
 const readonlyClass =
-  "w-full rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300";
-
-const labelClass =
-  "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
+  "w-full border border-[var(--color-line)] bg-[var(--color-cream)] px-3 py-2 text-sm text-[var(--color-ink-soft)]";
+const labelClass = "wos-label";
 
 // カテゴリ名から推奨される税区分を返す。
 //   「車検法定費用」 → shaken_non_tax
@@ -181,7 +177,7 @@ export default function WorkMenuForm({
   }, [allParts]);
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} className="wos-card space-y-5">
       <div>
         <label htmlFor="work_name" className={labelClass}>
           作業内容 <span className="text-red-600">*</span>
@@ -618,26 +614,20 @@ export default function WorkMenuForm({
       </div>
 
       {state?.error && (
-        <p
-          role="alert"
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-        >
+        <p role="alert" className="wos-alert warn">
           {state.error}
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pt-2">
         <button
           type="submit"
           disabled={pending || allCategories.length === 0}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="wos-btn wos-btn-sm"
         >
-          {pending ? "保存中..." : submitLabel}
+          {pending ? "保存中…" : submitLabel}
         </button>
-        <Link
-          href={cancelHref}
-          className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
           キャンセル
         </Link>
       </div>

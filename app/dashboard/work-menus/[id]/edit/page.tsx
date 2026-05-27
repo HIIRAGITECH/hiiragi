@@ -113,28 +113,29 @@ export default async function EditWorkMenuPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/work-menus"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 作業メニュー一覧に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          作業メニュー 編集
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/work-menus" className="hover:underline">
+              作業メニュー
+            </Link>{" "}
+            ／ 編集
+          </div>
+          <h1>{initial.work_name} を編集</h1>
+        </div>
       </div>
-
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <WorkMenuForm
-          action={action}
-          initial={initial}
-          allCategories={allCategories}
-          allParts={allParts}
-          initialIndirectMaterials={initialIndirect}
-          submitLabel="更新する"
-          cancelHref="/dashboard/work-menus"
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <WorkMenuForm
+            action={action}
+            initial={initial}
+            allCategories={allCategories}
+            allParts={allParts}
+            initialIndirectMaterials={initialIndirect}
+            submitLabel="更新する"
+            cancelHref="/dashboard/work-menus"
+          />
+        </div>
       </div>
     </>
   );

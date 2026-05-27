@@ -16,11 +16,8 @@ type Props = {
   cancelHref: string;
 };
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
-const labelClass =
-  "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
+const inputClass = "wos-input";
+const labelClass = "wos-label";
 
 const CATEGORY_LABEL: Record<WorkCategory, string> = {
   normal: "整備",
@@ -92,7 +89,7 @@ export default function WorkMenuSetForm({
   }
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} className="wos-card space-y-5">
       <input
         type="hidden"
         name="menu_item_ids_json"
@@ -222,26 +219,20 @@ export default function WorkMenuSetForm({
       </div>
 
       {state?.error && (
-        <p
-          role="alert"
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-        >
+        <p role="alert" className="wos-alert warn">
           {state.error}
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 pt-2">
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="wos-btn wos-btn-sm"
         >
-          {pending ? "保存中..." : submitLabel}
+          {pending ? "保存中…" : submitLabel}
         </button>
-        <Link
-          href={cancelHref}
-          className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
           キャンセル
         </Link>
       </div>

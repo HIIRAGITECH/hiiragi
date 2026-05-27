@@ -19,7 +19,6 @@ export default async function WorkMenusPage(
     data: { user },
   } = await supabase.auth.getUser();
 
-  // include_deleted=1 のとき deleted_at IS NULL のフィルタを外す。
   let menusQuery = supabase
     .from("work_menu_items")
     .select("*")
@@ -30,7 +29,6 @@ export default async function WorkMenusPage(
     menusQuery
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
-    // フィルタ表示用にアクティブな業務カテゴリ一覧を取得。
     supabase
       .from("work_item_categories")
       .select("*")
@@ -46,36 +44,34 @@ export default async function WorkMenusPage(
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            作業メニュー
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">工房 ／ 作業メニュー</div>
+          <h1>作業メニュー</h1>
+          <div className="wos-gloss">
             よく使う作業を登録しておくと、受注明細にワンクリックで追加できます。
-          </p>
+          </div>
         </div>
-        <Link
-          href="/dashboard/work-menus/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          ＋ 新規登録
-        </Link>
+        <div className="wos-actions">
+          <Link href="/dashboard/work-menus/new" className="wos-btn wos-btn-sm">
+            ＋ 新規登録
+          </Link>
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          作業メニュー一覧の取得に失敗しました: {error.message}
-        </p>
+        <div className="px-8 pt-4">
+          <p className="wos-alert warn">
+            作業メニュー一覧の取得に失敗しました: {error.message}
+          </p>
+        </div>
       )}
 
-      <div className="mt-4">
-        <WorkMenusTable
-          rows={rows}
-          includeDeleted={includeDeleted}
-          allCategories={allCategories}
-        />
-      </div>
+      <WorkMenusTable
+        rows={rows}
+        includeDeleted={includeDeleted}
+        allCategories={allCategories}
+      />
     </>
   );
 }

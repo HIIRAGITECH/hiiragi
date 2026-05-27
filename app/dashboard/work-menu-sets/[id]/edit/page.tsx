@@ -50,27 +50,28 @@ export default async function EditWorkMenuSetPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/work-menu-sets"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 作業セット一覧に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          作業セット 編集
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/work-menu-sets" className="hover:underline">
+              作業セット
+            </Link>{" "}
+            ／ 編集
+          </div>
+          <h1>{initial.name} を編集</h1>
+        </div>
       </div>
-
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <WorkMenuSetForm
-          action={action}
-          initial={initial}
-          initialMenuItemIds={initialMenuItemIds}
-          allMenus={allMenus}
-          submitLabel="更新する"
-          cancelHref="/dashboard/work-menu-sets"
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <WorkMenuSetForm
+            action={action}
+            initial={initial}
+            initialMenuItemIds={initialMenuItemIds}
+            allMenus={allMenus}
+            submitLabel="更新する"
+            cancelHref="/dashboard/work-menu-sets"
+          />
+        </div>
       </div>
     </>
   );

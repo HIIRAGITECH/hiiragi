@@ -68,25 +68,28 @@ export default async function WorkMenuSetsPage(
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            作業セット
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">工房 ／ 作業セット</div>
+          <h1>作業セット</h1>
+          <div className="wos-gloss">
             よく使う作業の組み合わせをセットで登録しておくと、受注明細にまとめて追加できます。
-          </p>
+          </div>
         </div>
-        <Link
-          href="/dashboard/work-menu-sets/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          ＋ 新規登録
-        </Link>
+        <div className="wos-actions">
+          <Link
+            href="/dashboard/work-menu-sets/new"
+            className="wos-btn wos-btn-sm"
+          >
+            ＋ 新規登録
+          </Link>
+        </div>
       </div>
 
-      <div className="mt-4">
-        <WorkMenuSetsList rows={rows} includeDeleted={includeDeleted} />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          <WorkMenuSetsList rows={rows} includeDeleted={includeDeleted} />
+        </div>
       </div>
     </>
   );

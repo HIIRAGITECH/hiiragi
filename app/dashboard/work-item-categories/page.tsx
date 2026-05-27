@@ -32,32 +32,33 @@ export default async function WorkItemCategoriesPage(
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            カテゴリ管理
-          </h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">工房 ／ カテゴリ管理</div>
+          <h1>業務カテゴリ管理</h1>
+          <div className="wos-gloss">
             業務カテゴリを管理します。標準カテゴリ「整備」「車検整備」「車検法定費用」は削除できませんが、名前は変更できます。
-          </p>
+          </div>
         </div>
-        <Link
-          href="/dashboard/work-item-categories/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          ＋ 新規登録
-        </Link>
+        <div className="wos-actions">
+          <Link
+            href="/dashboard/work-item-categories/new"
+            className="wos-btn wos-btn-sm"
+          >
+            ＋ 新規登録
+          </Link>
+        </div>
       </div>
 
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          カテゴリ一覧の取得に失敗しました: {error.message}
-        </p>
+        <div className="px-8 pt-4">
+          <p className="wos-alert warn">
+            カテゴリ一覧の取得に失敗しました: {error.message}
+          </p>
+        </div>
       )}
 
-      <div className="mt-4">
-        <WorkItemCategoriesList rows={rows} includeDeleted={includeDeleted} />
-      </div>
+      <WorkItemCategoriesList rows={rows} includeDeleted={includeDeleted} />
     </>
   );
 }

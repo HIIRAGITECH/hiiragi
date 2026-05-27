@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import SearchInput from "@/lib/components/search-input";
 import { formatYen } from "@/lib/format";
 import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
 import type { WorkMenuUsage } from "@/lib/work-menus/usage";
@@ -15,7 +14,6 @@ import {
   restoreWorkMenu,
 } from "./actions";
 
-// フィルタ値: 'all' または item_category_id（uuid）。
 type Filter = "all" | string;
 
 function normalize(s: string): string {
@@ -24,15 +22,10 @@ function normalize(s: string): string {
 
 type Props = {
   rows: WorkMenuItem[];
-  // 非表示（deleted_at が立った）行も含めて受け取っているか。
-  // 親ページが ?include_deleted=1 のときだけ true を渡す。
   includeDeleted?: boolean;
-  // フィルタ・バッジ表示で使う、アクティブな業務カテゴリ一覧。
   allCategories: WorkItemCategory[];
 };
 
-// 削除ダイアログの状態。
-// loading: 使用回数取得中。confirming: 警告ダイアログ表示中（mode 選択あり）。
 type DeleteDialog =
   | { kind: "loading"; row: WorkMenuItem }
   | {
@@ -54,7 +47,6 @@ export default function WorkMenusTable({
   const [dialog, setDialog] = useState<DeleteDialog | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 行の item_category_id → カテゴリ名の解決マップ。
   const categoryNameMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const c of allCategories) m.set(c.id, c.name);
@@ -85,7 +77,6 @@ export default function WorkMenusTable({
     });
   }
 
-  // 削除ボタン押下: 使用回数を取得し、0 件なら即時確認、>0 なら警告ダイアログを開く。
   async function handleDeleteClick(row: WorkMenuItem) {
     setDialog({ kind: "loading", row });
     const res = await getWorkMenuUsageAction(row.id);
@@ -96,11 +87,8 @@ export default function WorkMenusTable({
     }
     const usage = res.usage;
     if (usage.orderItemCount === 0 && usage.setCount === 0) {
-      // ケースA: どこからも参照されていない → 即時物理削除（簡易確認のみ）
       setDialog(null);
-      if (
-        !confirm(`「${row.work_name}」を削除します。よろしいですか？`)
-      ) {
+      if (!confirm(`「${row.work_name}」を削除します。よろしいですか？`)) {
         return;
       }
       setBusy(true);
@@ -110,7 +98,6 @@ export default function WorkMenusTable({
       else router.refresh();
       return;
     }
-    // ケースB: 参照あり → 警告ダイアログ（既定は推奨の "soft"）
     setDialog({ kind: "confirming", row, usage, mode: "soft" });
   }
 
@@ -138,40 +125,22 @@ export default function WorkMenusTable({
 
   return (
     <>
-      <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+        <div className="wos-search max-w-[480px]">
+          <span className="wos-ico">⌕</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="作業内容・部品名で検索…"
+          />
+        </div>
+        <span className="text-xs text-[var(--color-ink-light)] tracking-widest">
           {isFiltering
-            ? `${rows.length} 件中 ${filtered.length} 件表示`
-            : `登録件数: ${rows.length} 件`}
-        </p>
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="作業内容・部品名で検索"
-          className="w-full sm:w-80"
-        />
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-1.5">
-        {[
-          { value: "all" as Filter, label: "すべて" },
-          ...allCategories.map((c) => ({ value: c.id as Filter, label: c.name })),
-        ].map((f) => (
-          <button
-            key={f.value}
-            type="button"
-            onClick={() => setFilter(f.value)}
-            className={`rounded-full px-3 py-1 text-xs transition-colors ${
-              filter === f.value
-                ? "bg-zinc-900 text-white dark:bg-zinc-50 dark:text-zinc-900"
-                : "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-        {/* 非表示を含めるトグル: URL の ?include_deleted=1 を付け外しすると親 Server Component が再フェッチする */}
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+            ? `${rows.length} 件中 ${filtered.length} 件`
+            : `登録件数 ${rows.length} 件`}
+        </span>
+        <label className="text-xs text-[var(--color-ink-mid)] flex items-center gap-2 ml-auto cursor-pointer">
           <input
             type="checkbox"
             checked={!!includeDeleted}
@@ -181,195 +150,194 @@ export default function WorkMenusTable({
               else url.searchParams.delete("include_deleted");
               router.push(url.pathname + url.search);
             }}
-            className="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900"
           />
           非表示を含める
         </label>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            {isFiltering
-              ? "該当する作業メニューが見つかりません。"
-              : "作業メニューが登録されていません。"}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-              <tr>
-                <th className="w-20 px-2 py-3 text-center font-medium">並び</th>
-                <th className="px-3 py-3 font-medium">作業内容</th>
-                <th className="px-3 py-3 font-medium">部品名</th>
-                <th className="px-3 py-3 font-medium">カテゴリ</th>
-                <th className="px-3 py-3 text-right font-medium">工賃</th>
-                <th className="px-3 py-3 text-right font-medium">部品代</th>
-                <th className="px-3 py-3 text-right font-medium">合計</th>
-                <th className="w-44 px-3 py-3 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {filtered.map((r, idx) => {
-                const total =
-                  r.default_labor_cost > 0 || r.default_parts_cost > 0
-                    ? r.default_labor_cost + r.default_parts_cost
-                    : r.default_unit_price;
-                const deleted = r.deleted_at !== null;
-                return (
-                  <tr
-                    key={r.id}
-                    className={`transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
-                      deleted ? "opacity-50" : ""
-                    }`}
-                  >
-                    <td className="px-2 py-3 text-center align-top">
-                      <div className="flex justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleMove(r.id, "up")}
-                          disabled={
-                            pending ||
-                            idx === 0 ||
-                            isFiltering ||
-                            deleted
-                          }
-                          aria-label="上に移動"
-                          title={
-                            deleted
-                              ? "非表示のメニューは並び替えできません"
-                              : isFiltering
-                                ? "並び替えはフィルタ解除時のみ"
-                                : "上に移動"
-                          }
-                          className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleMove(r.id, "down")}
-                          disabled={
-                            pending ||
-                            idx === filtered.length - 1 ||
-                            isFiltering ||
-                            deleted
-                          }
-                          aria-label="下に移動"
-                          title={
-                            deleted
-                              ? "非表示のメニューは並び替えできません"
-                              : isFiltering
-                                ? "並び替えはフィルタ解除時のみ"
-                                : "下に移動"
-                          }
-                          className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          ↓
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top text-zinc-900 dark:text-zinc-50">
-                      {deleted ? (
-                        <span>{r.work_name}</span>
-                      ) : (
-                        <Link
-                          href={`/dashboard/work-menus/${r.id}/edit`}
-                          className="hover:underline"
-                        >
-                          {r.work_name}
-                        </Link>
-                      )}
-                      {deleted && (
-                        <span className="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
-                          非表示
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      <span>{r.part_name ?? "—"}</span>
-                      {r.linked_part_id && (
-                        <span
-                          className="ml-1.5 rounded bg-blue-100 px-1 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
-                          title="部品マスターにリンクされています（在庫管理対象）"
-                        >
-                          🔗 在庫
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 align-top text-zinc-600 dark:text-zinc-400">
-                      <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                        {(r.item_category_id &&
-                          categoryNameMap.get(r.item_category_id)) ||
-                          "（未分類）"}
-                      </span>
-                      {r.tax_category === "shaken_non_tax" && (
-                        <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300">
-                          非課税
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top text-zinc-700 dark:text-zinc-300">
-                      {r.default_labor_cost > 0
-                        ? formatYen(r.default_labor_cost)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top text-zinc-700 dark:text-zinc-300">
-                      {r.default_parts_cost > 0
-                        ? formatYen(r.default_parts_cost)
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top font-medium text-zinc-900 dark:text-zinc-50">
-                      {formatYen(total)}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      {deleted ? (
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => handleRestore(r.id)}
-                            disabled={busy}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                          >
-                            復元
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex justify-end gap-1">
-                          <Link
-                            href={`/dashboard/work-menus/${r.id}/edit`}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                          >
-                            編集
-                          </Link>
-                          <form action={duplicateWorkMenu}>
-                            <input type="hidden" name="id" value={r.id} />
-                            <button
-                              type="submit"
-                              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                            >
-                              複製
-                            </button>
-                          </form>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteClick(r)}
-                            disabled={busy}
-                            className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950"
-                          >
-                            削除
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-3 flex flex-wrap items-center gap-2">
+        {[
+          { value: "all" as Filter, label: "すべて" },
+          ...allCategories.map((c) => ({
+            value: c.id as Filter,
+            label: c.name,
+          })),
+        ].map((f) => (
+          <button
+            key={f.value}
+            type="button"
+            onClick={() => setFilter(f.value)}
+            className={`wos-chip ${filter === f.value ? "active" : ""}`}
+          >
+            {f.label}
+          </button>
+        ))}
       </div>
 
-      {/* 削除ダイアログ: usage を取得中の loading 表示と、参照あり時の警告 */}
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          {filtered.length === 0 ? (
+            <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
+              {isFiltering
+                ? "該当する作業メニューが見つかりません。"
+                : "作業メニューが登録されていません。"}
+            </div>
+          ) : (
+            <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
+              <thead>
+                <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
+                  <th className="wos-th w-16 text-center">並び</th>
+                  <th className="wos-th">作業内容</th>
+                  <th className="wos-th">部品名</th>
+                  <th className="wos-th">カテゴリ</th>
+                  <th className="wos-th right">工賃</th>
+                  <th className="wos-th right">部品代</th>
+                  <th className="wos-th right">合計</th>
+                  <th className="wos-th right w-44">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r, idx) => {
+                  const total =
+                    r.default_labor_cost > 0 || r.default_parts_cost > 0
+                      ? r.default_labor_cost + r.default_parts_cost
+                      : r.default_unit_price;
+                  const deleted = r.deleted_at !== null;
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`border-b border-[var(--color-line)] hover:bg-[var(--color-cream)] ${
+                        deleted ? "opacity-50" : ""
+                      }`}
+                    >
+                      <td className="wos-td text-center align-top">
+                        <div className="flex justify-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleMove(r.id, "up")}
+                            disabled={
+                              pending || idx === 0 || isFiltering || deleted
+                            }
+                            aria-label="上に移動"
+                            className="wos-btn-ghost wos-btn-xs"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMove(r.id, "down")}
+                            disabled={
+                              pending ||
+                              idx === filtered.length - 1 ||
+                              isFiltering ||
+                              deleted
+                            }
+                            aria-label="下に移動"
+                            className="wos-btn-ghost wos-btn-xs"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </td>
+                      <td className="wos-td">
+                        {deleted ? (
+                          <span className="font-semibold">{r.work_name}</span>
+                        ) : (
+                          <Link
+                            href={`/dashboard/work-menus/${r.id}/edit`}
+                            className="font-semibold text-[var(--color-ink)] hover:underline"
+                          >
+                            {r.work_name}
+                          </Link>
+                        )}
+                        {deleted && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
+                            非表示
+                          </span>
+                        )}
+                      </td>
+                      <td className="wos-td muted">
+                        <span>{r.part_name ?? "—"}</span>
+                        {r.linked_part_id && (
+                          <span
+                            className="ml-1.5 text-[10px] font-medium text-[var(--color-accent)]"
+                            title="部品マスターにリンクされています（在庫管理対象）"
+                          >
+                            ◆ 在庫
+                          </span>
+                        )}
+                      </td>
+                      <td className="wos-td muted">
+                        <span className="text-[11px] text-[var(--color-ink-soft)]">
+                          {(r.item_category_id &&
+                            categoryNameMap.get(r.item_category_id)) ||
+                            "（未分類）"}
+                        </span>
+                        {r.tax_category === "shaken_non_tax" && (
+                          <span className="ml-1 text-[10px] text-[var(--color-warn)]">
+                            非課税
+                          </span>
+                        )}
+                      </td>
+                      <td className="wos-td num right">
+                        {r.default_labor_cost > 0
+                          ? formatYen(r.default_labor_cost)
+                          : "—"}
+                      </td>
+                      <td className="wos-td num right">
+                        {r.default_parts_cost > 0
+                          ? formatYen(r.default_parts_cost)
+                          : "—"}
+                      </td>
+                      <td className="wos-td num right font-semibold">
+                        {formatYen(total)}
+                      </td>
+                      <td className="wos-td">
+                        {deleted ? (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRestore(r.id)}
+                              disabled={busy}
+                              className="wos-btn-ghost wos-btn-xs"
+                            >
+                              復元
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex justify-end gap-1">
+                            <Link
+                              href={`/dashboard/work-menus/${r.id}/edit`}
+                              className="wos-btn-ghost wos-btn-xs"
+                            >
+                              編集
+                            </Link>
+                            <form action={duplicateWorkMenu}>
+                              <input type="hidden" name="id" value={r.id} />
+                              <button type="submit" className="wos-btn-ghost wos-btn-xs">
+                                複製
+                              </button>
+                            </form>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteClick(r)}
+                              disabled={busy}
+                              className="wos-btn-danger wos-btn-xs"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {dialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -378,29 +346,27 @@ export default function WorkMenusTable({
           <div
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
+            className="w-full max-w-lg bg-[var(--color-paper)] p-5 border border-[var(--color-line-strong)]"
             onClick={(e) => e.stopPropagation()}
           >
             {dialog.kind === "loading" ? (
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">
+              <p className="text-sm text-[var(--color-ink-soft)]">
                 使用回数を確認しています…
               </p>
             ) : (
               <>
-                <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                <h3 className="text-base font-semibold text-[var(--color-ink)]">
                   「{dialog.row.work_name}」を削除しますか？
                 </h3>
-                <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
+                <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
                   このメニューは現在、以下で使用されています:
                 </p>
-                <ul className="mt-1.5 list-disc pl-5 text-sm text-zinc-700 dark:text-zinc-300">
-                  <li>
-                    過去の受注明細: {dialog.usage.orderItemCount} 件
-                  </li>
+                <ul className="mt-1.5 list-disc pl-5 text-sm text-[var(--color-ink-soft)]">
+                  <li>過去の受注明細: {dialog.usage.orderItemCount} 件</li>
                   <li>
                     作業セット: {dialog.usage.setCount} 件
                     {dialog.usage.sets.length > 0 && (
-                      <span className="text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[var(--color-ink-light)]">
                         {" "}
                         （
                         {dialog.usage.sets
@@ -414,10 +380,10 @@ export default function WorkMenusTable({
 
                 <div className="mt-4 space-y-2">
                   <label
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm transition-colors ${
+                    className={`flex cursor-pointer items-start gap-2 border p-3 text-sm transition-colors ${
                       dialog.mode === "soft"
-                        ? "border-zinc-900 bg-zinc-50 dark:border-zinc-50 dark:bg-zinc-800/40"
-                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                        ? "border-[var(--color-ink)] bg-[var(--color-cream)]"
+                        : "border-[var(--color-line)] bg-[var(--color-paper)]"
                     }`}
                   >
                     <input
@@ -425,25 +391,23 @@ export default function WorkMenusTable({
                       name="delete-mode"
                       value="soft"
                       checked={dialog.mode === "soft"}
-                      onChange={() =>
-                        setDialog({ ...dialog, mode: "soft" })
-                      }
+                      onChange={() => setDialog({ ...dialog, mode: "soft" })}
                       className="mt-0.5"
                     />
                     <span>
-                      <span className="font-medium text-zinc-900 dark:text-zinc-50">
+                      <span className="font-semibold text-[var(--color-ink)]">
                         非表示にする（推奨）
                       </span>
-                      <span className="mt-0.5 block text-xs text-zinc-600 dark:text-zinc-400">
+                      <span className="mt-0.5 block text-xs text-[var(--color-ink-mid)]">
                         一覧から非表示にしますが、過去の記録は残ります。後から復元できます。
                       </span>
                     </span>
                   </label>
                   <label
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm transition-colors ${
+                    className={`flex cursor-pointer items-start gap-2 border p-3 text-sm transition-colors ${
                       dialog.mode === "hard"
-                        ? "border-red-500 bg-red-50 dark:border-red-700 dark:bg-red-950/40"
-                        : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+                        ? "border-[var(--color-warn)] bg-[rgba(184,80,64,0.06)]"
+                        : "border-[var(--color-line)] bg-[var(--color-paper)]"
                     }`}
                   >
                     <input
@@ -451,16 +415,14 @@ export default function WorkMenusTable({
                       name="delete-mode"
                       value="hard"
                       checked={dialog.mode === "hard"}
-                      onChange={() =>
-                        setDialog({ ...dialog, mode: "hard" })
-                      }
+                      onChange={() => setDialog({ ...dialog, mode: "hard" })}
                       className="mt-0.5"
                     />
                     <span>
-                      <span className="font-medium text-red-700 dark:text-red-400">
+                      <span className="font-semibold text-[var(--color-warn)]">
                         完全に削除する
                       </span>
-                      <span className="mt-0.5 block text-xs text-zinc-600 dark:text-zinc-400">
+                      <span className="mt-0.5 block text-xs text-[var(--color-ink-mid)]">
                         過去の明細との紐付けが切れ、使用回数の集計ができなくなります。セットからも自動的に外されます。
                       </span>
                     </span>
@@ -472,7 +434,7 @@ export default function WorkMenusTable({
                     type="button"
                     onClick={() => setDialog(null)}
                     disabled={busy}
-                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    className="wos-btn-ghost wos-btn-sm"
                   >
                     キャンセル
                   </button>
@@ -480,13 +442,13 @@ export default function WorkMenusTable({
                     type="button"
                     onClick={handleConfirmDelete}
                     disabled={busy}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    className={
                       dialog.mode === "hard"
-                        ? "bg-red-600 hover:bg-red-700"
-                        : "bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-                    }`}
+                        ? "wos-btn-danger wos-btn-sm"
+                        : "wos-btn wos-btn-sm"
+                    }
                   >
-                    {busy ? "実行中..." : "実行する"}
+                    {busy ? "実行中…" : "実行する"}
                   </button>
                 </div>
               </>
