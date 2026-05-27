@@ -5,11 +5,8 @@ import { BANK_ACCOUNT_TYPES, type ShopInfo } from "@/lib/types";
 import { updateShopInfo, type SettingsFormState } from "./actions";
 import ImageUpload from "./image-upload";
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
-const labelClass =
-  "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
+const inputClass = "wos-input";
+const labelClass = "wos-label";
 
 export default function SettingsForm({
   initial,
@@ -27,8 +24,8 @@ export default function SettingsForm({
   const error = state && "error" in state ? state.error : undefined;
 
   return (
-    <div className="space-y-8">
-      <form action={formAction} className="space-y-4">
+    <div className="space-y-6">
+      <form action={formAction} className="wos-card space-y-5">
         <div>
           <label htmlFor="shop_name" className={labelClass}>
             店舗名 <span className="text-red-600">*</span>
@@ -164,29 +161,23 @@ export default function SettingsForm({
         </fieldset>
 
         {error && (
-          <p
-            role="alert"
-            className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          >
+          <p role="alert" className="wos-alert warn">
             {error}
           </p>
         )}
         {success && (
-          <p
-            role="status"
-            className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-          >
+          <p role="status" className="wos-alert info">
             保存しました。
           </p>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end pt-2">
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            className="wos-btn wos-btn-sm"
           >
-            {pending ? "保存中..." : "保存する"}
+            {pending ? "保存中…" : "保存する"}
           </button>
         </div>
       </form>

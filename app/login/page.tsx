@@ -42,25 +42,24 @@ export default async function LoginPage(props: PageProps<"/login">) {
   const flash = pickFlash(sp);
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 py-12 dark:bg-zinc-950">
-      <div className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex flex-1 items-center justify-center bg-[var(--color-cream)] px-4 py-12">
+      <div className="w-full max-w-md bg-[var(--color-paper)] border border-[var(--color-line-strong)] p-10">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            HIIRAGI
+          <h1
+            className="text-2xl font-bold tracking-widest text-[var(--color-ink)]"
+            style={{ letterSpacing: "0.2em" }}
+          >
+            HIIRAGI <span className="text-[var(--color-accent)]">TECH</span>
           </h1>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            自動車整備工場 業務管理システム
+          <p className="mt-2 text-xs text-[var(--color-ink-light)] tracking-widest">
+            工房管理システム
           </p>
         </div>
 
         {flash && (
           <p
             role={flash.kind === "error" ? "alert" : "status"}
-            className={`mb-4 rounded-md px-3 py-2 text-sm ${
-              flash.kind === "success"
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-                : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
-            }`}
+            className={flash.kind === "success" ? "wos-alert info mb-4" : "wos-alert warn mb-4"}
           >
             {flash.text}
           </p>
@@ -68,11 +67,11 @@ export default async function LoginPage(props: PageProps<"/login">) {
 
         <LoginForm />
 
-        <div className="mt-6 space-y-2 text-center text-sm text-zinc-500 dark:text-zinc-400">
+        <div className="mt-6 space-y-2 text-center text-xs text-[var(--color-ink-light)]">
           <p>
             <Link
               href="/reset-password"
-              className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
+              className="text-[var(--color-accent)] hover:underline"
             >
               パスワードを忘れた方はこちら
             </Link>
@@ -81,7 +80,7 @@ export default async function LoginPage(props: PageProps<"/login">) {
             アカウントをお持ちでない方は{" "}
             <Link
               href="/signup"
-              className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
+              className="text-[var(--color-accent)] hover:underline"
             >
               新規登録
             </Link>

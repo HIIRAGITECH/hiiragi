@@ -8,24 +8,27 @@ export const metadata: Metadata = {
 
 export default function SignupPage() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 py-12 dark:bg-zinc-950">
-      <div className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex flex-1 items-center justify-center bg-[var(--color-cream)] px-4 py-12">
+      <div className="w-full max-w-md bg-[var(--color-paper)] border border-[var(--color-line-strong)] p-10">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            HIIRAGI
+          <h1
+            className="text-2xl font-bold tracking-widest text-[var(--color-ink)]"
+            style={{ letterSpacing: "0.2em" }}
+          >
+            HIIRAGI <span className="text-[var(--color-accent)]">TECH</span>
           </h1>
-          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="mt-2 text-xs text-[var(--color-ink-light)] tracking-widest">
             新しいアカウントを作成します
           </p>
         </div>
 
         <SignupForm />
 
-        <p className="mt-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+        <p className="mt-6 text-center text-xs text-[var(--color-ink-light)]">
           すでにアカウントをお持ちの方は{" "}
           <Link
             href="/login"
-            className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
+            className="text-[var(--color-accent)] hover:underline"
           >
             ログイン
           </Link>

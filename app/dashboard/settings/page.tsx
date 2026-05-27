@@ -17,15 +17,20 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-        店舗設定
-      </h2>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        ここで設定した店舗情報は、見積書・請求書のヘッダに表示されます。
-      </p>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">システム ／ 設定</div>
+          <h1>店舗設定</h1>
+          <div className="wos-gloss">
+            ここで設定した店舗情報は、見積書・請求書のヘッダに表示されます。
+          </div>
+        </div>
+      </div>
 
-      <div className="mt-6 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <SettingsForm initial={shop} userId={user!.id} />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-4xl">
+          <SettingsForm initial={shop} userId={user!.id} />
+        </div>
       </div>
     </>
   );
