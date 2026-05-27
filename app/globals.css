@@ -207,7 +207,10 @@ body {
     font-size: 11.5px;
   }
 
-  /* ── ステータスドット ─────────────────────────── */
+  /* ── ステータスドット ───────────────────────────
+     ::before でドットを描画する。コンポーネントが children を追加できない
+     ケース（StatusDropdown のトリガー）にも対応するため、子要素ではなく
+     pseudo-element 方式を採用。 */
   .wos-status {
     display: inline-flex;
     align-items: center;
@@ -217,25 +220,37 @@ body {
     font-weight: 500;
     letter-spacing: 0.05em;
     color: var(--color-ink);
+    background: transparent;
+    border: none;
+    padding: 0;
   }
-  .wos-status .wos-dot {
+  .wos-status::before {
+    content: "";
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--color-ink-light);
     flex-shrink: 0;
+    background: var(--color-ink-light);
   }
-  .wos-status.w-u .wos-dot { background: #b3b6bc; }
-  .wos-status.w-s .wos-dot { background: var(--color-busy); }
-  .wos-status.w-k .wos-dot { background: var(--color-go); }
-  .wos-status.e-m .wos-dot { background: #b3b6bc; }
-  .wos-status.e-h .wos-dot { background: var(--color-busy); }
-  .wos-status.e-r .wos-dot { background: var(--color-go); }
-  .wos-status.i-m .wos-dot { background: #b3b6bc; }
-  .wos-status.i-s .wos-dot { background: var(--color-busy); }
-  .wos-status.i-n .wos-dot { background: var(--color-go); }
-  .wos-status.over .wos-dot { background: var(--color-warn); }
+  .wos-status.w-u::before { background: #b3b6bc; }
+  .wos-status.w-s::before { background: var(--color-busy); }
+  .wos-status.w-k::before { background: var(--color-go); }
+  .wos-status.e-m::before { background: #b3b6bc; }
+  .wos-status.e-h::before { background: var(--color-busy); }
+  .wos-status.e-r::before { background: var(--color-go); }
+  .wos-status.i-m::before { background: #b3b6bc; }
+  .wos-status.i-s::before { background: var(--color-busy); }
+  .wos-status.i-n::before { background: var(--color-go); }
+  .wos-status.over::before { background: var(--color-warn); }
   .wos-status.over { color: var(--color-warn); }
+
+  /* StatusDropdown のメニュー内ドット（インライン span に bg を当てる）。
+     trigger と同じ w-u / w-s / ... を classMap で渡すと ::before が出てしまうので、
+     メニュー側にだけ別の wos-dot- 接頭辞を使う。 */
+  .wos-dot-grey { background: #b3b6bc; }
+  .wos-dot-busy { background: var(--color-busy); }
+  .wos-dot-go   { background: var(--color-go); }
+  .wos-dot-warn { background: var(--color-warn); }
 
   /* ── チップ（フィルタタグ） ─────────────────────── */
   .wos-chip {
