@@ -33,25 +33,26 @@ export default async function EditPartPage(props: {
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/parts-inventory"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 部品在庫一覧に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          部品在庫 編集
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/parts-inventory" className="hover:underline">
+              部品在庫
+            </Link>{" "}
+            ／ 編集
+          </div>
+          <h1>{initial.name} を編集</h1>
+        </div>
       </div>
-
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <PartForm
-          action={action}
-          initial={initial}
-          submitLabel="更新する"
-          cancelHref="/dashboard/parts-inventory"
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <PartForm
+            action={action}
+            initial={initial}
+            submitLabel="更新する"
+            cancelHref="/dashboard/parts-inventory"
+          />
+        </div>
       </div>
     </>
   );

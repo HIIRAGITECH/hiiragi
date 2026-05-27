@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import SearchInput from "@/lib/components/search-input";
 import { formatYen } from "@/lib/format";
 import type { PartsInventory } from "@/lib/types";
 import {
@@ -19,7 +18,6 @@ function normalize(s: string): string {
   return s.toLowerCase().normalize("NFKC");
 }
 
-// 行の在庫状態を判定。表示優先度: 欠品 > 発注 > 在庫OK。
 type StockStatus = "out" | "low" | "ok";
 function stockStatus(r: PartsInventory): StockStatus {
   if (r.stock_quantity <= 0) return "out";
@@ -32,7 +30,6 @@ type Props = {
   includeDeleted?: boolean;
 };
 
-// 入庫モーダル / 棚卸モーダルの状態。
 type StockDialog =
   | { kind: "in"; row: PartsInventory }
   | { kind: "adjust"; row: PartsInventory };
@@ -45,7 +42,6 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<StockDialog | null>(null);
 
-  // 「発注が必要」件数: deleted_at が立った行は除外する。
   const reorderCount = useMemo(
     () =>
       rows.filter(
@@ -103,47 +99,32 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
 
   return (
     <>
-      {/* 発注アラート: 件数があるときだけ目立たせて出す */}
-      {reorderCount > 0 && !includeDeleted && (
-        <div className="mt-3 flex items-center gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm dark:border-red-900/60 dark:bg-red-950/30">
-          <span className="font-medium text-red-700 dark:text-red-300">
-            🔴 発注が必要: {reorderCount} 件
-          </span>
-          <button
-            type="button"
-            onClick={() => setOnlyReorder((v) => !v)}
-            className="text-xs text-red-700 underline-offset-2 hover:underline dark:text-red-300"
-          >
-            {onlyReorder ? "すべて表示" : "発注が必要なものだけ表示"}
-          </button>
-        </div>
-      )}
-
-      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          {isFiltering
-            ? `${rows.length} 件中 ${filtered.length} 件表示`
-            : `登録件数: ${rows.length} 件`}
-        </p>
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="部品名・品番・仕入先で検索"
-          className="w-full sm:w-80"
-        />
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+      {/* 検索 + フィルタ */}
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+        <div className="wos-search max-w-[480px]">
+          <span className="wos-ico">⌕</span>
           <input
-            type="checkbox"
-            checked={onlyReorder}
-            onChange={(e) => setOnlyReorder(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900"
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="部品名・品番・仕入先で検索…"
           />
-          発注が必要なものだけ表示
-        </label>
-        <label className="ml-auto inline-flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+        </div>
+        <span className="text-xs text-[var(--color-ink-light)] tracking-widest">
+          {isFiltering
+            ? `${rows.length} 件中 ${filtered.length} 件`
+            : `登録件数 ${rows.length} 件`}
+        </span>
+        <span
+          className={`wos-chip ${onlyReorder ? "active" : ""}`}
+          onClick={() => setOnlyReorder((v) => !v)}
+        >
+          発注が必要なものだけ
+          {reorderCount > 0 && (
+            <span className="wos-ct">{reorderCount}</span>
+          )}
+        </span>
+        <label className="text-xs text-[var(--color-ink-mid)] flex items-center gap-2 ml-auto cursor-pointer">
           <input
             type="checkbox"
             checked={!!includeDeleted}
@@ -153,215 +134,222 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
               else url.searchParams.delete("include_deleted");
               router.push(url.pathname + url.search);
             }}
-            className="h-3.5 w-3.5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-900"
           />
           非表示を含める
         </label>
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            {isFiltering
-              ? "該当する部品が見つかりません。"
-              : "部品が登録されていません。"}
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-              <tr>
-                <th className="w-20 px-2 py-3 text-center font-medium">並び</th>
-                <th className="px-3 py-3 font-medium">部品名</th>
-                <th className="px-3 py-3 text-right font-medium">原価</th>
-                <th className="px-3 py-3 text-right font-medium">売価</th>
-                <th className="px-3 py-3 text-right font-medium">在庫</th>
-                <th className="px-3 py-3 text-right font-medium">発注点</th>
-                <th className="px-3 py-3 font-medium">明細</th>
-                <th className="px-3 py-3 font-medium">状態</th>
-                <th className="w-56 px-3 py-3 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {filtered.map((r, idx) => {
-                const status = stockStatus(r);
-                const deleted = r.deleted_at !== null;
-                return (
-                  <tr
-                    key={r.id}
-                    className={`transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${
-                      deleted ? "opacity-50" : ""
-                    }`}
-                  >
-                    <td className="px-2 py-3 text-center align-top">
-                      <div className="flex justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleMove(r.id, "up")}
-                          disabled={
-                            pending || idx === 0 || isFiltering || deleted
-                          }
-                          aria-label="上に移動"
-                          title={
-                            deleted
-                              ? "非表示の部品は並び替えできません"
-                              : isFiltering
-                                ? "並び替えはフィルタ解除時のみ"
-                                : "上に移動"
-                          }
-                          className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleMove(r.id, "down")}
-                          disabled={
-                            pending ||
-                            idx === filtered.length - 1 ||
-                            isFiltering ||
-                            deleted
-                          }
-                          aria-label="下に移動"
-                          title={
-                            deleted
-                              ? "非表示の部品は並び替えできません"
-                              : isFiltering
-                                ? "並び替えはフィルタ解除時のみ"
-                                : "下に移動"
-                          }
-                          className="rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                        >
-                          ↓
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 align-top text-zinc-900 dark:text-zinc-50">
-                      {deleted ? (
-                        <span>{r.name}</span>
-                      ) : (
-                        <Link
-                          href={`/dashboard/parts-inventory/${r.id}/edit`}
-                          className="hover:underline"
-                        >
-                          {r.name}
-                        </Link>
-                      )}
-                      {deleted && (
-                        <span className="ml-2 rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
-                          非表示
-                        </span>
-                      )}
-                      {(r.internal_code || r.external_code) && (
-                        <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                          {r.internal_code && <>社内: {r.internal_code}</>}
-                          {r.internal_code && r.external_code && " / "}
-                          {r.external_code && <>社外: {r.external_code}</>}
-                        </div>
-                      )}
-                      {r.supplier && (
-                        <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                          仕入先: {r.supplier}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top text-zinc-700 dark:text-zinc-300">
-                      {formatYen(r.cost_price)}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top text-zinc-700 dark:text-zinc-300">
-                      {r.sale_price != null ? formatYen(r.sale_price) : "—"}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top font-medium text-zinc-900 dark:text-zinc-50">
-                      {r.stock_quantity}
-                      {r.unit ? (
-                        <span className="ml-0.5 text-xs font-normal text-zinc-500 dark:text-zinc-400">
-                          {r.unit}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="px-3 py-3 text-right align-top text-zinc-700 dark:text-zinc-300">
-                      {r.reorder_point}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      {r.show_in_detail ? (
-                        <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
-                          出す
-                        </span>
-                      ) : (
-                        <span
-                          className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300"
-                          title="間接材料: 明細には出さず工賃に含む扱い"
-                        >
-                          間接材料
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      <StatusBadge status={status} />
-                    </td>
-                    <td className="px-3 py-3 align-top">
-                      {deleted ? (
-                        <div className="flex justify-end">
+      {reorderCount > 0 && !includeDeleted && (
+        <div className="px-8 pt-4">
+          <p className="wos-alert warn">
+            ⚠ 発注が必要: {reorderCount} 件
+          </p>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          {filtered.length === 0 ? (
+            <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
+              {isFiltering
+                ? "該当する部品が見つかりません。"
+                : "部品が登録されていません。"}
+            </div>
+          ) : (
+            <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
+              <thead>
+                <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
+                  <th className="wos-th w-16 text-center">並び</th>
+                  <th className="wos-th">部品名</th>
+                  <th className="wos-th right">原価</th>
+                  <th className="wos-th right">売価</th>
+                  <th className="wos-th right">在庫</th>
+                  <th className="wos-th right">発注点</th>
+                  <th className="wos-th">明細</th>
+                  <th className="wos-th">状態</th>
+                  <th className="wos-th right w-60">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r, idx) => {
+                  const status = stockStatus(r);
+                  const deleted = r.deleted_at !== null;
+                  return (
+                    <tr
+                      key={r.id}
+                      className={`border-b border-[var(--color-line)] hover:bg-[var(--color-cream)] ${
+                        deleted ? "opacity-50" : ""
+                      }`}
+                    >
+                      <td className="wos-td text-center align-top">
+                        <div className="flex justify-center gap-1">
                           <button
                             type="button"
-                            onClick={() => handleRestore(r.id)}
-                            disabled={busy}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                          >
-                            復元
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setDialog({ kind: "in", row: r })}
-                            disabled={busy}
-                            className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-900 dark:bg-zinc-900 dark:text-emerald-400 dark:hover:bg-emerald-950"
-                          >
-                            入庫
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setDialog({ kind: "adjust", row: r })
+                            onClick={() => handleMove(r.id, "up")}
+                            disabled={
+                              pending || idx === 0 || isFiltering || deleted
                             }
-                            disabled={busy}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            aria-label="上に移動"
+                            title={
+                              deleted
+                                ? "非表示の部品は並び替えできません"
+                                : isFiltering
+                                  ? "並び替えはフィルタ解除時のみ"
+                                  : "上に移動"
+                            }
+                            className="wos-btn-ghost wos-btn-xs"
                           >
-                            棚卸
+                            ↑
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMove(r.id, "down")}
+                            disabled={
+                              pending ||
+                              idx === filtered.length - 1 ||
+                              isFiltering ||
+                              deleted
+                            }
+                            aria-label="下に移動"
+                            title={
+                              deleted
+                                ? "非表示の部品は並び替えできません"
+                                : isFiltering
+                                  ? "並び替えはフィルタ解除時のみ"
+                                  : "下に移動"
+                            }
+                            className="wos-btn-ghost wos-btn-xs"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </td>
+                      <td className="wos-td">
+                        {deleted ? (
+                          <span className="font-semibold">{r.name}</span>
+                        ) : (
                           <Link
                             href={`/dashboard/parts-inventory/${r.id}/edit`}
-                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                            className="font-semibold text-[var(--color-ink)] hover:underline"
                           >
-                            編集
+                            {r.name}
                           </Link>
-                          <form action={duplicatePart}>
-                            <input type="hidden" name="id" value={r.id} />
-                            <button
-                              type="submit"
-                              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                            >
-                              複製
-                            </button>
-                          </form>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(r)}
-                            disabled={busy}
-                            className="rounded-md border border-red-200 bg-white px-2 py-1 text-xs text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950"
+                        )}
+                        {deleted && (
+                          <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
+                            非表示
+                          </span>
+                        )}
+                        {(r.internal_code || r.external_code) && (
+                          <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
+                            {r.internal_code && <>社内: {r.internal_code}</>}
+                            {r.internal_code && r.external_code && " / "}
+                            {r.external_code && <>社外: {r.external_code}</>}
+                          </div>
+                        )}
+                        {r.supplier && (
+                          <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
+                            仕入先: {r.supplier}
+                          </div>
+                        )}
+                      </td>
+                      <td className="wos-td num right">
+                        {formatYen(r.cost_price)}
+                      </td>
+                      <td className="wos-td num right">
+                        {r.sale_price != null ? formatYen(r.sale_price) : "—"}
+                      </td>
+                      <td className="wos-td num right font-semibold">
+                        {r.stock_quantity}
+                        {r.unit ? (
+                          <span className="ml-0.5 text-xs font-normal text-[var(--color-ink-light)]">
+                            {r.unit}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="wos-td num right">{r.reorder_point}</td>
+                      <td className="wos-td">
+                        {r.show_in_detail ? (
+                          <span className="text-[10px] text-[var(--color-ink-mid)]">
+                            出す
+                          </span>
+                        ) : (
+                          <span
+                            className="text-[10px] text-[var(--color-warn)]"
+                            title="間接材料: 明細には出さず工賃に含む扱い"
                           >
-                            削除
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                            間接材料
+                          </span>
+                        )}
+                      </td>
+                      <td className="wos-td">
+                        <StatusBadge status={status} />
+                      </td>
+                      <td className="wos-td">
+                        {deleted ? (
+                          <div className="flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRestore(r.id)}
+                              disabled={busy}
+                              className="wos-btn-ghost wos-btn-xs"
+                            >
+                              復元
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setDialog({ kind: "in", row: r })}
+                              disabled={busy}
+                              className="wos-btn wos-btn-xs"
+                            >
+                              入庫
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDialog({ kind: "adjust", row: r })
+                              }
+                              disabled={busy}
+                              className="wos-btn-ghost wos-btn-xs"
+                            >
+                              棚卸
+                            </button>
+                            <Link
+                              href={`/dashboard/parts-inventory/${r.id}/edit`}
+                              className="wos-btn-ghost wos-btn-xs"
+                            >
+                              編集
+                            </Link>
+                            <form action={duplicatePart}>
+                              <input type="hidden" name="id" value={r.id} />
+                              <button
+                                type="submit"
+                                className="wos-btn-ghost wos-btn-xs"
+                              >
+                                複製
+                              </button>
+                            </form>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(r)}
+                              disabled={busy}
+                              className="wos-btn-danger wos-btn-xs"
+                            >
+                              削除
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {dialog?.kind === "in" && (
@@ -390,24 +378,12 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
 
 function StatusBadge({ status }: { status: StockStatus }) {
   if (status === "out") {
-    return (
-      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
-        🔴 欠品
-      </span>
-    );
+    return <span className="wos-status over">欠品</span>;
   }
   if (status === "low") {
-    return (
-      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950/60 dark:text-red-300">
-        🔴 発注
-      </span>
-    );
+    return <span className="wos-status over">発注</span>;
   }
-  return (
-    <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
-      🟢 在庫OK
-    </span>
-  );
+  return <span className="wos-status w-k">在庫OK</span>;
 }
 
 function StockInModal({
@@ -453,16 +429,13 @@ function StockInModal({
   }
 
   return (
-    <ModalShell
-      title={`入庫登録: ${row.name}`}
-      onClose={busy ? undefined : onClose}
-    >
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+    <ModalShell title={`入庫登録: ${row.name}`} onClose={busy ? undefined : onClose}>
+      <p className="text-xs text-[var(--color-ink-light)]">
         現在の在庫: {row.stock_quantity}
         {row.unit ? ` ${row.unit}` : ""}
       </p>
       <div className="mt-3 space-y-3">
-        <Field label="入庫数" required>
+        <ModalField label="入庫数" required>
           <input
             type="number"
             inputMode="decimal"
@@ -470,10 +443,10 @@ function StockInModal({
             step="0.1"
             value={qty}
             onChange={(e) => setQty(e.target.value)}
-            className={modalInputClass}
+            className="wos-input"
           />
-        </Field>
-        <Field label="単価（仕入値、任意）">
+        </ModalField>
+        <ModalField label="単価（仕入値、任意）">
           <input
             type="number"
             inputMode="numeric"
@@ -481,23 +454,19 @@ function StockInModal({
             step={1}
             value={unitCost}
             onChange={(e) => setUnitCost(e.target.value)}
-            className={modalInputClass}
+            className="wos-input"
           />
-        </Field>
-        <Field label="メモ（任意）">
+        </ModalField>
+        <ModalField label="メモ（任意）">
           <input
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             placeholder="例: ○○商会から仕入れ"
-            className={modalInputClass}
+            className="wos-input"
           />
-        </Field>
+        </ModalField>
       </div>
-      {error && (
-        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          {error}
-        </p>
-      )}
+      {error && <p className="wos-alert warn mt-3">{error}</p>}
       <ModalFooter
         onClose={onClose}
         busy={busy}
@@ -550,16 +519,13 @@ function StockAdjustModal({
   }
 
   return (
-    <ModalShell
-      title={`棚卸調整: ${row.name}`}
-      onClose={busy ? undefined : onClose}
-    >
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+    <ModalShell title={`棚卸調整: ${row.name}`} onClose={busy ? undefined : onClose}>
+      <p className="text-xs text-[var(--color-ink-light)]">
         現在の在庫: {row.stock_quantity}
         {row.unit ? ` ${row.unit}` : ""}
       </p>
       <div className="mt-3 space-y-3">
-        <Field label="実際の在庫数" required>
+        <ModalField label="実際の在庫数" required>
           <input
             type="number"
             inputMode="decimal"
@@ -567,28 +533,24 @@ function StockAdjustModal({
             step="0.1"
             value={newQty}
             onChange={(e) => setNewQty(e.target.value)}
-            className={modalInputClass}
+            className="wos-input"
           />
           {delta !== null && delta !== 0 && (
-            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="mt-1 text-xs text-[var(--color-ink-light)]">
               差分: {delta > 0 ? `+${delta}` : delta}
             </p>
           )}
-        </Field>
-        <Field label="メモ（任意）">
+        </ModalField>
+        <ModalField label="メモ（任意）">
           <input
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
             placeholder="例: 棚卸"
-            className={modalInputClass}
+            className="wos-input"
           />
-        </Field>
+        </ModalField>
       </div>
-      {error && (
-        <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          {error}
-        </p>
-      )}
+      {error && <p className="wos-alert warn mt-3">{error}</p>}
       <ModalFooter
         onClose={onClose}
         busy={busy}
@@ -599,10 +561,7 @@ function StockAdjustModal({
   );
 }
 
-const modalInputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
-function Field({
+function ModalField({
   label,
   required,
   children,
@@ -613,8 +572,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-        {label} {required && <span className="text-red-600">*</span>}
+      <span className="wos-label">
+        {label}
+        {required && <span className="wos-req">*</span>}
       </span>
       {children}
     </label>
@@ -638,10 +598,13 @@ function ModalShell({
       <div
         role="dialog"
         aria-modal="true"
-        className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl dark:bg-zinc-900"
+        className="w-full max-w-md bg-[var(--color-paper)] p-5 border border-[var(--color-line-strong)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+        <h3
+          className="text-base font-semibold text-[var(--color-ink)]"
+          style={{ letterSpacing: "0.04em" }}
+        >
           {title}
         </h3>
         <div className="mt-3">{children}</div>
@@ -667,7 +630,7 @@ function ModalFooter({
         type="button"
         onClick={onClose}
         disabled={busy}
-        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        className="wos-btn-ghost wos-btn-sm"
       >
         キャンセル
       </button>
@@ -675,9 +638,9 @@ function ModalFooter({
         type="button"
         onClick={onConfirm}
         disabled={busy}
-        className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+        className="wos-btn wos-btn-sm"
       >
-        {busy ? "実行中..." : confirmLabel}
+        {busy ? "実行中…" : confirmLabel}
       </button>
     </div>
   );
