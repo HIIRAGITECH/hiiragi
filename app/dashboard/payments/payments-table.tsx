@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import PaymentConfirmModal from "@/lib/components/payment-confirm-modal";
-import SearchInput from "@/lib/components/search-input";
 import { formatYen } from "@/lib/format";
 import { getTodayJst, type PaymentStatus } from "@/lib/payments/classify";
 import { updateInvoiceStatus } from "@/app/dashboard/orders/actions";
@@ -17,10 +16,7 @@ export type PaymentRow = {
   customer_id: string | null;
   owed_amount: number;
   status: PaymentStatus;
-  // overdue → 超過日数、due_soon/on_track → 残り日数、no_due_date → 0
   days: number;
-  // 作業側（受注一覧）でアーカイブ済みかどうか。未回収一覧は invoice_status 軸で
-  // 独立に絞り込むが、アーカイブ済みであることはユーザーに視認させたいのでバッジで表示する。
   is_archived: boolean;
 };
 
@@ -50,7 +46,6 @@ function formatDueDate(s: string | null): string {
   return s.replace(/-/g, "/");
 }
 
-// 状態バッジ。色とテキストを一箇所にまとめておく。
 function StatusBadge({
   status,
   days,
@@ -60,37 +55,24 @@ function StatusBadge({
 }) {
   if (status === "overdue") {
     return (
-      <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-950/40 dark:text-red-300">
-        ⚠️ {days}日超過
-      </span>
+      <span className="wos-status over">{days}日超過</span>
     );
   }
   if (status === "due_soon") {
     return (
-      <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-        残り {days}日
-      </span>
+      <span className="wos-status w-s">残り{days}日</span>
     );
   }
   if (status === "on_track") {
-    return (
-      <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800 dark:bg-green-950/40 dark:text-green-300">
-        期限内
-      </span>
-    );
+    return <span className="wos-status w-k">期限内</span>;
   }
-  return (
-    <span className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-      期限未設定
-    </span>
-  );
+  return <span className="wos-status w-u">期限未設定</span>;
 }
 
 export default function PaymentsTable({ rows }: Props) {
   const [query, setQuery] = useState("");
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
-  // 入金確認モーダル対象の orderId（null = モーダル非表示）
   const [paymentConfirmFor, setPaymentConfirmFor] = useState<string | null>(
     null,
   );
@@ -118,8 +100,6 @@ export default function PaymentsTable({ rows }: Props) {
         window.alert(result.error);
         return;
       }
-      // updateInvoiceStatus 内で revalidatePath されるが、明示的に router.refresh して
-      // 行が消えることを即座に画面に反映する。
       router.refresh();
     } finally {
       setPendingId(null);
@@ -128,109 +108,116 @@ export default function PaymentsTable({ rows }: Props) {
 
   return (
     <>
-      <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+        <div className="wos-search max-w-[480px]">
+          <span className="wos-ico">⌕</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="管理番号・顧客名・期限で検索…"
+          />
+        </div>
+        <span className="text-xs text-[var(--color-ink-light)] tracking-widest">
           {isSearching
-            ? `${rows.length} 件中 ${filtered.length} 件表示`
-            : `未回収: ${rows.length} 件`}
-        </p>
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="管理番号・顧客名・期限で検索"
-          className="w-full sm:w-96"
-        />
+            ? `${rows.length} 件中 ${filtered.length} 件`
+            : `未回収 ${rows.length} 件`}
+        </span>
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-        {filtered.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
-            {isSearching
-              ? "該当する受注が見つかりません。"
-              : "現在、未回収はありません 🎉"}
-          </div>
-        ) : (
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
-              <tr>
-                <th className="px-4 py-3 font-medium">管理番号</th>
-                <th className="px-4 py-3 font-medium">顧客名</th>
-                <th className="px-4 py-3 font-medium">請求日</th>
-                <th className="px-4 py-3 font-medium">振込期限</th>
-                <th className="px-4 py-3 font-medium">状態</th>
-                <th className="px-4 py-3 text-right font-medium">金額</th>
-                <th className="px-4 py-3 text-right font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {filtered.map((r) => (
-                <tr
-                  key={r.id}
-                  className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                >
-                  <td className="px-4 py-3 font-mono text-xs">
-                    <Link
-                      href={`/dashboard/orders/${r.id}`}
-                      className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
-                    >
-                      {r.id}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-900 dark:text-zinc-50">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <span>
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          {filtered.length === 0 ? (
+            <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
+              {isSearching
+                ? "該当する受注が見つかりません。"
+                : "現在、未回収はありません 🎉"}
+            </div>
+          ) : (
+            <table className="w-full min-w-[760px] border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
+              <thead>
+                <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
+                  <th className="wos-th w-[14%]">管理番号</th>
+                  <th className="wos-th w-[22%]">顧客名</th>
+                  <th className="wos-th w-[12%]">請求日</th>
+                  <th className="wos-th w-[12%]">振込期限</th>
+                  <th className="wos-th w-[14%]">状態</th>
+                  <th className="wos-th right w-[14%]">金額</th>
+                  <th className="wos-th right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r, i) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-[var(--color-line)]"
+                    style={{
+                      background:
+                        i % 2 === 1 ? "var(--color-cream)" : "transparent",
+                    }}
+                  >
+                    <td className="wos-td">
+                      <Link
+                        href={`/dashboard/orders/${r.id}`}
+                        className="wos-serif-num hover:underline"
+                      >
+                        {r.id.slice(0, 8)}
+                      </Link>
+                    </td>
+                    <td className="wos-td">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         {r.customer_name ? (
                           r.customer_id ? (
                             <Link
                               href={`/dashboard/customers/${r.customer_id}`}
-                              className="hover:underline"
+                              className="font-semibold text-[var(--color-ink)] hover:underline"
                             >
-                              {r.customer_name}
+                              {r.customer_name} 様
                             </Link>
                           ) : (
-                            r.customer_name
+                            <span className="font-semibold">
+                              {r.customer_name} 様
+                            </span>
                           )
                         ) : (
                           "—"
                         )}
-                      </span>
-                      {r.is_archived && (
-                        <span
-                          className="inline-flex items-center rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                          title="作業はアーカイブ済みですが、まだ入金されていません"
-                        >
-                          📦 アーカイブ済
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                    {formatDateOnly(r.invoiced_at)}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
-                    {formatDueDate(r.payment_due_date)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={r.status} days={r.days} />
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                    {formatYen(r.owed_amount)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentConfirmFor(r.id)}
-                      disabled={pendingId === r.id}
-                      className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    >
-                      {pendingId === r.id ? "更新中..." : "入金確認"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+                        {r.is_archived && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]"
+                            title="作業はアーカイブ済み"
+                          >
+                            アーカイブ済
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="wos-td num muted">
+                      {formatDateOnly(r.invoiced_at)}
+                    </td>
+                    <td className="wos-td num">{formatDueDate(r.payment_due_date)}</td>
+                    <td className="wos-td">
+                      <StatusBadge status={r.status} days={r.days} />
+                    </td>
+                    <td className="wos-td num right">
+                      {formatYen(r.owed_amount)}
+                    </td>
+                    <td className="wos-td right">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentConfirmFor(r.id)}
+                        disabled={pendingId === r.id}
+                        className="wos-btn wos-btn-xs"
+                      >
+                        {pendingId === r.id ? "更新中…" : "入金確認"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {paymentConfirmFor && (
