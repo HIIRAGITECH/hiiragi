@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>HIIRAGI 工房管理システム — 全画面（紺青配色）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="assets/wos-tokens.css" />
+<link rel="stylesheet" href="assets/palettes.css" />
+<style>
+  html, body { margin: 0; background: #efece6; }
+  .slate-wrap { width: 100%; height: 100%; }
+</style>
+</head>
+<body class="wos">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="shell2.jsx"></script>
+<script type="text/babel" src="dashboards2.jsx"></script>
+<script type="text/babel" src="orders2.jsx"></script>
+<script type="text/babel" src="screens.jsx"></script>
+<script type="text/babel" src="screens2.jsx"></script>
+<script type="text/babel" src="screens3.jsx"></script>
+<script type="text/babel" src="screens4.jsx"></script>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+const {
+  DashboardC2, OrdersC2,
+  CustomersList, CustomerDetail, OrderDetail,
+  PaymentsScreen, SalesScreen, PartsScreen, SettingsScreen,
+  NewOrderScreen, WorkMenusScreen, WorkSetsScreen,
+  EstimatePreview, InvoicePreview, LoginScreen,
+} = window;
+
+const ART_W = 1440;
+const ART_H = 980;
+
+function Slate({ children }) {
+  return <div className="palette-slate slate-wrap">{children}</div>;
+}
+
+function App() {
+  return (
+    <DesignCanvas
+      title="HIIRAGI 工房管理システム — 全画面（紺青配色）"
+      subtitle="02 · 紺青 × 灰白 パレットで主要画面を一式。サイドバー型 (案C) を採用。"
+    >
+      <DCSection id="primary" title="メイン画面" subtitle="ダッシュボード・受注一覧">
+        <DCArtboard id="dash"   label="ダッシュボード"   width={ART_W} height={ART_H}><Slate><DashboardC2 /></Slate></DCArtboard>
+        <DCArtboard id="orders" label="受注一覧"         width={ART_W} height={ART_H}><Slate><OrdersC2 /></Slate></DCArtboard>
+      </DCSection>
+
+      <DCSection id="customers" title="顧客" subtitle="顧客一覧と顧客詳細 (基本情報・保有車両・整備履歴)">
+        <DCArtboard id="cus-list" label="顧客一覧" width={ART_W} height={ART_H}><Slate><CustomersList /></Slate></DCArtboard>
+        <DCArtboard id="cus-detail" label="顧客詳細" width={ART_W} height={ART_H}><Slate><CustomerDetail /></Slate></DCArtboard>
+      </DCSection>
+
+      <DCSection id="order-detail" title="受注・帳票" subtitle="新規受注、受注詳細、見積書、請求書">
+        <DCArtboard id="ord-new"    label="新規受注作成"        width={ART_W} height={ART_H}><Slate><NewOrderScreen /></Slate></DCArtboard>
+        <DCArtboard id="ord-detail" label="受注詳細"            width={ART_W} height={ART_H}><Slate><OrderDetail /></Slate></DCArtboard>
+        <DCArtboard id="estimate"   label="見積書プレビュー (A4)" width={ART_W} height={ART_H}><Slate><EstimatePreview /></Slate></DCArtboard>
+        <DCArtboard id="invoice"    label="請求書プレビュー (A4)" width={ART_W} height={ART_H}><Slate><InvoicePreview /></Slate></DCArtboard>
+      </DCSection>
+
+      <DCSection id="finance" title="会計" subtitle="入金管理と売上集計">
+        <DCArtboard id="payments" label="入金管理"   width={ART_W} height={ART_H}><Slate><PaymentsScreen /></Slate></DCArtboard>
+        <DCArtboard id="sales"    label="売上集計"   width={ART_W} height={ART_H}><Slate><SalesScreen /></Slate></DCArtboard>
+      </DCSection>
+
+      <DCSection id="masters" title="マスタ" subtitle="作業メニュー、作業セット">
+        <DCArtboard id="work-menus" label="作業メニュー一覧" width={ART_W} height={ART_H}><Slate><WorkMenusScreen /></Slate></DCArtboard>
+        <DCArtboard id="work-sets"  label="作業セット一覧"   width={ART_W} height={ART_H}><Slate><WorkSetsScreen /></Slate></DCArtboard>
+      </DCSection>
+
+      <DCSection id="workshop" title="工房・システム" subtitle="部品在庫・設定・ログイン">
+        <DCArtboard id="parts"    label="部品在庫" width={ART_W} height={ART_H}><Slate><PartsScreen /></Slate></DCArtboard>
+        <DCArtboard id="settings" label="設定"     width={ART_W} height={ART_H}><Slate><SettingsScreen /></Slate></DCArtboard>
+        <DCArtboard id="login"    label="ログイン"   width={ART_W} height={ART_H}><Slate><LoginScreen /></Slate></DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>HIIRAGI Workshop OS — Design Variants</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="assets/hiiragi-tokens.css" />
+<style>
+  html, body { margin: 0; background: #efece6; }
+
+  /* =====  Shared editorial primitives (scoped to .wos-* so they don't bleed into the canvas chrome)  ===== */
+  .wos-art {
+    background: var(--color-cream);
+    color: var(--color-ink);
+    font-family: var(--font-jp), var(--font-display), serif;
+    font-weight: 300;
+    line-height: 1.6;
+    letter-spacing: 0.02em;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .wos-art * { box-sizing: border-box; }
+  .wos-art .mono {
+    font-family: var(--font-inter);
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--color-ink-light);
+    font-weight: 400;
+  }
+  .wos-art .mono-sm { font-size: 9px; letter-spacing: 0.32em; }
+  .wos-art .mono-md { font-size: 11px; letter-spacing: 0.26em; }
+  .wos-art .ital   { font-style: italic; color: var(--color-accent); font-weight: 400; font-family: var(--font-display); }
+  .wos-art .num    { font-family: var(--font-display); font-weight: 300; letter-spacing: -0.02em; line-height: 1; }
+  .wos-art .serif  { font-family: var(--font-display); font-weight: 400; }
+  .wos-art .hair   { background: var(--color-line); }
+  .wos-art .rule   { height: 1px; background: var(--color-line); display: block; }
+  .wos-art .vrule  { width: 1px; background: var(--color-line); display: block; align-self: stretch; }
+  .wos-art .accent-rule { height: 1px; width: 28px; background: var(--color-accent); display: inline-block; vertical-align: middle; }
+
+  /* Top nav (shared between V1, V2 and orders V1, V2) */
+  .wos-nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 40px; border-bottom: 1px solid var(--color-line); background: rgba(245, 242, 236, 0.92); backdrop-filter: blur(6px); flex-shrink: 0; }
+  .wos-nav .brand { display: flex; align-items: baseline; gap: 12px; }
+  .wos-nav .brand .wm { font-family: var(--font-display); font-weight: 500; font-size: 17px; letter-spacing: 0.22em; color: var(--color-ink); }
+  .wos-nav .brand .wm em { font-style: normal; color: var(--color-accent); }
+  .wos-nav .brand .sub { font-family: var(--font-inter); font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--color-ink-light); padding-left: 12px; border-left: 1px solid var(--color-line); }
+  .wos-nav .nav-links { display: flex; gap: 28px; align-items: center; }
+  .wos-nav .nav-links a { font-family: var(--font-jp); font-size: 13px; letter-spacing: 0.1em; color: var(--color-ink-soft); text-decoration: none; padding: 4px 0; position: relative; }
+  .wos-nav .nav-links a.active { color: var(--color-ink); }
+  .wos-nav .nav-links a.active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -22px; height: 1px; background: var(--color-accent); }
+  .wos-nav .nav-right { display: flex; align-items: center; gap: 16px; }
+  .wos-nav .nav-right .user { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--color-ink-light); }
+  .wos-nav .nav-right .signout { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--color-ink); border: 1px solid var(--color-line); padding: 8px 14px; background: transparent; cursor: pointer; }
+
+  /* Page header pattern: numeral + mono label + bilingual title */
+  .wos-pagehead { display: grid; grid-template-columns: 220px 1fr auto; align-items: end; padding: 36px 48px 28px; gap: 24px; }
+  .wos-pagehead .lhs { display: flex; flex-direction: column; gap: 8px; }
+  .wos-pagehead .lhs .num-tag { display: flex; align-items: baseline; gap: 10px; color: var(--color-accent); }
+  .wos-pagehead .lhs .num-tag .n { font-family: var(--font-display); font-style: italic; font-size: 22px; }
+  .wos-pagehead .lhs .num-tag .dash { color: var(--color-accent); }
+  .wos-pagehead .lhs .num-tag .lbl { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--color-ink-light); }
+  .wos-pagehead .rhs h1 { margin: 0; font-family: var(--font-display); font-weight: 300; font-size: 48px; line-height: 1.05; letter-spacing: -0.02em; color: var(--color-ink); }
+  .wos-pagehead .rhs h1 em { font-style: italic; color: var(--color-accent); font-weight: 400; }
+  .wos-pagehead .rhs .jp-gloss { font-family: var(--font-jp); font-size: 13px; letter-spacing: 0.1em; color: var(--color-ink-soft); margin-top: 8px; }
+  .wos-pagehead .actions { display: flex; gap: 10px; align-items: center; }
+
+  /* Buttons */
+  .wos-btn-ink {
+    font-family: var(--font-inter); font-size: 10.5px; letter-spacing: 0.25em; text-transform: uppercase;
+    background: var(--color-ink); color: var(--color-paper); border: 1px solid var(--color-ink);
+    padding: 11px 18px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .wos-btn-ink:hover { background: transparent; color: var(--color-ink); }
+  .wos-btn-ghost {
+    font-family: var(--font-inter); font-size: 10.5px; letter-spacing: 0.25em; text-transform: uppercase;
+    background: transparent; color: var(--color-ink); border: 1px solid var(--color-line);
+    padding: 11px 18px; cursor: pointer;
+  }
+  .wos-btn-ghost:hover { border-color: var(--color-ink); }
+
+  /* Status dot + label (replaces noisy colored pills) */
+  .wos-status { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-jp); font-size: 12px; letter-spacing: 0.08em; color: var(--color-ink); }
+  .wos-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-ink-light); }
+  .wos-status.work-uketsuke .dot   { background: var(--color-ink-light); }
+  .wos-status.work-sagyochu .dot   { background: var(--color-accent); }
+  .wos-status.work-kanryo .dot     { background: var(--color-ink); }
+  .wos-status.est-mi .dot          { background: var(--color-ink-light); }
+  .wos-status.est-hakko .dot       { background: #6b7a4e; }
+  .wos-status.est-ryosho .dot      { background: #4a5d3d; }
+  .wos-status.inv-mi .dot          { background: var(--color-ink-light); }
+  .wos-status.inv-seikyu .dot      { background: var(--color-accent); }
+  .wos-status.inv-nyukin .dot      { background: var(--color-ink); }
+  .wos-status.overdue .dot         { background: #b1503e; }
+  .wos-status.overdue .lbl         { color: #b1503e; }
+  .wos-status .lbl { color: inherit; }
+
+  /* Small tag (uppercase tracked mini-pill, hairline border) */
+  .wos-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--font-inter); font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    border: 1px solid var(--color-line); padding: 4px 9px; color: var(--color-ink-soft);
+    background: transparent; line-height: 1;
+  }
+  .wos-tag.active { border-color: var(--color-ink); color: var(--color-ink); }
+
+  /* Search input */
+  .wos-search { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--color-line); padding: 8px 4px; flex: 1; min-width: 280px; }
+  .wos-search input { border: none; outline: none; background: transparent; flex: 1; font-family: var(--font-jp); font-size: 13px; color: var(--color-ink); letter-spacing: 0.06em; }
+  .wos-search input::placeholder { color: var(--color-ink-light); font-family: var(--font-jp); }
+  .wos-search .key { font-family: var(--font-inter); font-size: 9px; letter-spacing: 0.2em; color: var(--color-ink-light); border: 1px solid var(--color-line); padding: 2px 6px; }
+
+  /* Section label (numeral + uppercase mono + accent rule) — reused inside body */
+  .wos-section-label { display: flex; align-items: center; gap: 12px; color: var(--color-ink-light); margin-bottom: 14px; }
+  .wos-section-label .n { font-family: var(--font-display); font-style: italic; color: var(--color-accent); font-size: 15px; }
+  .wos-section-label .lbl { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--color-ink-light); }
+  .wos-section-label .accent-rule { background: var(--color-accent); height: 1px; width: 24px; }
+
+  /* Hairline lattice */
+  .wos-lattice { display: grid; background: var(--color-line); gap: 1px; border: 1px solid var(--color-line); }
+  .wos-lattice > * { background: var(--color-paper); padding: 18px 22px; }
+
+  /* Scroll containment — artboards are static frames */
+  .wos-body { flex: 1; min-height: 0; overflow: hidden; }
+
+  /* On-ink (dark panel) styling */
+  .on-ink { background: var(--color-ink); color: var(--color-on-ink-fg); }
+  .on-ink .mono { color: var(--color-on-ink-muted); }
+  .on-ink .ital { color: #c8b994; }
+  .on-ink .rule, .on-ink .hair { background: var(--color-on-ink-line); }
+  .on-ink .accent-rule { background: #c8b994; }
+
+  /* Sidebar (V3) */
+  .wos-side {
+    width: 240px; flex-shrink: 0; background: var(--color-ink); color: var(--color-on-ink-fg);
+    display: flex; flex-direction: column; padding: 28px 0;
+  }
+  .wos-side .brand { padding: 0 24px 28px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--color-on-ink-line); }
+  .wos-side .brand .wm { font-family: var(--font-display); font-weight: 500; font-size: 18px; letter-spacing: 0.22em; color: var(--color-on-ink-fg); }
+  .wos-side .brand .wm em { font-style: normal; color: #c8b994; }
+  .wos-side .brand .sub { font-family: var(--font-inter); font-size: 9px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--color-on-ink-muted); }
+  .wos-side .nav { display: flex; flex-direction: column; padding: 24px 0; gap: 2px; flex: 1; }
+  .wos-side .nav .grp { font-family: var(--font-inter); font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--color-on-ink-muted); padding: 16px 24px 8px; }
+  .wos-side .nav a {
+    display: flex; align-items: baseline; gap: 10px; padding: 9px 24px;
+    color: var(--color-on-ink-soft); text-decoration: none;
+    font-family: var(--font-jp); font-size: 13px; letter-spacing: 0.1em;
+    border-left: 2px solid transparent;
+  }
+  .wos-side .nav a .en { font-family: var(--font-inter); font-size: 8.5px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--color-on-ink-muted); }
+  .wos-side .nav a.active { color: var(--color-on-ink-fg); border-left-color: #c8b994; background: rgba(255,255,255,0.04); }
+  .wos-side .nav a.active .en { color: #c8b994; }
+  .wos-side .nav a:hover { color: var(--color-on-ink-fg); }
+  .wos-side .foot { padding: 18px 24px; border-top: 1px solid var(--color-on-ink-line); display: flex; flex-direction: column; gap: 10px; }
+  .wos-side .foot .user { font-family: var(--font-inter); font-size: 9.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--color-on-ink-muted); }
+  .wos-side .foot .signout { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--color-on-ink-fg); border: 1px solid var(--color-on-ink-line); padding: 8px 12px; background: transparent; cursor: pointer; text-align: left; }
+
+  /* Selectable text accent inside dark hero */
+  .hero-dark { background: var(--color-ink); color: var(--color-on-ink-fg); padding: 36px 48px; }
+  .hero-dark .lbl-row { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
+  .hero-dark .lbl-row .accent-rule { background: #c8b994; }
+  .hero-dark .lbl-row .lbl { font-family: var(--font-inter); font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--color-on-ink-muted); }
+  .hero-dark h1 { font-family: var(--font-display); font-weight: 300; font-size: 44px; line-height: 1.05; letter-spacing: -0.02em; margin: 0; color: var(--color-on-ink-fg); }
+  .hero-dark h1 em { font-style: italic; color: #c8b994; font-weight: 400; }
+</style>
+</head>
+<body>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="dashboards.jsx"></script>
+<script type="text/babel" src="orders.jsx"></script>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+const { DashboardA, DashboardB, DashboardC } = window;
+const { OrdersA, OrdersB, OrdersC } = window;
+
+const ART_W = 1440;
+const ART_H = 980;
+
+function App() {
+  return (
+    <DesignCanvas
+      title="HIIRAGI · Workshop OS"
+      subtitle="Dashboard と 受注一覧 — 3 つのデザイン案 / Three directions per screen"
+    >
+      <DCSection
+        id="dashboard"
+        title="Dashboard / ダッシュボード"
+        subtitle="The morning page. 朝一番に開く、その日の作業を俯瞰する場所。"
+      >
+        <DCArtboard id="dash-a" label="A · Editorial Ledger / 台帳" width={ART_W} height={ART_H}>
+          <DashboardA />
+        </DCArtboard>
+        <DCArtboard id="dash-b" label="B · Atelier Dark Hero / 工房の朝" width={ART_W} height={ART_H}>
+          <DashboardB />
+        </DCArtboard>
+        <DCArtboard id="dash-c" label="C · Sidebar Ops / 業務密度" width={ART_W} height={ART_H}>
+          <DashboardC />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="orders"
+        title="Orders List / 受注一覧"
+        subtitle="The shop floor at a glance. 入庫から請求まで、進行中の仕事を一覧する。"
+      >
+        <DCArtboard id="ord-a" label="A · Specimen Plate / 標本表" width={ART_W} height={ART_H}>
+          <OrdersA />
+        </DCArtboard>
+        <DCArtboard id="ord-b" label="B · Order Cards / 受注帳" width={ART_W} height={ART_H}>
+          <OrdersB />
+        </DCArtboard>
+        <DCArtboard id="ord-c" label="C · Workbench Board / 作業台" width={ART_W} height={ART_H}>
+          <OrdersC />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

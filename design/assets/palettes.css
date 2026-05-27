@@ -1,0 +1,91 @@
+/* =====================================================================
+   HIIRAGI Workshop OS — 配色バリエーション
+   案Cシリーズの色味比較用。 .palette-X クラスを .wos-art の親に当てる。
+   ===================================================================== */
+
+/* ---------- 1) 現行: 暖かい茶 × クリーム (warm) ----------------------- */
+.palette-warm {
+  --color-cream:       #f5f2ec;
+  --color-paper:       #ffffff;
+  --color-ink:         #1a1a1a;
+  --color-ink-soft:    #383838;
+  --color-ink-mid:     #5c5c5c;
+  --color-ink-light:   #8a8a85;
+  --color-line:        #d8d2c6;
+  --color-line-strong: #b8b0a0;
+  --color-accent:      #7a6a4f;
+  --color-accent-dark: #3d3528;
+  --color-warn:        #b1503e;
+  --color-go:          #4a5d3d;
+  --color-busy:        #7a6a4f;
+  --color-on-ink-accent: #d8c8a0;
+}
+
+/* ---------- 2) 紺青 × 灰白 (slate navy) -------------------------------- */
+.palette-slate {
+  --color-cream:       #f1f2f4;
+  --color-paper:       #ffffff;
+  --color-ink:         #1c2330;    /* 深いスレートネイビー */
+  --color-ink-soft:    #313844;
+  --color-ink-mid:     #5a606c;
+  --color-ink-light:   #8a8f99;
+  --color-line:        #d4d6da;
+  --color-line-strong: #b3b6bc;
+  --color-accent:      #3f5b7a;    /* 渋い藍 */
+  --color-accent-dark: #243348;
+  --color-warn:        #b85040;
+  --color-go:          #41685d;
+  --color-busy:        #3f5b7a;
+  --color-on-ink-accent: #9fb7d3;
+}
+
+/* ---------- 3) 炭黒 × 苔緑 (charcoal forest) -------------------------- */
+.palette-forest {
+  --color-cream:       #eeece4;
+  --color-paper:       #ffffff;
+  --color-ink:         #232624;    /* 木炭 */
+  --color-ink-soft:    #383b38;
+  --color-ink-mid:     #5a5e58;
+  --color-ink-light:   #888c85;
+  --color-line:        #cfcec5;
+  --color-line-strong: #aeaea0;
+  --color-accent:      #5a6e4a;    /* 苔・常磐 */
+  --color-accent-dark: #2f3d24;
+  --color-warn:        #9b5c3a;
+  --color-go:          #5a6e4a;
+  --color-busy:        #5a6e4a;
+  --color-on-ink-accent: #b5c79e;
+}
+
+/* ---------- 4) 象牙 × 海老茶 (ivory burgundy) ------------------------- */
+.palette-burgundy {
+  --color-cream:       #f7f3ea;    /* 象牙 */
+  --color-paper:       #ffffff;
+  --color-ink:         #1d1a16;    /* やや赤味の墨 */
+  --color-ink-soft:    #3b3530;
+  --color-ink-mid:     #5e564f;
+  --color-ink-light:   #8c857c;
+  --color-line:        #dcd3c4;
+  --color-line-strong: #b9ae9a;
+  --color-accent:      #7d3a3a;    /* 海老茶・小豆色 */
+  --color-accent-dark: #4a1f1f;
+  --color-warn:        #b1503e;
+  --color-go:          #586e4a;
+  --color-busy:        #7d3a3a;
+  --color-on-ink-accent: #d8a988;
+}
+
+/* ---------- 配色見本ラベル ----------
+   キャンバスのアートボード横に小さく「配色見本」を出すパッチ */
+.palette-swatch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+.palette-swatch i {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(0,0,0,0.12);
+}

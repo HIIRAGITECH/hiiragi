@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>HIIRAGI 工房管理システム — 配色バリエーション</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="assets/wos-tokens.css" />
+<link rel="stylesheet" href="assets/palettes.css" />
+<style>
+  html, body { margin: 0; background: #efece6; }
+</style>
+</head>
+<body class="wos">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="shell2.jsx"></script>
+<script type="text/babel" src="dashboards2.jsx"></script>
+<script type="text/babel" src="orders2.jsx"></script>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+const { DashboardC2, OrdersC2 } = window;
+
+const ART_W = 1440;
+const ART_H = 980;
+
+// パレット定義 - 色見本の3色を表示するため
+const PALETTES = [
+  {
+    key: 'warm',     name: '01 · 暖かい茶 × クリーム', sub: '現行配色 — 工房・暖炉のような落ち着き',
+    swatch: ['#1a1a1a', '#7a6a4f', '#f5f2ec'],
+  },
+  {
+    key: 'slate',    name: '02 · 紺青 × 灰白',         sub: 'やや冷たく、企業システム寄りの清涼感',
+    swatch: ['#1c2330', '#3f5b7a', '#f1f2f4'],
+  },
+  {
+    key: 'forest',   name: '03 · 炭黒 × 苔緑',         sub: '木陰のような落ち着き、整備工場の自然色',
+    swatch: ['#232624', '#5a6e4a', '#eeece4'],
+  },
+  {
+    key: 'burgundy', name: '04 · 象牙 × 海老茶',       sub: '和の高級感、伝統工芸の老舗らしさ',
+    swatch: ['#1d1a16', '#7d3a3a', '#f7f3ea'],
+  },
+];
+
+function PaletteWrap({ pkey, children }) {
+  return (
+    <div className={`palette-${pkey}`} style={{ width: '100%', height: '100%' }}>
+      {children}
+    </div>
+  );
+}
+
+function PaletteLabel({ p }) {
+  // アートボード上部に出す配色名 + 3色のスウォッチ
+  return (
+    <span>
+      {p.name}
+      <span className="palette-swatch">
+        {p.swatch.map((c, i) => <i key={i} style={{ background: c }} />)}
+      </span>
+      <span style={{ color: '#8a8a85', fontWeight: 400, marginLeft: 10, fontSize: 13 }}>— {p.sub}</span>
+    </span>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas
+      title="HIIRAGI 工房管理システム — 配色バリエーション"
+      subtitle="案Cシリーズ（暗色サイドバー型）で4配色を比較。 横が配色、縦がダッシュボード／受注一覧。"
+    >
+      {PALETTES.map(p => (
+        <DCSection
+          key={p.key}
+          id={`palette-${p.key}`}
+          title={p.name}
+          subtitle={p.sub}
+        >
+          <DCArtboard
+            id={`dash-${p.key}`}
+            label={`ダッシュボード · ${p.name}`}
+            width={ART_W}
+            height={ART_H}
+          >
+            <PaletteWrap pkey={p.key}><DashboardC2 /></PaletteWrap>
+          </DCArtboard>
+          <DCArtboard
+            id={`ord-${p.key}`}
+            label={`受注一覧 · ${p.name}`}
+            width={ART_W}
+            height={ART_H}
+          >
+            <PaletteWrap pkey={p.key}><OrdersC2 /></PaletteWrap>
+          </DCArtboard>
+        </DCSection>
+      ))}
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

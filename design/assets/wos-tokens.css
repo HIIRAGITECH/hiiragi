@@ -1,0 +1,235 @@
+/* =====================================================================
+   HIIRAGI WORKSHOP OS — v2 トークン
+   方針:
+   - 視認性最優先。 明朝体 → ゴシック体(Noto Sans JP)へ
+   - 本文サイズを 13px → 14〜15px に拡大、行間も広め
+   - 英字ラベルを排除し、すべて日本語で表記
+   - 金額は省略せず ¥1,234,567 のフル表記
+   - セリフは固有番号(管理番号)など限られた箇所のみで使う
+   ===================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=Cormorant+Garamond:ital,wght@0,400;1,400;1,500&display=swap");
+
+:root {
+  /* Surface (継承) */
+  --color-cream:        #f5f2ec;
+  --color-paper:        #ffffff;
+  --color-ink:          #1a1a1a;
+  --color-ink-soft:     #383838;
+  --color-ink-mid:      #5c5c5c;
+  --color-ink-light:    #8a8a85;
+  --color-line:         #d8d2c6;
+  --color-line-strong:  #b8b0a0;
+  --color-accent:       #7a6a4f;
+  --color-accent-dark:  #3d3528;
+
+  /* ステータス色 — はっきり識別できるよう少しだけ強める */
+  --color-warn:   #b1503e;   /* 期限超過 */
+  --color-go:    #4a5d3d;   /* 入金済・完了の確定状態 */
+  --color-busy:  #7a6a4f;   /* 作業中 */
+
+  /* On-dark */
+  --color-on-ink-fg:        #faf8f3;
+  --color-on-ink-muted:     rgba(255,255,255,0.55);
+  --color-on-ink-soft:      rgba(255,255,255,0.78);
+  --color-on-ink-line:      rgba(255,255,255,0.14);
+  --color-on-ink-faint:     rgba(255,255,255,0.05);
+  --color-on-ink-accent:    #d8c8a0;
+
+  /* タイプ — Noto Sans JP を主役に */
+  --font-jp:     "Noto Sans JP", "Hiragino Kaku Gothic ProN", "ヒラギノ角ゴ ProN", "Yu Gothic", "メイリオ", sans-serif;
+  --font-num:    "IBM Plex Sans", "Inter", "Noto Sans JP", sans-serif;
+  --font-serif:  "Cormorant Garamond", Georgia, serif;
+}
+
+/* ===== ベース =================================================== */
+body.wos { background: var(--color-cream); color: var(--color-ink); font-family: var(--font-jp); font-weight: 400; }
+
+.wos-art {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-jp);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.wos-art * { box-sizing: border-box; }
+.wos-art .body-area { flex: 1; min-height: 0; overflow: hidden; }
+
+/* ===== 数値表示 =================================================== */
+.wos-art .num     { font-family: var(--font-num); font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1; }
+.wos-art .num-big { font-family: var(--font-num); font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+.wos-art .yen    { font-family: var(--font-num); font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* セリフ斜体は管理番号など限定使用 */
+.wos-art .serif-num { font-family: var(--font-serif); font-style: italic; font-weight: 500; color: var(--color-accent); letter-spacing: 0; }
+
+/* ===== セクションラベル ============================================ */
+.wos-art .sec-label {
+  font-family: var(--font-jp);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--color-ink-mid);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.wos-art .sec-label::before {
+  content: "";
+  width: 24px;
+  height: 2px;
+  background: var(--color-accent);
+}
+.wos-art .sec-label .count { color: var(--color-ink-light); font-weight: 400; font-size: 12px; letter-spacing: 0.1em; margin-left: 4px; }
+
+/* ===== ボタン ===================================================== */
+.wos-art .btn {
+  font-family: var(--font-jp);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  padding: 12px 20px;
+  border: 1px solid var(--color-ink);
+  background: var(--color-ink);
+  color: #fff;
+  cursor: pointer;
+  transition: background 200ms, color 200ms;
+}
+.wos-art .btn:hover { background: transparent; color: var(--color-ink); }
+.wos-art .btn-ghost {
+  font-family: var(--font-jp); font-size: 13px; font-weight: 500; letter-spacing: 0.08em;
+  padding: 12px 20px; border: 1px solid var(--color-line-strong); background: transparent; color: var(--color-ink); cursor: pointer;
+}
+.wos-art .btn-ghost:hover { border-color: var(--color-ink); }
+.wos-art .btn-sm { padding: 8px 14px; font-size: 12px; }
+
+/* ===== ステータス (ドット+ラベル) ================================== */
+.wos-art .status {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-jp); font-size: 13px; font-weight: 500; letter-spacing: 0.05em;
+  color: var(--color-ink);
+}
+.wos-art .status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-ink-light); flex-shrink: 0; }
+
+.wos-art .status.w-u .dot { background: #b8b0a0; }
+.wos-art .status.w-s .dot { background: var(--color-busy); }
+.wos-art .status.w-k .dot { background: var(--color-go); }
+.wos-art .status.e-m .dot { background: #b8b0a0; }
+.wos-art .status.e-h .dot { background: var(--color-busy); }
+.wos-art .status.e-r .dot { background: var(--color-go); }
+.wos-art .status.i-m .dot { background: #b8b0a0; }
+.wos-art .status.i-s .dot { background: var(--color-busy); }
+.wos-art .status.i-n .dot { background: var(--color-go); }
+.wos-art .status.over .dot { background: var(--color-warn); }
+.wos-art .status.over { color: var(--color-warn); }
+
+/* ===== タグ / フィルタチップ ======================================= */
+.wos-art .chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-jp); font-size: 12.5px; font-weight: 500; letter-spacing: 0.06em;
+  padding: 7px 14px; border: 1px solid var(--color-line-strong); color: var(--color-ink-mid);
+  background: transparent; line-height: 1; border-radius: 2px; cursor: pointer;
+}
+.wos-art .chip:hover { color: var(--color-ink); border-color: var(--color-ink); }
+.wos-art .chip.active { background: var(--color-ink); color: #fff; border-color: var(--color-ink); }
+.wos-art .chip .ct { color: var(--color-ink-light); font-size: 11px; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.wos-art .chip.active .ct { color: rgba(255,255,255,0.6); }
+
+/* ===== トップナビ ================================================== */
+.wos-art .topnav {
+  display: flex; align-items: stretch; justify-content: space-between;
+  padding: 0 40px; border-bottom: 1px solid var(--color-line);
+  background: var(--color-paper); flex-shrink: 0; height: 64px;
+}
+.wos-art .topnav .brand { display: flex; align-items: center; gap: 14px; }
+.wos-art .topnav .brand .wm { font-family: var(--font-jp); font-weight: 700; font-size: 17px; letter-spacing: 0.2em; color: var(--color-ink); }
+.wos-art .topnav .brand .wm em { font-style: normal; color: var(--color-accent); font-weight: 500; }
+.wos-art .topnav .brand .sub { font-family: var(--font-jp); font-size: 12px; font-weight: 500; letter-spacing: 0.12em; color: var(--color-ink-light); padding-left: 14px; border-left: 1px solid var(--color-line); }
+.wos-art .topnav .links { display: flex; align-items: stretch; gap: 0; }
+.wos-art .topnav .links a {
+  display: flex; align-items: center; padding: 0 18px; height: 100%;
+  font-family: var(--font-jp); font-size: 14px; font-weight: 500; letter-spacing: 0.08em;
+  color: var(--color-ink-mid); text-decoration: none; position: relative;
+}
+.wos-art .topnav .links a:hover { color: var(--color-ink); }
+.wos-art .topnav .links a.active { color: var(--color-ink); }
+.wos-art .topnav .links a.active::after { content: ''; position: absolute; left: 18px; right: 18px; bottom: -1px; height: 2px; background: var(--color-accent); }
+.wos-art .topnav .right { display: flex; align-items: center; gap: 16px; }
+.wos-art .topnav .right .user { font-family: var(--font-jp); font-size: 13px; font-weight: 500; color: var(--color-ink); }
+.wos-art .topnav .right .user-sub { font-family: var(--font-jp); font-size: 11px; color: var(--color-ink-light); margin-top: 2px; }
+
+/* ===== ページヘッダー (タイトル領域) ================================ */
+.wos-art .pagehead {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  padding: 32px 40px 24px;
+}
+.wos-art .pagehead .crumbs { font-family: var(--font-jp); font-size: 12px; color: var(--color-ink-light); letter-spacing: 0.12em; margin-bottom: 12px; }
+.wos-art .pagehead h1 {
+  margin: 0; font-family: var(--font-jp); font-weight: 600; font-size: 32px;
+  letter-spacing: 0.02em; color: var(--color-ink); line-height: 1.2;
+}
+.wos-art .pagehead .gloss {
+  margin-top: 8px; font-family: var(--font-jp); font-size: 14px;
+  color: var(--color-ink-mid); letter-spacing: 0.06em; line-height: 1.7; max-width: 720px;
+}
+.wos-art .pagehead .actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+
+/* ===== 罫線 / 格子 ================================================ */
+.wos-art .hair { height: 1px; background: var(--color-line); }
+.wos-art .vhair { width: 1px; background: var(--color-line); align-self: stretch; }
+.wos-art .lattice { display: grid; background: var(--color-line); gap: 1px; border: 1px solid var(--color-line); }
+.wos-art .lattice > * { background: var(--color-paper); }
+
+/* ===== 検索ボックス ============================================== */
+.wos-art .search {
+  display: flex; align-items: center; gap: 12px; padding: 11px 14px;
+  border: 1px solid var(--color-line-strong); background: var(--color-paper);
+  flex: 1; min-width: 280px; border-radius: 2px;
+}
+.wos-art .search input {
+  border: none; outline: none; background: transparent; flex: 1;
+  font-family: var(--font-jp); font-size: 14px; color: var(--color-ink); letter-spacing: 0.04em;
+}
+.wos-art .search input::placeholder { color: var(--color-ink-light); }
+.wos-art .search .ico { color: var(--color-ink-light); font-size: 14px; }
+.wos-art .search .key { font-family: var(--font-num); font-size: 11px; color: var(--color-ink-light); border: 1px solid var(--color-line); padding: 2px 7px; border-radius: 2px; }
+
+/* ===== サイドバー (暗色) ======================================== */
+.wos-art .sidebar {
+  width: 232px; flex-shrink: 0; background: var(--color-ink); color: var(--color-on-ink-fg);
+  display: flex; flex-direction: column; padding: 24px 0;
+}
+.wos-art .sidebar .brand { padding: 0 22px 22px; border-bottom: 1px solid var(--color-on-ink-line); }
+.wos-art .sidebar .brand .wm { font-family: var(--font-jp); font-weight: 700; font-size: 17px; letter-spacing: 0.2em; color: var(--color-on-ink-fg); }
+.wos-art .sidebar .brand .wm em { font-style: normal; color: var(--color-on-ink-accent); font-weight: 500; }
+.wos-art .sidebar .brand .sub { font-family: var(--font-jp); font-size: 11px; letter-spacing: 0.18em; color: var(--color-on-ink-muted); margin-top: 4px; }
+.wos-art .sidebar .nav { display: flex; flex-direction: column; padding: 16px 0; flex: 1; }
+.wos-art .sidebar .nav .grp { font-family: var(--font-jp); font-size: 11px; font-weight: 500; letter-spacing: 0.2em; color: var(--color-on-ink-muted); padding: 14px 22px 8px; }
+.wos-art .sidebar .nav a {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 22px; color: var(--color-on-ink-soft); text-decoration: none;
+  font-family: var(--font-jp); font-size: 14px; font-weight: 500; letter-spacing: 0.06em;
+  border-left: 3px solid transparent;
+}
+.wos-art .sidebar .nav a .ct { font-family: var(--font-num); font-size: 11px; color: var(--color-on-ink-muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.wos-art .sidebar .nav a.active { color: #fff; border-left-color: var(--color-on-ink-accent); background: rgba(255,255,255,0.05); }
+.wos-art .sidebar .nav a.active .ct { color: var(--color-on-ink-accent); }
+.wos-art .sidebar .nav a:hover { color: #fff; }
+.wos-art .sidebar .foot { padding: 16px 22px; border-top: 1px solid var(--color-on-ink-line); display: flex; flex-direction: column; gap: 10px; }
+.wos-art .sidebar .foot .user { font-family: var(--font-jp); font-size: 12.5px; font-weight: 500; color: var(--color-on-ink-fg); }
+.wos-art .sidebar .foot .user-sub { font-family: var(--font-jp); font-size: 11px; color: var(--color-on-ink-muted); }
+.wos-art .sidebar .foot .signout { font-family: var(--font-jp); font-size: 12px; font-weight: 500; letter-spacing: 0.08em; color: var(--color-on-ink-fg); border: 1px solid var(--color-on-ink-line); padding: 9px 12px; background: transparent; cursor: pointer; text-align: left; }
+
+/* ===== 暗色ヒーロー ============================================== */
+.wos-art .hero-dark { background: var(--color-ink); color: var(--color-on-ink-fg); padding: 32px 40px 36px; }
+.wos-art .hero-dark .crumb { font-family: var(--font-jp); font-size: 12px; color: var(--color-on-ink-muted); letter-spacing: 0.12em; margin-bottom: 14px; display: flex; align-items: center; gap: 12px; }
+.wos-art .hero-dark .crumb::before { content: ""; width: 24px; height: 2px; background: var(--color-on-ink-accent); }
+.wos-art .hero-dark h1 { font-family: var(--font-jp); font-weight: 500; font-size: 36px; line-height: 1.4; letter-spacing: 0.04em; margin: 0; color: #fff; }
+.wos-art .hero-dark h1 em { font-style: normal; color: var(--color-on-ink-accent); font-weight: 600; }
+.wos-art .hero-dark h1 .warn { color: #d89880; }

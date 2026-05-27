@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<title>HIIRAGI 工房管理システム — デザイン提案 v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="assets/wos-tokens.css" />
+<style>
+  html, body { margin: 0; background: #efece6; }
+</style>
+</head>
+<body class="wos">
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="shell.jsx"></script>
+<script type="text/babel" src="shell2.jsx"></script>
+<script type="text/babel" src="dashboards2.jsx"></script>
+<script type="text/babel" src="orders2.jsx"></script>
+
+<div id="root"></div>
+
+<script type="text/babel">
+const { DesignCanvas, DCSection, DCArtboard } = window;
+const { DashboardA2, DashboardB2, DashboardC2, OrdersA2, OrdersB2, OrdersC2 } = window;
+
+const ART_W = 1440;
+const ART_H = 980;
+
+function App() {
+  return (
+    <DesignCanvas
+      title="HIIRAGI 工房管理システム"
+      subtitle="ダッシュボード ／ 受注一覧 — 各3案（日本語表記・視認性重視 v2）"
+    >
+      <DCSection
+        id="dashboard"
+        title="ダッシュボード"
+        subtitle="朝一番に開く、その日の作業を俯瞰する画面。"
+      >
+        <DCArtboard id="dash-a2" label="案A · 帳簿型 — 数字の格子" width={ART_W} height={ART_H}>
+          <DashboardA2 />
+        </DCArtboard>
+        <DCArtboard id="dash-b2" label="案B · 暗色ヒーロー — 朝の宣言" width={ART_W} height={ART_H}>
+          <DashboardB2 />
+        </DCArtboard>
+        <DCArtboard id="dash-c2" label="案C · 業務密度 — サイドバー型" width={ART_W} height={ART_H}>
+          <DashboardC2 />
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection
+        id="orders"
+        title="受注一覧"
+        subtitle="入庫から請求まで、進行中の仕事を一覧する画面。"
+      >
+        <DCArtboard id="ord-a2" label="案A · 一覧テーブル — 細罫の台帳" width={ART_W} height={ART_H}>
+          <OrdersA2 />
+        </DCArtboard>
+        <DCArtboard id="ord-b2" label="案B · 行カード — 受注帳" width={ART_W} height={ART_H}>
+          <OrdersB2 />
+        </DCArtboard>
+        <DCArtboard id="ord-c2" label="案C · 作業台ボード — カンバン式" width={ART_W} height={ART_H}>
+          <OrdersC2 />
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>
