@@ -70,6 +70,7 @@ export default function OrderStatusBar({
           classMap={workClass}
           onSelect={(next) => updateWorkStatus(orderId, next)}
           ariaLabel="作業ステータスを変更"
+          baseClassName="wos-status"
         />
       </StatusRow>
       <StatusRow
@@ -86,6 +87,7 @@ export default function OrderStatusBar({
           classMap={estimateClass}
           onSelect={(next) => updateEstimateStatus(orderId, next)}
           ariaLabel="見積ステータスを変更"
+          baseClassName="wos-status"
         />
       </StatusRow>
       <StatusRow
@@ -108,6 +110,7 @@ export default function OrderStatusBar({
             }
           }}
           ariaLabel="請求ステータスを変更"
+          baseClassName="wos-status"
         />
       </StatusRow>
 

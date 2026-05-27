@@ -16,16 +16,10 @@ type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   customers: CustomerOption[];
   initial?: Order;
-  defaultReceptionDate: string; // YYYY-MM-DD
+  defaultReceptionDate: string;
   submitLabel: string;
   cancelHref: string;
 };
-
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
-
-const labelClass =
-  "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
 export default function OrderForm({
   action,
@@ -45,7 +39,6 @@ export default function OrderForm({
 
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
-  // モーダルから追加された車両をローカルで保持（顧客ID毎）
   const [extraVehicles, setExtraVehicles] = useState<
     Record<string, { id: string; label: string }[]>
   >({});
@@ -58,7 +51,6 @@ export default function OrderForm({
 
   function handleCustomerChange(newId: string) {
     setCustomerId(newId);
-    // 顧客が変わったら車両選択はリセット（以前の車両は別顧客所属なので）
     setVehicleId("");
   }
 
@@ -71,11 +63,11 @@ export default function OrderForm({
   }
 
   return (
-    <form action={formAction} className="space-y-4">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <form action={formAction} className="wos-card space-y-5">
+      <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="customer_id" className={labelClass}>
-            顧客 <span className="text-red-600">*</span>
+          <label htmlFor="customer_id" className="wos-label">
+            顧客<span className="wos-req">*</span>
           </label>
           <select
             id="customer_id"
@@ -83,18 +75,18 @@ export default function OrderForm({
             required
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
-            className={inputClass}
+            className="wos-select"
           >
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}（{c.id}）
+                {c.name}
               </option>
             ))}
           </select>
         </div>
 
         <div>
-          <label htmlFor="vehicle_id" className={labelClass}>
+          <label htmlFor="vehicle_id" className="wos-label">
             車両
           </label>
           <div className="flex gap-2">
@@ -103,7 +95,7 @@ export default function OrderForm({
               name="vehicle_id"
               value={vehicleId}
               onChange={(e) => setVehicleId(e.target.value)}
-              className={inputClass}
+              className="wos-select"
             >
               <option value="">
                 {vehicles.length === 0
@@ -121,9 +113,11 @@ export default function OrderForm({
               onClick={() => setModalOpen(true)}
               disabled={!customerId}
               title={
-                customerId ? "この顧客に車両を新規登録" : "先に顧客を選択してください"
+                customerId
+                  ? "この顧客に車両を新規登録"
+                  : "先に顧客を選択してください"
               }
-              className="shrink-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="wos-btn-ghost wos-btn-xs shrink-0"
             >
               ＋ 新規
             </button>
@@ -131,8 +125,8 @@ export default function OrderForm({
         </div>
 
         <div>
-          <label htmlFor="reception_date" className={labelClass}>
-            受付日 <span className="text-red-600">*</span>
+          <label htmlFor="reception_date" className="wos-label">
+            受付日<span className="wos-req">*</span>
           </label>
           <input
             id="reception_date"
@@ -140,15 +134,15 @@ export default function OrderForm({
             type="date"
             required
             defaultValue={initial?.reception_date ?? defaultReceptionDate}
-            className={inputClass}
+            className="wos-input"
           />
         </div>
 
         <div className="sm:col-span-2">
-          <label htmlFor="notes" className={labelClass}>
+          <label htmlFor="notes" className="wos-label">
             入荷時メモ
           </label>
-          <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-[var(--color-ink-light)] mb-2">
             受注一覧画面で確認するための社内向けメモ。見積書・請求書には出ません。
           </p>
           <textarea
@@ -156,33 +150,25 @@ export default function OrderForm({
             name="notes"
             rows={3}
             defaultValue={initial?.notes ?? ""}
-            className={inputClass}
+            className="wos-textarea"
           />
         </div>
-        {/* 見積書 備考 / 請求書 備考は受注詳細画面の帳票出力エリアで編集する。
-            帳票を都度修正する性質が強いため詳細画面側に集約した（編集画面には残さない）。 */}
       </div>
 
       {state?.error && (
-        <p
-          role="alert"
-          className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-        >
+        <p role="alert" className="wos-alert warn">
           {state.error}
         </p>
       )}
 
       <div className="flex items-center justify-end gap-2 pt-2">
-        <Link
-          href={cancelHref}
-          className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
           キャンセル
         </Link>
         <button
           type="submit"
           disabled={pending}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          className="wos-btn wos-btn-sm"
         >
           {pending ? "保存中..." : submitLabel}
         </button>

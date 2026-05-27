@@ -8,7 +8,6 @@ export const metadata: Metadata = {
   title: "アーカイブ受注 | HIIRAGI",
 };
 
-// 一覧表示用の行 + 金額計算用に items / discount_amount を追加
 type ArchiveRow = OrderListRow & {
   items: OrderItem[];
   discount_amount: number;
@@ -29,7 +28,6 @@ export default async function ArchivePage({
   const now = new Date();
   const year = pickInt(sp.year, now.getFullYear());
 
-  // 年の境界（JST）。invoiced_at で絞り込む。
   const start = `${year}-01-01T00:00:00+09:00`;
   const end = `${year + 1}-01-01T00:00:00+09:00`;
 
@@ -53,30 +51,38 @@ export default async function ArchivePage({
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          アーカイブ受注
-        </h2>
-        <Link
-          href="/dashboard/orders"
-          className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          ← 受注一覧へ戻る
-        </Link>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/orders" className="hover:underline">
+              受注一覧
+            </Link>{" "}
+            ／ アーカイブ
+          </div>
+          <h1>アーカイブ受注（{year}年）</h1>
+          <div className="wos-gloss">
+            請求日（invoiced_at）の月でグループ化して表示しています。
+          </div>
+        </div>
+        <div className="wos-actions">
+          <Link href="/dashboard/orders" className="wos-btn-ghost wos-btn-sm">
+            ← 受注一覧へ戻る
+          </Link>
+        </div>
       </div>
 
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        アーカイブ済みの受注を、請求日（invoiced_at）の月でグループ化して表示します。
-      </p>
-
       {error && (
-        <p className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          アーカイブ一覧の取得に失敗しました: {error.message}
-        </p>
+        <div className="px-8 pt-4">
+          <p className="wos-alert warn">
+            アーカイブ一覧の取得に失敗しました: {error.message}
+          </p>
+        </div>
       )}
 
-      <div className="mt-4">
-        <ArchiveTable rows={orders} year={year} />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6">
+          <ArchiveTable rows={orders} year={year} />
+        </div>
       </div>
     </>
   );

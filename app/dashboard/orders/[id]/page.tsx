@@ -72,7 +72,6 @@ export default async function OrderDetailPage(
           .eq("user_id", user!.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    // 明細フォームの「メニューから追加」picker 用（非表示は除外）
     supabase
       .from("work_menu_items")
       .select("*")
@@ -80,7 +79,6 @@ export default async function OrderDetailPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
-    // 明細フォームの「セットから追加」picker 用（非表示セットは除外）
     supabase
       .from("work_menu_sets")
       .select("*")
@@ -92,7 +90,6 @@ export default async function OrderDetailPage(
       .from("work_menu_set_items")
       .select("set_id, menu_item_id, position")
       .order("position", { ascending: true }),
-    // 業務カテゴリ（明細フォームでセクション分け／カテゴリ選択に使う）
     supabase
       .from("work_item_categories")
       .select("*")
@@ -100,14 +97,10 @@ export default async function OrderDetailPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
-    // 部品マスター: メニュー追加時の間接材料スナップショットで cost_price を引くために必要。
-    // 削除済みもスナップショットの原価を取りたいので含める。
     supabase
       .from("parts_inventory")
       .select("id, cost_price")
       .eq("user_id", user!.id),
-    // 間接材料: ユーザーの全メニューに紐づくエントリを一括取得。
-    // RLS（親メニュー所有チェック）で他人のものは弾かれる。
     supabase
       .from("work_menu_indirect_materials")
       .select("menu_item_id, part_id, quantity"),
@@ -124,9 +117,6 @@ export default async function OrderDetailPage(
   }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
-  // メニュー id → 間接材料スナップショット候補のマップ。
-  // part_id ごとに parts_inventory.cost_price を引いてスナップ用配列を構築する。
-  // メニュー追加時にこの配列をそのまま OrderItem.indirect_materials へコピーする。
   const partsCostMap = new Map<string, number>();
   for (const p of (partsRes.data ?? []) as Pick<
     PartsInventory,
@@ -149,7 +139,6 @@ export default async function OrderDetailPage(
     });
   }
 
-  // セットを「中身を menu 解決済み配列で持つ」形にして渡す
   const menuMap = new Map(allMenus.map((m) => [m.id, m]));
   const allSetsWithItems = allSets.map((s) => ({
     set: s,
@@ -168,205 +157,209 @@ export default async function OrderDetailPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/orders"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 受注一覧に戻る
-        </Link>
-        <div className="mt-2 flex items-start justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="font-mono text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-                {order.id}
-              </h2>
-              <OrderStatusBar
-                orderId={order.id}
-                workStatus={order.work_status}
-                estimateStatus={order.estimate_status}
-                invoiceStatus={order.invoice_status}
-                invoiceSubject={order.invoice_subject}
-              />
-            </div>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              受付日: {formatDate(order.reception_date)}
-            </p>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/orders" className="hover:underline">
+              受注一覧
+            </Link>{" "}
+            ／ 受注詳細
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={`/dashboard/orders/${order.id}/edit`}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              受注情報を編集
-            </Link>
-            {order.is_archived ? (
-              <DeleteButton
-                action={restoreOrderFormAction}
-                hidden={{ id: order.id }}
-                confirmMessage={`受注「${order.id}」をアーカイブから復元しますか？`}
-                label="アーカイブから戻す"
-                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              />
-            ) : (
-              <DeleteButton
-                action={archiveOrderFormAction}
-                hidden={{ id: order.id }}
-                confirmMessage={`受注「${order.id}」をアーカイブしますか？（一覧から非表示になります）`}
-                label="アーカイブ"
-                className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              />
-            )}
-            <DeleteButton
-              action={deleteOrder}
-              hidden={{ id: order.id }}
-              confirmMessage={`受注「${order.id}」を削除します。よろしいですか？`}
-              label="削除"
+          <h1 className="flex items-center gap-3 flex-wrap">
+            <span className="wos-serif-num text-2xl">No. {order.id.slice(0, 8)}</span>
+            <span className="text-base text-[var(--color-ink-mid)] font-normal">
+              受付 {formatDate(order.reception_date)}
+            </span>
+          </h1>
+          <div className="wos-gloss flex flex-wrap items-center gap-3">
+            <OrderStatusBar
+              orderId={order.id}
+              workStatus={order.work_status}
+              estimateStatus={order.estimate_status}
+              invoiceStatus={order.invoice_status}
+              invoiceSubject={order.invoice_subject}
             />
           </div>
         </div>
-      </div>
-
-      {/* 顧客・車両情報 */}
-      <section className="grid gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h3 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            顧客
-          </h3>
-          {customer ? (
-            <dl className="space-y-1.5 text-sm">
-              <Field
-                label="氏名"
-                value={
-                  <Link
-                    href={`/dashboard/customers/${customer.id}`}
-                    className="text-zinc-900 underline-offset-2 hover:underline dark:text-zinc-50"
-                  >
-                    {customer.name}
-                  </Link>
-                }
-              />
-              <Field label="フリガナ" value={customer.name_kana ?? "—"} />
-              <Field label="電話番号" value={customer.phone ?? "—"} />
-              <Field label="住所" value={customer.address ?? "—"} />
-            </dl>
+        <div className="wos-actions flex-wrap">
+          <Link
+            href={`/dashboard/orders/${order.id}/edit`}
+            className="wos-btn-ghost wos-btn-sm"
+          >
+            受注情報を編集
+          </Link>
+          {order.is_archived ? (
+            <DeleteButton
+              action={restoreOrderFormAction}
+              hidden={{ id: order.id }}
+              confirmMessage={`受注「${order.id}」をアーカイブから復元しますか？`}
+              label="アーカイブから戻す"
+              className="wos-btn-ghost wos-btn-sm"
+            />
           ) : (
-            <p className="text-sm text-zinc-500">顧客情報が取得できません。</p>
+            <DeleteButton
+              action={archiveOrderFormAction}
+              hidden={{ id: order.id }}
+              confirmMessage={`受注「${order.id}」をアーカイブしますか？（一覧から非表示になります）`}
+              label="アーカイブ"
+              className="wos-btn-ghost wos-btn-sm"
+            />
           )}
-        </div>
-
-        <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h3 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            車両
-          </h3>
-          {vehicle ? (
-            <dl className="space-y-1.5 text-sm">
-              <Field label="ナンバー" value={vehicle.plate_number ?? "—"} />
-              <Field
-                label="メーカー / 車種"
-                value={`${vehicle.maker ?? "—"} / ${vehicle.model ?? "—"}`}
-              />
-              <Field
-                label="年式"
-                value={vehicle.model_year ? `${vehicle.model_year}年` : "—"}
-              />
-              <Field label="車台番号" value={vehicle.vin ?? "—"} />
-            </dl>
-          ) : (
-            <p className="text-sm text-zinc-500">
-              {order.vehicle_id
-                ? "車両情報が取得できません。"
-                : "車両は未選択です。"}
-            </p>
-          )}
-        </div>
-      </section>
-
-      {order.notes && (
-        <section className="mt-4 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <h3 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            メモ
-          </h3>
-          <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
-            {order.notes}
-          </p>
-        </section>
-      )}
-
-      {/* 明細編集 */}
-      <section className="mt-8">
-        <h3 className="mb-3 text-base font-semibold text-zinc-900 dark:text-zinc-50">
-          明細
-        </h3>
-        <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-          <ItemsForm
-            action={itemsAction}
-            initialItems={order.items ?? []}
-            initialDiscount={order.discount_amount}
-            initialDeposit={order.deposit_amount}
-            initialEstimateNotes={order.estimate_notes}
-            initialInvoiceNotes={order.invoice_notes}
-            initialPhotoFolderUrl={order.photo_folder_url}
-            allMenus={allMenus}
-            allSetsWithItems={allSetsWithItems}
-            allCategories={allCategories}
-            stockDeducted={order.stock_deducted}
-            indirectByMenu={indirectByMenu}
+          <DeleteButton
+            action={deleteOrder}
+            hidden={{ id: order.id }}
+            confirmMessage={`受注「${order.id}」を削除します。よろしいですか？`}
+            label="削除"
+            className="wos-btn-danger wos-btn-sm"
           />
         </div>
-      </section>
+      </div>
 
-      {/* 在庫引き（Step 4）: 明細編集の後ろ、帳票出力の前に配置。 */}
-      <StockDeductionSection
-        orderId={order.id}
-        stockDeducted={order.stock_deducted}
-        stockDeductedAt={order.stock_deducted_at}
-      />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 flex flex-col gap-6">
+          {/* 顧客・車両情報 */}
+          <section className="grid gap-4 sm:grid-cols-2">
+            <div className="wos-card">
+              <div className="wos-sec-label mb-3">顧客</div>
+              {customer ? (
+                <dl className="space-y-2 text-sm">
+                  <DetailField
+                    label="氏名"
+                    value={
+                      <Link
+                        href={`/dashboard/customers/${customer.id}`}
+                        className="text-[var(--color-ink)] font-semibold hover:underline"
+                      >
+                        {customer.name} 様
+                      </Link>
+                    }
+                  />
+                  <DetailField label="フリガナ" value={customer.name_kana ?? "—"} />
+                  <DetailField label="電話番号" value={customer.phone ?? "—"} num />
+                  <DetailField label="住所" value={customer.address ?? "—"} />
+                </dl>
+              ) : (
+                <p className="text-sm text-[var(--color-ink-light)]">
+                  顧客情報が取得できません。
+                </p>
+              )}
+            </div>
 
-      {/* 整備写真フォルダの入力は ItemsForm 内に統合済み（「内容を保存」で一括保存）。 */}
+            <div className="wos-card">
+              <div className="wos-sec-label mb-3">車両</div>
+              {vehicle ? (
+                <dl className="space-y-2 text-sm">
+                  <DetailField label="ナンバー" value={vehicle.plate_number ?? "—"} />
+                  <DetailField
+                    label="メーカー / 車種"
+                    value={`${vehicle.maker ?? "—"} / ${vehicle.model ?? "—"}`}
+                  />
+                  <DetailField
+                    label="年式"
+                    value={vehicle.model_year ? `${vehicle.model_year}年` : "—"}
+                    num
+                  />
+                  <DetailField label="車台番号" value={vehicle.vin ?? "—"} />
+                </dl>
+              ) : (
+                <p className="text-sm text-[var(--color-ink-light)]">
+                  {order.vehicle_id
+                    ? "車両情報が取得できません。"
+                    : "車両は未選択です。"}
+                </p>
+              )}
+            </div>
+          </section>
 
-      {/* 見積/請求 出力 */}
-      <section className="mt-8 rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-        <h3 className="mb-3 text-base font-semibold text-zinc-900 dark:text-zinc-50">
-          帳票出力
-        </h3>
-        <p className="mb-4 text-sm text-zinc-500 dark:text-zinc-400">
-          内容を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「見積済」に更新されます。
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <form action={openEstimateAction}>
-            <button
-              type="submit"
-              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-            >
-              見積書を出力
-            </button>
-          </form>
-          <Link
-            href={`/dashboard/orders/${order.id}/invoice`}
-            className="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            請求書を出力
-          </Link>
+          {order.notes && (
+            <section className="wos-card">
+              <div className="wos-sec-label mb-2">メモ</div>
+              <p className="whitespace-pre-wrap text-sm text-[var(--color-ink-soft)]">
+                {order.notes}
+              </p>
+            </section>
+          )}
+
+          {/* 明細編集（既存 ItemsForm を維持） */}
+          <section>
+            <div className="wos-sec-label mb-3">明細</div>
+            <div className="wos-card">
+              <ItemsForm
+                action={itemsAction}
+                initialItems={order.items ?? []}
+                initialDiscount={order.discount_amount}
+                initialDeposit={order.deposit_amount}
+                initialEstimateNotes={order.estimate_notes}
+                initialInvoiceNotes={order.invoice_notes}
+                initialPhotoFolderUrl={order.photo_folder_url}
+                allMenus={allMenus}
+                allSetsWithItems={allSetsWithItems}
+                allCategories={allCategories}
+                stockDeducted={order.stock_deducted}
+                indirectByMenu={indirectByMenu}
+              />
+            </div>
+          </section>
+
+          {/* 在庫引き（既存 StockDeductionSection を維持） */}
+          <StockDeductionSection
+            orderId={order.id}
+            stockDeducted={order.stock_deducted}
+            stockDeductedAt={order.stock_deducted_at}
+          />
+
+          {/* 帳票出力 */}
+          <section className="wos-card">
+            <div className="wos-sec-label mb-3">帳票出力</div>
+            <p className="text-sm text-[var(--color-ink-mid)] mb-4">
+              内容を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「発行済」に更新されます。
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <form action={openEstimateAction}>
+                <button type="submit" className="wos-btn wos-btn-sm">
+                  見積書を出力
+                </button>
+              </form>
+              <Link
+                href={`/dashboard/orders/${order.id}/invoice`}
+                className="wos-btn-ghost wos-btn-sm"
+              >
+                請求書を出力
+              </Link>
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
     </>
   );
 }
 
-function Field({
+function DetailField({
   label,
   value,
+  num,
 }: {
   label: string;
   value: React.ReactNode;
+  num?: boolean;
 }) {
   return (
     <div className="flex items-baseline gap-3">
-      <dt className="w-24 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+      <dt
+        className="w-24 shrink-0 text-xs font-medium text-[var(--color-ink-mid)]"
+        style={{ letterSpacing: "0.1em" }}
+      >
         {label}
       </dt>
-      <dd className="text-zinc-900 dark:text-zinc-100">{value}</dd>
+      <dd
+        className="text-[var(--color-ink)] text-sm flex-1 min-w-0"
+        style={{
+          fontFamily: num ? "var(--font-num)" : undefined,
+          fontVariantNumeric: num ? "tabular-nums" : undefined,
+        }}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

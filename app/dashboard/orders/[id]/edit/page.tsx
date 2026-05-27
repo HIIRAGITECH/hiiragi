@@ -66,27 +66,36 @@ export default async function EditOrderPage(
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/orders"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 受注一覧に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          受注 編集（{order.id}）
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/orders" className="hover:underline">
+              受注一覧
+            </Link>{" "}
+            ／{" "}
+            <Link
+              href={`/dashboard/orders/${order.id}`}
+              className="hover:underline"
+            >
+              No. {order.id.slice(0, 8)}
+            </Link>{" "}
+            ／ 編集
+          </div>
+          <h1>受注情報を編集</h1>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <OrderForm
-          action={action}
-          customers={customers}
-          initial={order}
-          defaultReceptionDate={order.reception_date}
-          submitLabel="更新する"
-          cancelHref="/dashboard/orders"
-        />
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          <OrderForm
+            action={action}
+            customers={customers}
+            initial={order}
+            defaultReceptionDate={order.reception_date}
+            submitLabel="更新する"
+            cancelHref={`/dashboard/orders/${order.id}`}
+          />
+        </div>
       </div>
     </>
   );

@@ -48,42 +48,44 @@ export default async function NewOrderPage() {
 
   return (
     <>
-      <div className="mb-6">
-        <Link
-          href="/dashboard/orders"
-          className="text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
-          ← 受注一覧に戻る
-        </Link>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          受注 新規登録
-        </h2>
+      <div className="wos-pagehead">
+        <div className="min-w-0 flex-1">
+          <div className="wos-crumbs">
+            <Link href="/dashboard/orders" className="hover:underline">
+              受注一覧
+            </Link>{" "}
+            ／ 新規受注
+          </div>
+          <h1>受注を新規登録</h1>
+        </div>
       </div>
 
-      {customers.length === 0 ? (
-        <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <p className="text-sm text-zinc-700 dark:text-zinc-300">
-            顧客が登録されていません。先に
-            <Link
-              href="/dashboard/customers/new"
-              className="mx-1 text-zinc-900 underline dark:text-zinc-50"
-            >
-              顧客を登録
-            </Link>
-            してください。
-          </p>
+      <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
+        <div className="px-8 py-6 max-w-3xl">
+          {customers.length === 0 ? (
+            <div className="wos-card">
+              <p className="text-sm text-[var(--color-ink-soft)]">
+                顧客が登録されていません。先に
+                <Link
+                  href="/dashboard/customers/new"
+                  className="mx-1 text-[var(--color-accent)] underline"
+                >
+                  顧客を登録
+                </Link>
+                してください。
+              </p>
+            </div>
+          ) : (
+            <OrderForm
+              action={createOrder}
+              customers={customers}
+              defaultReceptionDate={today}
+              submitLabel="登録する"
+              cancelHref="/dashboard/orders"
+            />
+          )}
         </div>
-      ) : (
-        <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <OrderForm
-            action={createOrder}
-            customers={customers}
-            defaultReceptionDate={today}
-            submitLabel="登録する"
-            cancelHref="/dashboard/orders"
-          />
-        </div>
-      )}
+      </div>
     </>
   );
 }
