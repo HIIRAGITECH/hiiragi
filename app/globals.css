@@ -11,44 +11,607 @@
   font-style: normal;
 }
 
+/* =====================================================================
+   HIIRAGI Workshop OS — slate デザイントークン
+   配色: ネイビー × グレー白 + 渋い藍アクセント
+   フォント: Noto Sans JP（本文）/ IBM Plex Sans（数字）/ Cormorant Garamond（管理番号等）
+   ===================================================================== */
 :root {
+  /* Surface */
+  --color-cream: #f1f2f4;
+  --color-paper: #ffffff;
+  --color-ink: #1c2330;
+  --color-ink-soft: #313844;
+  --color-ink-mid: #5a606c;
+  --color-ink-light: #8a8f99;
+  --color-line: #d4d6da;
+  --color-line-strong: #b3b6bc;
+  --color-accent: #3f5b7a;
+  --color-accent-dark: #243348;
+
+  /* ステータス色 */
+  --color-warn: #b85040;
+  --color-go: #41685d;
+  --color-busy: #3f5b7a;
+
+  /* On-dark variants (サイドバー内) */
+  --color-on-ink-fg: #faf8f3;
+  --color-on-ink-muted: rgba(255, 255, 255, 0.55);
+  --color-on-ink-soft: rgba(255, 255, 255, 0.78);
+  --color-on-ink-line: rgba(255, 255, 255, 0.14);
+  --color-on-ink-faint: rgba(255, 255, 255, 0.05);
+  --color-on-ink-accent: #9fb7d3;
+
+  /* タイプ — next/font/google の CSS 変数を参照（fallback 付き） */
+  --font-jp: var(--font-noto-sans-jp), "Hiragino Kaku Gothic ProN",
+    "ヒラギノ角ゴ ProN", "Yu Gothic", "メイリオ", sans-serif;
+  --font-num: var(--font-ibm-plex-sans), var(--font-noto-sans-jp), sans-serif;
+  --font-serif: var(--font-cormorant), Georgia, serif;
+
+  /* 既存 zinc 互換用（PDF/printable を破壊しないため zinc-* は維持） */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: var(--color-ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-jp);
+  --font-mono: var(--font-num);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-jp);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.6;
 }
 
-/* ===== 印刷用スタイル ===== */
+/* =====================================================================
+   wos- ユーティリティ群（design/assets/wos-tokens.css から移植）
+   .wos-art の universal selector は持ち込まず、個別クラスに展開する
+   ===================================================================== */
+
+@layer components {
+  /* ── 数値表示 ──────────────────────────────────── */
+  .wos-num {
+    font-family: var(--font-num);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+  .wos-num-big {
+    font-family: var(--font-num);
+    font-weight: 300;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+  .wos-yen {
+    font-family: var(--font-num);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .wos-serif-num {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 500;
+    color: var(--color-accent);
+    letter-spacing: 0;
+  }
+
+  /* ── セクションラベル（左に2px幅のアクセント線） ── */
+  .wos-sec-label {
+    font-family: var(--font-jp);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    color: var(--color-ink-mid);
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .wos-sec-label::before {
+    content: "";
+    width: 24px;
+    height: 2px;
+    background: var(--color-accent);
+  }
+  .wos-sec-label .wos-ct {
+    color: var(--color-ink-light);
+    font-weight: 400;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    margin-left: 4px;
+  }
+
+  /* ── ボタン ───────────────────────────────────── */
+  .wos-btn {
+    font-family: var(--font-jp);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    padding: 12px 20px;
+    border: 1px solid var(--color-ink);
+    background: var(--color-ink);
+    color: #fff;
+    cursor: pointer;
+    transition:
+      background 200ms,
+      color 200ms;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .wos-btn:hover:not(:disabled) {
+    background: transparent;
+    color: var(--color-ink);
+  }
+  .wos-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .wos-btn-ghost {
+    font-family: var(--font-jp);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    padding: 12px 20px;
+    border: 1px solid var(--color-line-strong);
+    background: transparent;
+    color: var(--color-ink);
+    cursor: pointer;
+    transition: border-color 200ms;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .wos-btn-ghost:hover:not(:disabled) {
+    border-color: var(--color-ink);
+  }
+  .wos-btn-ghost:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .wos-btn-danger {
+    font-family: var(--font-jp);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    padding: 12px 20px;
+    border: 1px solid var(--color-warn);
+    background: transparent;
+    color: var(--color-warn);
+    cursor: pointer;
+    transition: background 200ms;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .wos-btn-danger:hover:not(:disabled) {
+    background: rgba(184, 80, 64, 0.08);
+  }
+  .wos-btn-sm {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+  .wos-btn-xs {
+    padding: 5px 10px;
+    font-size: 11.5px;
+  }
+
+  /* ── ステータスドット ─────────────────────────── */
+  .wos-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-jp);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    color: var(--color-ink);
+  }
+  .wos-status .wos-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-ink-light);
+    flex-shrink: 0;
+  }
+  .wos-status.w-u .wos-dot { background: #b3b6bc; }
+  .wos-status.w-s .wos-dot { background: var(--color-busy); }
+  .wos-status.w-k .wos-dot { background: var(--color-go); }
+  .wos-status.e-m .wos-dot { background: #b3b6bc; }
+  .wos-status.e-h .wos-dot { background: var(--color-busy); }
+  .wos-status.e-r .wos-dot { background: var(--color-go); }
+  .wos-status.i-m .wos-dot { background: #b3b6bc; }
+  .wos-status.i-s .wos-dot { background: var(--color-busy); }
+  .wos-status.i-n .wos-dot { background: var(--color-go); }
+  .wos-status.over .wos-dot { background: var(--color-warn); }
+  .wos-status.over { color: var(--color-warn); }
+
+  /* ── チップ（フィルタタグ） ─────────────────────── */
+  .wos-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-jp);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    padding: 7px 14px;
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-ink-mid);
+    background: transparent;
+    line-height: 1;
+    border-radius: 2px;
+    cursor: pointer;
+    transition:
+      color 150ms,
+      border-color 150ms,
+      background 150ms;
+  }
+  .wos-chip:hover {
+    color: var(--color-ink);
+    border-color: var(--color-ink);
+  }
+  .wos-chip.active {
+    background: var(--color-ink);
+    color: #fff;
+    border-color: var(--color-ink);
+  }
+  .wos-chip .wos-ct {
+    color: var(--color-ink-light);
+    font-size: 11px;
+    margin-left: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .wos-chip.active .wos-ct {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* ── 検索ボックス ─────────────────────────────── */
+  .wos-search {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-paper);
+    flex: 1;
+    min-width: 280px;
+    border-radius: 2px;
+  }
+  .wos-search input {
+    border: none;
+    outline: none;
+    background: transparent;
+    flex: 1;
+    font-family: var(--font-jp);
+    font-size: 14px;
+    color: var(--color-ink);
+    letter-spacing: 0.04em;
+  }
+  .wos-search input::placeholder {
+    color: var(--color-ink-light);
+  }
+  .wos-search .wos-ico {
+    color: var(--color-ink-light);
+    font-size: 14px;
+  }
+  .wos-search .wos-key {
+    font-family: var(--font-num);
+    font-size: 11px;
+    color: var(--color-ink-light);
+    border: 1px solid var(--color-line);
+    padding: 2px 7px;
+    border-radius: 2px;
+  }
+
+  /* ── 暗色サイドバー ───────────────────────────── */
+  .wos-sidebar {
+    width: 232px;
+    flex-shrink: 0;
+    background: var(--color-ink);
+    color: var(--color-on-ink-fg);
+    display: flex;
+    flex-direction: column;
+    padding: 24px 0;
+    min-height: 100vh;
+  }
+  .wos-sidebar-brand {
+    padding: 0 22px 22px;
+    border-bottom: 1px solid var(--color-on-ink-line);
+  }
+  .wos-sidebar-brand .wos-wm {
+    font-family: var(--font-jp);
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: 0.2em;
+    color: var(--color-on-ink-fg);
+  }
+  .wos-sidebar-brand .wos-wm em {
+    font-style: normal;
+    color: var(--color-on-ink-accent);
+    font-weight: 500;
+  }
+  .wos-sidebar-brand .wos-sub {
+    font-family: var(--font-jp);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--color-on-ink-muted);
+    margin-top: 4px;
+    display: block;
+  }
+  .wos-sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+    flex: 1;
+  }
+  .wos-sidebar-grp {
+    font-family: var(--font-jp);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    color: var(--color-on-ink-muted);
+    padding: 14px 22px 8px;
+  }
+  .wos-sidebar-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 22px;
+    color: var(--color-on-ink-soft);
+    text-decoration: none;
+    font-family: var(--font-jp);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    border-left: 3px solid transparent;
+    transition: color 150ms;
+  }
+  .wos-sidebar-link .wos-ct {
+    font-family: var(--font-num);
+    font-size: 11px;
+    color: var(--color-on-ink-muted);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+  .wos-sidebar-link.active {
+    color: #fff;
+    border-left-color: var(--color-on-ink-accent);
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .wos-sidebar-link.active .wos-ct {
+    color: var(--color-on-ink-accent);
+  }
+  .wos-sidebar-link:hover {
+    color: #fff;
+  }
+  .wos-sidebar-foot {
+    padding: 16px 22px;
+    border-top: 1px solid var(--color-on-ink-line);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .wos-sidebar-foot .wos-user {
+    font-family: var(--font-jp);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--color-on-ink-fg);
+  }
+  .wos-sidebar-foot .wos-user-sub {
+    font-family: var(--font-jp);
+    font-size: 11px;
+    color: var(--color-on-ink-muted);
+  }
+  .wos-sidebar-foot .wos-signout {
+    font-family: var(--font-jp);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    color: var(--color-on-ink-fg);
+    border: 1px solid var(--color-on-ink-line);
+    padding: 9px 12px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background 150ms;
+  }
+  .wos-sidebar-foot .wos-signout:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ── ページヘッダー（コンテンツ上部） ─────────── */
+  .wos-pagehead {
+    padding: 22px 32px;
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-paper);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-shrink: 0;
+    gap: 24px;
+  }
+  .wos-pagehead .wos-crumbs {
+    font-size: 12px;
+    color: var(--color-ink-light);
+    letter-spacing: 0.12em;
+    margin-bottom: 6px;
+  }
+  .wos-pagehead h1 {
+    margin: 0;
+    font-family: var(--font-jp);
+    font-weight: 600;
+    font-size: 26px;
+    color: var(--color-ink);
+    letter-spacing: 0.02em;
+    line-height: 1.3;
+  }
+  .wos-pagehead .wos-gloss {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--color-ink-mid);
+    letter-spacing: 0.04em;
+    max-width: 760px;
+  }
+  .wos-pagehead .wos-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  /* ── 罫線 / 格子 ──────────────────────────────── */
+  .wos-hair {
+    height: 1px;
+    background: var(--color-line);
+  }
+  .wos-vhair {
+    width: 1px;
+    background: var(--color-line);
+    align-self: stretch;
+  }
+  .wos-lattice {
+    display: grid;
+    background: var(--color-line);
+    gap: 1px;
+    border: 1px solid var(--color-line);
+  }
+  .wos-lattice > * {
+    background: var(--color-paper);
+  }
+
+  /* ── テーブル（ledger 型） ────────────────────── */
+  .wos-th {
+    padding: 14px 12px;
+    font-family: var(--font-jp);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--color-ink-mid);
+    text-align: left;
+  }
+  .wos-th.right {
+    text-align: right;
+  }
+  .wos-td {
+    padding: 14px 12px;
+    font-family: var(--font-jp);
+    font-size: 13.5px;
+    color: var(--color-ink);
+    letter-spacing: 0.03em;
+    vertical-align: top;
+  }
+  .wos-td.right {
+    text-align: right;
+  }
+  .wos-td.num {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.005em;
+    font-weight: 500;
+  }
+  .wos-td.muted {
+    color: var(--color-ink-mid);
+  }
+
+  /* ── フォーム ─────────────────────────────────── */
+  .wos-input,
+  .wos-select,
+  .wos-textarea {
+    width: 100%;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-paper);
+    padding: 10px 12px;
+    font-family: var(--font-jp);
+    font-size: 14px;
+    color: var(--color-ink);
+    letter-spacing: 0.03em;
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 150ms;
+  }
+  .wos-input:focus,
+  .wos-select:focus,
+  .wos-textarea:focus {
+    border-color: var(--color-ink);
+  }
+  .wos-input::placeholder,
+  .wos-textarea::placeholder {
+    color: var(--color-ink-light);
+  }
+  .wos-input:disabled,
+  .wos-select:disabled,
+  .wos-textarea:disabled {
+    background: var(--color-cream);
+    color: var(--color-ink-mid);
+    cursor: not-allowed;
+  }
+  .wos-label {
+    font-family: var(--font-jp);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    color: var(--color-ink-mid);
+    margin-bottom: 6px;
+    display: block;
+  }
+  .wos-label .wos-req {
+    color: var(--color-warn);
+    margin-left: 4px;
+  }
+
+  /* ── カード ───────────────────────────────────── */
+  .wos-card {
+    background: var(--color-paper);
+    border: 1px solid var(--color-line);
+    padding: 20px;
+  }
+
+  /* ── アラート/通知 ────────────────────────────── */
+  .wos-alert {
+    padding: 12px 16px;
+    border-left: 3px solid var(--color-line-strong);
+    background: var(--color-paper);
+    font-size: 13px;
+    color: var(--color-ink);
+    letter-spacing: 0.03em;
+  }
+  .wos-alert.warn {
+    border-left-color: var(--color-warn);
+    color: var(--color-warn);
+    background: rgba(184, 80, 64, 0.06);
+  }
+  .wos-alert.info {
+    border-left-color: var(--color-accent);
+    background: rgba(63, 91, 122, 0.06);
+  }
+}
+
+/* ===== 印刷用スタイル =====
+   PDF/帳票プレビューを守るため、印刷時は wos- トークンの影響を最小化。
+   printable-document.tsx は inline で font-family: "IPAex Gothic" を強制しているので、
+   ここではグローバル背景・色のみリセットする。 */
 @media print {
   @page {
     size: A4;
     margin: 15mm;
   }
 
-  /* 画面用クロームを非表示 */
   .no-print {
     display: none !important;
   }
 
-  /* ダッシュボードのレイアウト余白を解除して紙面いっぱいに */
   body,
   html {
     background: #fff !important;
@@ -60,7 +623,6 @@ body {
     margin: 0 !important;
   }
 
-  /* 帳票本体の改ページ整形 */
   .printable {
     box-shadow: none !important;
     page-break-inside: auto;
@@ -78,4 +640,13 @@ body {
     page-break-inside: avoid;
     page-break-after: auto;
   }
+}
+
+/* ===== 帳票プレビュー保護 =====
+   .printable 内では Tailwind の text-zinc-* / bg-white が PDF と一致する必要があるため、
+   wos- トークンの font 継承を遮断する。 */
+.printable,
+.printable * {
+  font-family: "IPAex Gothic", "Yu Gothic", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", system-ui, sans-serif !important;
 }

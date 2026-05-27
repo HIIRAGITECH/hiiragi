@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // デザインモックアップ（design/）は参照用であり、ビルドにも含めない。
+    "design/**",
   ]),
 ]);
 
