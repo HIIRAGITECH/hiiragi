@@ -12,6 +12,7 @@ import {
   type InvoiceStatus,
   type OrderItem,
   type TaxCategory,
+  type WorkCategory,
   type WorkStatus,
 } from "@/lib/types";
 
@@ -741,4 +742,283 @@ export async function openEstimate(id: string) {
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath("/dashboard/orders");
   redirect(`/dashboard/orders/${id}/estimate`);
+}
+
+// ============================================
+// 受注を作業セットとして保存
+// ============================================
+// 受注詳細画面の「📦 作業セットとして保存」ボタンから呼ばれる。
+//
+// 戦略:
+//   - 各明細について source_menu_id が「現存・所有・非削除」なら、そのメニュー id を再利用
+//   - それ以外（手入力 / 削除済みリンク）は新規 work_menu_items 行を作成
+//   - work_menu_sets を 1 行作成、work_menu_set_items で全行を position 順に紐付け
+//
+// 旧フィールド (category / tax_free) は新フィールド (tax_category / item_category_id)
+// からインライン派生する（work-menus/actions.ts の deriveLegacyCategory と同じロジック）。
+function deriveLegacyCategoryInline(
+  taxCategory: TaxCategory,
+  categoryName: string,
+): { category: WorkCategory; tax_free: boolean } {
+  if (taxCategory === "shaken_non_tax") {
+    return { category: "shaken_tax_free", tax_free: true };
+  }
+  if (categoryName === "車検整備") {
+    return { category: "shaken", tax_free: false };
+  }
+  return { category: "normal", tax_free: false };
+}
+
+export type SaveOrderAsSetResult =
+  | { error: string }
+  | { success: true; setId: string; newMenuCount: number; reusedMenuCount: number };
+
+export async function saveOrderAsSet(
+  orderId: string,
+  setName: string,
+  memo: string | null,
+): Promise<SaveOrderAsSetResult> {
+  if (!orderId) return { error: "受注 ID が不正です。" };
+
+  const name = (setName ?? "").trim();
+  if (!name) return { error: "セット名は必須です。" };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  // 1) 受注 + 明細を取得
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, items")
+    .eq("id", orderId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!order) return { error: "受注が見つかりません。" };
+
+  const items = ((order.items ?? []) as OrderItem[]).filter(
+    (i) => typeof i?.work_name === "string" && i.work_name.trim() !== "",
+  );
+  if (items.length === 0) {
+    return { error: "明細が空の受注はセット化できません。" };
+  }
+
+  // 2) source_menu_id のうち現存・所有・非削除なものを抽出（バルク確認）
+  const candidateMenuIds = Array.from(
+    new Set(
+      items
+        .map((i) => i.source_menu_id)
+        .filter((x): x is string => typeof x === "string" && x !== ""),
+    ),
+  );
+  let validMenuIds = new Set<string>();
+  if (candidateMenuIds.length > 0) {
+    const { data: rows } = await supabase
+      .from("work_menu_items")
+      .select("id")
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .in("id", candidateMenuIds);
+    validMenuIds = new Set((rows ?? []).map((r) => r.id as string));
+  }
+
+  // 3) 業務カテゴリ名マップ（旧 category 派生に使用）
+  const { data: catsData } = await supabase
+    .from("work_item_categories")
+    .select("id, name, deleted_at")
+    .eq("user_id", user.id);
+  const catNameById = new Map<string, string>();
+  for (const c of (catsData ?? []) as {
+    id: string;
+    name: string;
+    deleted_at: string | null;
+  }[]) {
+    if (c.deleted_at === null) catNameById.set(c.id, c.name);
+  }
+
+  // 4) 新規メニュー用の display_order 起点（既存最大 + 1）
+  const { data: maxMenuRow } = await supabase
+    .from("work_menu_items")
+    .select("display_order")
+    .eq("user_id", user.id)
+    .order("display_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let nextMenuOrder =
+    typeof maxMenuRow?.display_order === "number"
+      ? maxMenuRow.display_order + 1
+      : 0;
+
+  // 5) 各明細を「再利用 or 新規作成」してメニュー id 列を確定
+  // 並び順は明細の並びをそのまま position に対応させる。
+  const orderedMenuIds: string[] = [];
+  let newMenuCount = 0;
+  let reusedMenuCount = 0;
+
+  // ロールバック用: この実行で作成した menu_id（部分失敗時に消す）。
+  const createdMenuIds: string[] = [];
+
+  async function rollback() {
+    if (createdMenuIds.length > 0) {
+      // 間接材料は ON DELETE CASCADE なので親消去で連鎖。
+      await supabase
+        .from("work_menu_items")
+        .delete()
+        .in("id", createdMenuIds)
+        .eq("user_id", user!.id);
+    }
+  }
+
+  for (const item of items) {
+    if (item.source_menu_id && validMenuIds.has(item.source_menu_id)) {
+      orderedMenuIds.push(item.source_menu_id);
+      reusedMenuCount++;
+      continue;
+    }
+
+    const itemCatId =
+      typeof item.item_category_id === "string" && item.item_category_id !== ""
+        ? item.item_category_id
+        : null;
+    const catName = itemCatId ? (catNameById.get(itemCatId) ?? "") : "";
+    const taxCategory: TaxCategory =
+      item.tax_category ?? (item.tax_free === true ? "shaken_non_tax" : "taxable");
+    const legacy = deriveLegacyCategoryInline(taxCategory, catName);
+
+    const { data: insMenu, error: insErr } = await supabase
+      .from("work_menu_items")
+      .insert({
+        user_id: user.id,
+        work_name: item.work_name.trim(),
+        part_name: item.part_name ?? null,
+        default_quantity: Number(item.quantity ?? 1),
+        default_unit_price: Number(item.unit_price ?? 0),
+        default_labor_cost: Number(item.labor_cost ?? 0),
+        default_parts_cost: Number(item.parts_cost ?? 0),
+        labor_cost_price: Number(item.labor_cost_price ?? 0),
+        parts_cost_price: Number(item.parts_cost_price ?? 0),
+        tax_category: taxCategory,
+        item_category_id: itemCatId,
+        linked_part_id: item.linked_part_id ?? null,
+        category: legacy.category,
+        tax_free: legacy.tax_free,
+        display_order: nextMenuOrder++,
+      })
+      .select("id")
+      .single();
+    if (insErr || !insMenu) {
+      await rollback();
+      return {
+        error: `メニュー作成に失敗しました: ${insErr?.message ?? "unknown"}`,
+      };
+    }
+    const newMenuId = insMenu.id as string;
+    createdMenuIds.push(newMenuId);
+    orderedMenuIds.push(newMenuId);
+    newMenuCount++;
+
+    // 間接材料スナップショットをメニュー側に焼き直す。
+    // 注意: work_menu_indirect_materials は (part_id, quantity) のみ持つ
+    // （cost_price は parts_inventory 側で持つので不要）。
+    if (
+      Array.isArray(item.indirect_materials) &&
+      item.indirect_materials.length > 0
+    ) {
+      const seen = new Set<string>();
+      const valid: { menu_item_id: string; part_id: string; quantity: number }[] =
+        [];
+      for (const e of item.indirect_materials) {
+        const pid =
+          typeof e?.part_id === "string" ? e.part_id.trim() : "";
+        const qty = Number(e?.quantity ?? 0);
+        if (!pid || seen.has(pid)) continue;
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        seen.add(pid);
+        valid.push({ menu_item_id: newMenuId, part_id: pid, quantity: qty });
+      }
+      if (valid.length > 0) {
+        // 所有 parts_inventory のみ受け付ける（RLS 補助）。
+        const { data: ownedParts } = await supabase
+          .from("parts_inventory")
+          .select("id")
+          .eq("user_id", user.id)
+          .in("id", valid.map((v) => v.part_id));
+        const ownedSet = new Set((ownedParts ?? []).map((r) => r.id as string));
+        const filtered = valid.filter((v) => ownedSet.has(v.part_id));
+        if (filtered.length > 0) {
+          const { error: indErr } = await supabase
+            .from("work_menu_indirect_materials")
+            .insert(filtered);
+          if (indErr) {
+            await rollback();
+            return {
+              error: `間接材料の複製に失敗しました: ${indErr.message}`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 6) work_menu_sets を作成
+  const { data: maxSetRow } = await supabase
+    .from("work_menu_sets")
+    .select("display_order")
+    .eq("user_id", user.id)
+    .order("display_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextSetOrder =
+    typeof maxSetRow?.display_order === "number"
+      ? maxSetRow.display_order + 1
+      : 0;
+
+  const { data: insSet, error: setErr } = await supabase
+    .from("work_menu_sets")
+    .insert({
+      user_id: user.id,
+      name,
+      memo: memo && memo.trim() !== "" ? memo.trim() : null,
+      display_order: nextSetOrder,
+    })
+    .select("id")
+    .single();
+  if (setErr || !insSet) {
+    await rollback();
+    return {
+      error: `セット作成に失敗しました: ${setErr?.message ?? "unknown"}`,
+    };
+  }
+
+  // 7) work_menu_set_items でメニューを position 順に紐付け
+  const links = orderedMenuIds.map((mid, i) => ({
+    set_id: insSet.id as string,
+    menu_item_id: mid,
+    position: i,
+  }));
+  const { error: linkErr } = await supabase
+    .from("work_menu_set_items")
+    .insert(links);
+  if (linkErr) {
+    // セットを孤立させないよう削除してから返す（メニュー本体は残す: 部分成功でも価値があるため）。
+    await supabase
+      .from("work_menu_sets")
+      .delete()
+      .eq("id", insSet.id as string)
+      .eq("user_id", user.id);
+    await rollback();
+    return { error: `セット項目の作成に失敗しました: ${linkErr.message}` };
+  }
+
+  revalidatePath(`/dashboard/orders/${orderId}`);
+  revalidatePath("/dashboard/work-menu-sets");
+  revalidatePath("/dashboard/work-menus");
+  return {
+    success: true,
+    setId: insSet.id as string,
+    newMenuCount,
+    reusedMenuCount,
+  };
 }

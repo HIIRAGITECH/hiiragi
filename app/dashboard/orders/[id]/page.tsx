@@ -23,6 +23,7 @@ import {
 } from "../actions";
 import ItemsForm from "./items-form";
 import OrderStatusBar from "./order-status-bar";
+import SaveAsSetButton from "./save-as-set-button";
 import StockDeductionSection from "./stock-deduction-section";
 
 export const metadata: Metadata = {
@@ -188,6 +189,17 @@ export default async function OrderDetailPage(
           >
             受注情報を編集
           </Link>
+          <SaveAsSetButton
+            orderId={order.id}
+            defaultName={
+              vehicle?.maker || vehicle?.model
+                ? `${[vehicle?.maker, vehicle?.model].filter(Boolean).join(" ")} 一式`
+                : ""
+            }
+            itemsCount={(order.items ?? []).filter(
+              (i) => typeof i?.work_name === "string" && i.work_name.trim() !== "",
+            ).length}
+          />
           {order.is_archived ? (
             <DeleteButton
               action={restoreOrderFormAction}
