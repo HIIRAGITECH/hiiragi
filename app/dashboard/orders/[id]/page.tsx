@@ -188,6 +188,13 @@ export default async function OrderDetailPage(
           >
             受注情報を編集
           </Link>
+          <Link
+            href={`/dashboard/orders/new?duplicate=${encodeURIComponent(order.id)}`}
+            className="wos-btn-ghost wos-btn-sm"
+            title="この受注の明細・値引き・メモを引き継いで新規作成"
+          >
+            📋 複製
+          </Link>
           {order.is_archived ? (
             <DeleteButton
               action={restoreOrderFormAction}

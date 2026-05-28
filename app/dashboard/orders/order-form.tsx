@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
+import { formatYen } from "@/lib/format";
 import { type Order } from "@/lib/types";
 import type { FormState } from "./actions";
 import VehicleQuickAddModal from "./vehicle-quick-add-modal";
@@ -12,13 +13,26 @@ export type CustomerOption = {
   vehicles: { id: string; label: string }[];
 };
 
+// 受注「複製」モードで OrderForm に渡すプレビュー情報。
+// sourceId は hidden input として送信され、createOrder 側で再フェッチして
+// items / discount_amount を新規行にコピーする（クライアントから JSON を送らないので改ざんに強い）。
+export type DuplicateContext = {
+  sourceId: string;
+  itemsPreview: { work_name: string; quantity: number }[];
+  discountAmount: number;
+};
+
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   customers: CustomerOption[];
   initial?: Order;
   defaultReceptionDate: string;
+  // 複製モードで notes 初期値を渡す。initial と排他で使う。
+  defaultNotes?: string | null;
   submitLabel: string;
   cancelHref: string;
+  // 複製モード: 顧客・車両を空に強制し、プレビュー＋hidden duplicate_from を出す。
+  duplicate?: DuplicateContext;
 };
 
 export default function OrderForm({
@@ -26,16 +40,20 @@ export default function OrderForm({
   customers,
   initial,
   defaultReceptionDate,
+  defaultNotes,
   submitLabel,
   cancelHref,
+  duplicate,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
     undefined,
   );
 
-  const initialCustomerId = initial?.customer_id ?? customers[0]?.id ?? "";
-  const initialVehicleId = initial?.vehicle_id ?? "";
+  const initialCustomerId = duplicate
+    ? ""
+    : (initial?.customer_id ?? customers[0]?.id ?? "");
+  const initialVehicleId = duplicate ? "" : (initial?.vehicle_id ?? "");
 
   const [customerId, setCustomerId] = useState(initialCustomerId);
   const [vehicleId, setVehicleId] = useState(initialVehicleId);
@@ -62,8 +80,41 @@ export default function OrderForm({
     setVehicleId(v.id);
   }
 
+  const previewItems = duplicate?.itemsPreview ?? [];
+  const previewHead = previewItems.slice(0, 5);
+  const previewRest = previewItems.length - previewHead.length;
+
   return (
     <form action={formAction} className="wos-card space-y-5">
+      {duplicate && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="font-semibold mb-1">
+            📋 受注「{duplicate.sourceId}」から複製
+          </div>
+          <div className="text-xs leading-relaxed">
+            明細 {previewItems.length} 件・値引き {formatYen(duplicate.discountAmount)}・入荷時メモを引き継ぎます。
+            お客様・車両を選択して「保存」すると、新しい管理番号で登録されます。
+          </div>
+          {previewItems.length > 0 && (
+            <ul className="mt-2 list-disc pl-5 text-xs text-amber-800 dark:text-amber-300">
+              {previewHead.map((it, i) => (
+                <li key={i}>
+                  {it.work_name}
+                  <span className="text-amber-600 dark:text-amber-400/80">
+                    {" "}× {it.quantity}
+                  </span>
+                </li>
+              ))}
+              {previewRest > 0 && <li>…他 {previewRest} 件</li>}
+            </ul>
+          )}
+          <input
+            type="hidden"
+            name="duplicate_from"
+            value={duplicate.sourceId}
+          />
+        </div>
+      )}
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label htmlFor="customer_id" className="wos-label">
@@ -77,6 +128,11 @@ export default function OrderForm({
             onChange={(e) => handleCustomerChange(e.target.value)}
             className="wos-select"
           >
+            {customerId === "" && (
+              <option value="" disabled>
+                （顧客を選択してください）
+              </option>
+            )}
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -149,7 +205,7 @@ export default function OrderForm({
             id="notes"
             name="notes"
             rows={3}
-            defaultValue={initial?.notes ?? ""}
+            defaultValue={defaultNotes ?? initial?.notes ?? ""}
             className="wos-textarea"
           />
         </div>
