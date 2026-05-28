@@ -349,13 +349,6 @@ function BoardCard({
           >
             編集
           </Link>
-          <Link
-            href={`/dashboard/orders/new?duplicate=${encodeURIComponent(o.id)}`}
-            className="wos-btn-ghost wos-btn-xs"
-            title="この受注の明細・値引き・メモを引き継いで新規作成"
-          >
-            📋 複製
-          </Link>
           <DeleteButton
             action={deleteOrder}
             hidden={{ id: o.id }}

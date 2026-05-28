@@ -68,59 +68,9 @@ export async function createOrder(
     return { error: "認証エラー: 再度ログインしてください。" };
   }
 
-  // 複製モード: hidden duplicate_from で複製元 ID を受け取り、サーバ側で
-  // 当該受注の items / discount_amount を読んで新規行にコピーする。
-  // クライアントから JSON を流さないので「他ユーザの受注を指す ID」を投げられても
-  // RLS + user_id 条件で 0 件になるだけで害なし。
-  const duplicateFrom = pickString(formData, "duplicate_from");
-  type DuplicatePayload = {
-    items: OrderItem[];
-    discount_amount: number;
-  };
-  let dupPayload: DuplicatePayload | null = null;
-  if (duplicateFrom) {
-    const { data: src } = await supabase
-      .from("orders")
-      .select("items, discount_amount")
-      .eq("id", duplicateFrom)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!src) {
-      return { error: "複製元の受注が見つかりません。" };
-    }
-    dupPayload = {
-      items: (src.items ?? []) as OrderItem[],
-      discount_amount: Number(src.discount_amount ?? 0),
-    };
-  }
-
-  const insertPayload: Record<string, unknown> = {
-    ...result,
-    user_id: user.id,
-  };
-  if (dupPayload) {
-    insertPayload.items = dupPayload.items;
-    insertPayload.discount_amount = dupPayload.discount_amount;
-  }
-
-  // 複製時は新規 id が必要なので RETURNING して詳細画面へ飛ばす。
-  // 通常の新規作成（明細なし）はこれまで通り一覧へ。
-  if (dupPayload) {
-    const { data: inserted, error } = await supabase
-      .from("orders")
-      .insert(insertPayload)
-      .select("id")
-      .single();
-    if (error || !inserted) {
-      return {
-        error: `登録に失敗しました: ${error?.message ?? "不明なエラー"}`,
-      };
-    }
-    revalidatePath("/dashboard/orders");
-    redirect(`/dashboard/orders/${inserted.id}`);
-  }
-
-  const { error } = await supabase.from("orders").insert(insertPayload);
+  const { error } = await supabase
+    .from("orders")
+    .insert({ ...result, user_id: user.id });
   if (error) {
     return { error: `登録に失敗しました: ${error.message}` };
   }
