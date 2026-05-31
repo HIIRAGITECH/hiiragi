@@ -315,13 +315,13 @@ export type OrderInput = Omit<
 >;
 
 // 一覧用: 顧客名・車種を join 表示。一覧の検索対象になる列も含む。
+// 各 status は schema 上は NOT NULL だが、過去の prod スキーマ乖離で NULL が混入していた
+// 経緯があるため、ここでは過渡期データの堅牢性を優先して null を許容する。
+// 表示側で `?? 'デフォルト値'` で coerce すること。
 export type OrderListRow = Pick<
   Order,
   | "id"
   | "reception_date"
-  | "work_status"
-  | "estimate_status"
-  | "invoice_status"
   | "invoiced_at"
   | "paid_at"
   | "payment_due_date"
@@ -329,6 +329,9 @@ export type OrderListRow = Pick<
   | "is_archived"
   | "notes"
 > & {
+  work_status: WorkStatus | null;
+  estimate_status: EstimateStatus | null;
+  invoice_status: InvoiceStatus | null;
   customer: Pick<Customer, "id" | "name" | "name_kana"> | null;
   vehicle: Pick<Vehicle, "id" | "maker" | "model" | "plate_number"> | null;
 };

@@ -102,7 +102,7 @@ export default function OrdersTable({ rows }: Props) {
       完了: [],
     };
     for (const o of filtered) {
-      map[o.work_status].push(o);
+      map[o.work_status ?? "受付"].push(o);
     }
     return map;
   }, [filtered]);
@@ -291,7 +291,7 @@ function BoardCard({
       <div className="flex flex-col gap-1.5">
         <StatusRow label="作業">
           <StatusDropdown
-            value={o.work_status}
+            value={o.work_status ?? "受付"}
             options={WORK_STATUSES}
             classMap={workClass}
             onSelect={(next) => updateWorkStatus(o.id, next)}
@@ -308,7 +308,7 @@ function BoardCard({
           }
         >
           <StatusDropdown
-            value={o.estimate_status}
+            value={o.estimate_status ?? "未作成"}
             options={ESTIMATE_STATUSES}
             classMap={estimateClass}
             onSelect={(next) => updateEstimateStatus(o.id, next)}
@@ -325,7 +325,7 @@ function BoardCard({
           }
         >
           <StatusDropdown
-            value={o.invoice_status}
+            value={o.invoice_status ?? "未請求"}
             options={INVOICE_STATUSES}
             classMap={invoiceClass}
             onSelect={async (next) => {

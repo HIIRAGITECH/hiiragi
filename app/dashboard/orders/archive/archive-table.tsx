@@ -231,7 +231,7 @@ export default function ArchiveTable({ rows, year }: Props) {
                           <td className="px-4 py-3 align-top">
                             <div className="flex flex-col gap-1">
                               <StatusRow label="作業">
-                                <WorkStatusBadge value={o.work_status} />
+                                <WorkStatusBadge value={o.work_status ?? "受付"} />
                               </StatusRow>
                               <StatusRow
                                 label="見積"
@@ -243,7 +243,7 @@ export default function ArchiveTable({ rows, year }: Props) {
                                 }
                               >
                                 <EstimateStatusBadge
-                                  value={o.estimate_status}
+                                  value={o.estimate_status ?? "未作成"}
                                   orderId={o.id}
                                 />
                               </StatusRow>
@@ -257,7 +257,7 @@ export default function ArchiveTable({ rows, year }: Props) {
                                 }
                               >
                                 <InvoiceStatusBadge
-                                  value={o.invoice_status}
+                                  value={o.invoice_status ?? "未請求"}
                                   orderId={o.id}
                                 />
                               </StatusRow>
