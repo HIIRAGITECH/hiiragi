@@ -29,11 +29,14 @@ export function buildPdfFileName(params: {
 }): string {
   const typeLabel = params.documentType === "estimate" ? "見積書" : "請求書";
   const dateStr = toYyyymmdd(params.date);
-  const customer = sanitizeFileName(
+  const rawCustomer =
     params.customerName && params.customerName.trim() !== ""
-      ? params.customerName
-      : "顧客名未設定",
-  );
+      ? params.customerName.trim()
+      : "顧客名未設定";
+  const customerWithHonorific = rawCustomer.endsWith("様")
+    ? rawCustomer
+    : `${rawCustomer}様`;
+  const customer = sanitizeFileName(customerWithHonorific);
   const orderNo = sanitizeFileName(
     params.orderNumber && params.orderNumber.trim() !== ""
       ? params.orderNumber
