@@ -1,5 +1,6 @@
 import { isAdmin } from "@/lib/admin";
 import { createClient } from "@/lib/supabase/server";
+import { ensureSystemCategories } from "@/lib/work-item-categories/ensure";
 import { signOut } from "./actions";
 import Sidebar from "./sidebar";
 
@@ -13,6 +14,14 @@ export default async function DashboardLayout({
     data: { user },
   } = await supabase.auth.getUser();
   const admin = await isAdmin();
+
+  // 標準業務カテゴリの遅延 seed（再発防止の恒久対策）。
+  // 新規ユーザー（マイグレーションのバックフィル対象外）でも、ダッシュボードに来た時点で
+  // 標準カテゴリ3つを保証する。既存ユーザーは NOOP。エラーは内部で握りつぶすため
+  // 画面遷移は止まらない。await して、以降の子ページがカテゴリを参照する前に揃える。
+  if (user) {
+    await ensureSystemCategories();
+  }
 
   // サイドバーの件数バッジ用集計（参照のみ・既存テーブル）。
   // 失敗してもサイドバーは出すため、エラーは無視して 0 に倒す。

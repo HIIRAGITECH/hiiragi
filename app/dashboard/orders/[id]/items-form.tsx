@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 import type {
   IndirectMaterialEntry,
@@ -512,6 +513,26 @@ export default function ItemsForm({
         name="deposit_amount"
         value={Number(deposit) || 0}
       />
+
+      {/* 防御的 UI: 業務カテゴリが 1 件も無いと、明細はカテゴリ別セクション単位で描画される
+          仕様のため入力欄が一切出ず明細追加できなくなる。通常はダッシュボードの遅延 seed
+          （ensureSystemCategories）で 0 件にはならないが、万一の不整合時に操作不能で詰まないよう
+          カテゴリ管理画面への導線を出す。 */}
+      {allCategories.length === 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
+          <p className="font-medium">業務カテゴリが未登録です</p>
+          <p className="mt-1 text-amber-700 dark:text-amber-400">
+            明細は「整備」「車検整備」などの業務カテゴリごとに入力します。
+            まずカテゴリ管理画面で業務カテゴリを追加してください。
+          </p>
+          <Link
+            href="/dashboard/work-item-categories"
+            className="mt-2 inline-block rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-zinc-900 dark:text-amber-300 dark:hover:bg-amber-950"
+          >
+            → 業務カテゴリを管理する
+          </Link>
+        </div>
+      )}
 
       {/* カテゴリ単位の動的セクション。空セクションも一括追加ボタンを置くため表示する。
           orphan（allCategories に無いが行が存在する categoryId）は末尾にまとめて出す。 */}
