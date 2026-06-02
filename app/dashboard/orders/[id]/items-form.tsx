@@ -905,13 +905,9 @@ function ItemTableEditor({
               {/* 2 段グリッド: [#] [作業/工賃] [部品名/部品代] [数量/—] [単価/小計] [☆/×]
                   items-end で各セルを下端揃え（ラベル付きセルと入力単独セルの底辺を一致）。
                   # バッジは row-span-2 + self-center で縦方向中央。 */}
-              <div
-                className="grid items-end gap-x-2 gap-y-1.5"
-                style={{
-                  gridTemplateColumns:
-                    "28px minmax(0,1fr) minmax(0,1fr) 70px 90px 36px",
-                }}
-              >
+              {/* 最終列（☆ / ×）はモバイルは 36px のアイコン幅のまま（横スクロール防止）、
+                  sm 以上では auto にして「☆ メニュー登録」ラベル分だけ広げる。 */}
+              <div className="grid items-end gap-x-2 gap-y-1.5 grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_36px] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_auto]">
                 <div className="row-span-2 flex justify-center self-center">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
                     {i + 1}
@@ -1010,9 +1006,12 @@ function ItemTableEditor({
                       ? "現在の内容で別のマスターとして登録"
                       : "マスターに登録"
                   }
-                  className="flex h-9 w-9 items-center justify-center rounded-md border border-amber-200 bg-white text-sm text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
+                  className="flex h-9 w-9 items-center justify-center gap-1 rounded-md border border-amber-200 bg-white text-sm text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-2.5 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
                 >
                   ☆
+                  <span className="hidden whitespace-nowrap text-xs font-medium sm:inline">
+                    メニュー登録
+                  </span>
                 </button>
 
                 {/* 列2 下: 工賃 + 工賃原価（縦並び） */}
@@ -1121,7 +1120,7 @@ function ItemTableEditor({
                   type="button"
                   onClick={() => remove(i)}
                   aria-label="行を削除"
-                  className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 sm:justify-self-end dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
                 >
                   ×
                 </button>
