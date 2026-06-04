@@ -355,7 +355,41 @@ export async function updateOrderItems(
   return undefined;
 }
 
+// ステータス更新に伴う在庫RPC（reserve/release/consume/unconsume）を呼ぶ。
+// 在庫RPC自体は原子的だが status 更新とは別文のため、RPC が失敗したら status を prevValue に
+// 巻き戻して「status は進んだが在庫は動いていない」割れ状態を防ぐ（採用方針: status 先行更新 →
+// 在庫RPC失敗時は status ロールバック + エラー返却）。ロールバックも失敗した場合はその旨を返す。
+async function runStockHook(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  id: string,
+  rpc:
+    | "reserve_order_stock"
+    | "release_order_reservation"
+    | "consume_order_stock"
+    | "unconsume_order_stock",
+  statusColumn: "work_status" | "estimate_status",
+  prevValue: string,
+): Promise<{ error: string } | undefined> {
+  const { error } = await supabase.rpc(rpc, { p_order_id: id });
+  if (!error) return undefined;
+  const { error: rbError } = await supabase
+    .from("orders")
+    .update({ [statusColumn]: prevValue })
+    .eq("id", id)
+    .eq("user_id", userId);
+  if (rbError) {
+    return {
+      error: `在庫処理に失敗し、ステータスの巻き戻しにも失敗しました。データ整合を確認してください（${rpc}: ${error.message} / rollback: ${rbError.message}）。`,
+    };
+  }
+  return {
+    error: `在庫処理に失敗したため操作を取り消しました（${rpc}）。再度お試しください: ${error.message}`,
+  };
+}
+
 // バッジドロップダウンから呼ばれる作業ステータス更新。
+// 「完了」で在庫消費、「完了」から戻すと消費取消を自動実行する（Step 2）。
 export async function updateWorkStatus(
   id: string,
   next: WorkStatus,
@@ -369,6 +403,15 @@ export async function updateWorkStatus(
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
+  // 遷移判定 + ロールバック用に現在値を取得
+  const { data: cur } = await supabase
+    .from("orders")
+    .select("work_status, consumed_at")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const prev = (cur?.work_status ?? "受付") as WorkStatus;
+
   const { error } = await supabase
     .from("orders")
     .update({ work_status: next })
@@ -376,11 +419,36 @@ export async function updateWorkStatus(
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
 
+  // 在庫フック（RPC 側にも reserved_at/consumed_at の冪等ガードあり）
+  let hookErr: { error: string } | undefined;
+  if (next === "完了" && cur?.consumed_at == null) {
+    hookErr = await runStockHook(
+      supabase,
+      user.id,
+      id,
+      "consume_order_stock",
+      "work_status",
+      prev,
+    );
+  } else if (prev === "完了" && next !== "完了") {
+    hookErr = await runStockHook(
+      supabase,
+      user.id,
+      id,
+      "unconsume_order_stock",
+      "work_status",
+      prev,
+    );
+  }
+  if (hookErr) return hookErr;
+
   revalidatePath("/dashboard/orders");
   revalidatePath(`/dashboard/orders/${id}`);
+  revalidatePath("/dashboard/parts-inventory");
   return undefined;
 }
 
+// 見積ステータス更新。「了承済」で在庫確保、「了承済」から戻すと確保解除を自動実行する（Step 2）。
 export async function updateEstimateStatus(
   id: string,
   next: EstimateStatus,
@@ -394,6 +462,14 @@ export async function updateEstimateStatus(
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
+  const { data: cur } = await supabase
+    .from("orders")
+    .select("estimate_status, reserved_at, consumed_at")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const prev = (cur?.estimate_status ?? "未作成") as EstimateStatus;
+
   const { error } = await supabase
     .from("orders")
     .update({ estimate_status: next })
@@ -401,8 +477,32 @@ export async function updateEstimateStatus(
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
 
+  // 在庫フック（消費済みは RPC 側で no-op。RPC 側にも冪等ガードあり）
+  let hookErr: { error: string } | undefined;
+  if (next === "了承済" && cur?.reserved_at == null && cur?.consumed_at == null) {
+    hookErr = await runStockHook(
+      supabase,
+      user.id,
+      id,
+      "reserve_order_stock",
+      "estimate_status",
+      prev,
+    );
+  } else if (prev === "了承済" && next !== "了承済") {
+    hookErr = await runStockHook(
+      supabase,
+      user.id,
+      id,
+      "release_order_reservation",
+      "estimate_status",
+      prev,
+    );
+  }
+  if (hookErr) return hookErr;
+
   revalidatePath("/dashboard/orders");
   revalidatePath(`/dashboard/orders/${id}`);
+  revalidatePath("/dashboard/parts-inventory");
   return undefined;
 }
 

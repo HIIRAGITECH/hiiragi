@@ -236,6 +236,11 @@ export type Order = {
   //   取消すと false / null に戻る。明細編集時の「取消して引き直し」案内に使用。
   stock_deducted: boolean;
   stock_deducted_at: string | null;
+  // Step 2: ステータス連動の在庫確保/消費の状態フラグ。
+  //   reserved_at  : 見積「了承済」で確保した時刻（解除で NULL）。消費後も「元が確保済み」マーカーとして保持。
+  //   consumed_at  : 作業「完了」で消費した時刻（消費取消で NULL）。
+  reserved_at: string | null;
+  consumed_at: string | null;
   created_at: string;
   updated_at: string;
 };

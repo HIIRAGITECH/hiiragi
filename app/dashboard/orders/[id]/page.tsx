@@ -24,7 +24,8 @@ import {
 import ItemsForm from "./items-form";
 import OrderStatusBar from "./order-status-bar";
 import SaveAsSetButton from "./save-as-set-button";
-import StockDeductionSection from "./stock-deduction-section";
+// 在庫はステータス連動（了承済=確保 / 完了=消費）に一本化したため、手動在庫引きUI
+// (StockDeductionSection) は引退（描画停止）。server action / RPC は保険として残置（UIからは到達不能）。
 
 export const metadata: Metadata = {
   title: "受注詳細 | HIIRAGI",
@@ -319,18 +320,12 @@ export default async function OrderDetailPage(
                 allSetsWithItems={allSetsWithItems}
                 allCategories={allCategories}
                 allParts={allParts}
-                stockDeducted={order.stock_deducted}
+                reservedAt={order.reserved_at}
+                consumedAt={order.consumed_at}
                 indirectByMenu={indirectByMenu}
               />
             </div>
           </section>
-
-          {/* 在庫引き（既存 StockDeductionSection を維持） */}
-          <StockDeductionSection
-            orderId={order.id}
-            stockDeducted={order.stock_deducted}
-            stockDeductedAt={order.stock_deducted_at}
-          />
 
           {/* 帳票出力 */}
           <section className="wos-card">

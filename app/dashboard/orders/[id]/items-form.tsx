@@ -41,9 +41,10 @@ type Props = {
   allParts?: PartsInventory[];
   // 業務カテゴリ（アクティブのみ、display_order 昇順）
   allCategories: WorkItemCategory[];
-  // 受注の在庫引き状態。true のとき明細編集に対して取消→引き直し案内を出す。
-  // Step 4 で追加。デフォルト false で後方互換。
-  stockDeducted?: boolean;
+  // 受注の在庫状態（Step 2）。確保済み(reserved_at)/消費済み(consumed_at)のとき、明細編集に対して
+  // 「一度ステータスを戻して在庫を解除してから直す」案内バナーを出す。null は未確保/未消費。
+  reservedAt?: string | null;
+  consumedAt?: string | null;
   // メニュー id → 標準間接材料スナップショット候補（Step 5）。
   // メニュー追加・セット追加時に明細へコピーする。空オブジェクトで省略可能。
   indirectByMenu?: Record<string, IndirectMaterialEntry[]>;
@@ -316,7 +317,8 @@ export default function ItemsForm({
   allSetsWithItems,
   allCategories,
   allParts = [],
-  stockDeducted = false,
+  reservedAt = null,
+  consumedAt = null,
   indirectByMenu = {},
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
@@ -541,9 +543,19 @@ export default function ItemsForm({
 
   return (
     <form action={formAction} className="space-y-6">
-      {stockDeducted && (
+      {(consumedAt || reservedAt) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300">
-          ⚠️ この受注は在庫引き済みです。明細を変更した場合は、一度「在庫引きを取り消す」してから引き直してください（自動では差分調整されません）。
+          {consumedAt ? (
+            <>
+              ⚠️ この受注は在庫消費済みです（作業ステータス「完了」）。明細を変更する場合は、一度
+              作業ステータスを「完了」から戻して在庫消費を取り消してから直してください（自動では差分調整されません）。
+            </>
+          ) : (
+            <>
+              ⚠️ この受注は在庫確保済みです（見積ステータス「了承済」）。明細を変更する場合は、一度
+              見積ステータスを「了承済」から戻して確保を解除してから直してください（自動では差分調整されません）。
+            </>
+          )}
         </div>
       )}
       <input
