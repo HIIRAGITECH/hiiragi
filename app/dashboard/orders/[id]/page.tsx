@@ -58,6 +58,7 @@ export default async function OrderDetailPage(
     catsRes,
     partsRes,
     indirectRes,
+    pickerPartsRes,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -105,6 +106,15 @@ export default async function OrderDetailPage(
     supabase
       .from("work_menu_indirect_materials")
       .select("menu_item_id, part_id, quantity"),
+    // 「部品在庫から追加」ピッカー用: 明細に出せるアクティブ部品のみ（間接材料は除外）。
+    supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .eq("show_in_detail", true)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   const customer = customerData as Customer | null;
@@ -117,6 +127,7 @@ export default async function OrderDetailPage(
     position: number;
   }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
+  const allParts = (pickerPartsRes.data ?? []) as PartsInventory[];
 
   const partsCostMap = new Map<string, number>();
   for (const p of (partsRes.data ?? []) as Pick<
@@ -307,6 +318,7 @@ export default async function OrderDetailPage(
                 allMenus={allMenus}
                 allSetsWithItems={allSetsWithItems}
                 allCategories={allCategories}
+                allParts={allParts}
                 stockDeducted={order.stock_deducted}
                 indirectByMenu={indirectByMenu}
               />

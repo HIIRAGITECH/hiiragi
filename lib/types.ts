@@ -253,6 +253,9 @@ export type PartsInventory = {
   sale_price: number | null;
   show_in_detail: boolean;
   stock_quantity: number;
+  // 在庫確保(引当)モデルの基盤（Step 1 で追加）。利用可能数 = stock_quantity - reserved_quantity。
+  // 今は常に 0（増減処理は Step 2 以降）。
+  reserved_quantity: number;
   reorder_point: number;
   supplier: string | null;
   unit: string | null;

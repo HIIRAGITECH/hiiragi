@@ -5,6 +5,7 @@ import { useActionState, useMemo, useState } from "react";
 import type {
   IndirectMaterialEntry,
   OrderItem,
+  PartsInventory,
   TaxCategory,
   WorkItemCategory,
   WorkMenuItem,
@@ -34,6 +35,10 @@ type Props = {
   // 「メニューから追加」「セットから追加」picker 用のマスター一覧
   allMenus: WorkMenuItem[];
   allSetsWithItems: SetWithItems[];
+  // 「部品在庫から追加」picker 用の部品マスター一覧（deleted_at IS NULL かつ
+  // show_in_detail = true のアクティブ部品のみ、display_order 順で渡される前提）。
+  // Step 1 で追加。空配列で省略可能（部品未登録環境でもボタンは出すが一覧は空表示）。
+  allParts?: PartsInventory[];
   // 業務カテゴリ（アクティブのみ、display_order 昇順）
   allCategories: WorkItemCategory[];
   // 受注の在庫引き状態。true のとき明細編集に対して取消→引き直し案内を出す。
@@ -88,6 +93,32 @@ function rowFromMenu(
     indirect_materials: indirectByMenu[m.id] ?? [],
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
+  };
+}
+
+// 部品マスター 1 件から「部品行」を作る。
+// work_name は空（部品だけの行）。linked_part_id で在庫管理対象になる（在庫減算は Step 2 以降）。
+// parts_cost = 売価（null は 0）、parts_cost_price = 原価。片方でも値があれば単価は自動計算され、
+// 単価は「部品代」欄から編集する（rowFromMenu と同じ自動計算モードに揃える）。
+function rowFromPart(p: PartsInventory, categoryId: string): ItemRow {
+  const sale = p.sale_price ?? 0;
+  const cost = p.cost_price ?? 0;
+  return {
+    name: "",
+    part_name: p.name,
+    note: "",
+    quantity: "1",
+    labor_cost: "",
+    // 売価は 0 でも明示的に入れて「自動計算（内訳あり）」モードにする。
+    parts_cost: String(sale),
+    parts_cost_price: cost > 0 ? String(cost) : "",
+    labor_cost_price: "",
+    unit_price: String(sale),
+    source_menu_id: "",
+    linked_part_id: p.id,
+    indirect_materials: [],
+    tax_category: "taxable",
+    item_category_id: categoryId,
   };
 }
 
@@ -284,6 +315,7 @@ export default function ItemsForm({
   allMenus,
   allSetsWithItems,
   allCategories,
+  allParts = [],
   stockDeducted = false,
   indirectByMenu = {},
 }: Props) {
@@ -329,6 +361,7 @@ export default function ItemsForm({
   // ピッカーモーダルの開閉
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
+  const [partPickerOpen, setPartPickerOpen] = useState(false);
 
   // 表示するセクションの並び: アクティブなカテゴリ display_order 順 +
   // それに無い orphan カテゴリ id（行を持つが allCategories に無いもの）を末尾に。
@@ -400,6 +433,19 @@ export default function ItemsForm({
     });
     addRowsByCategory(rows);
     setSetPickerOpen(false);
+  }
+
+  // 「部品在庫から追加」: 選択部品を部品行に変換し、業務カテゴリ「整備」（無ければ先頭）の
+  // セクションへ載せる。部品行は work_name 空・item_category_id を持つため
+  // splitByCategory / addRowsByCategory のどちらでも捨てられず、再読込後も同じ位置に出る。
+  function handlePartPickerConfirm(parts: PartsInventory[]) {
+    const fallbackId =
+      allCategories.find((c) => c.name === "整備")?.id ??
+      allCategories[0]?.id ??
+      "";
+    const rows = parts.map((p) => rowFromPart(p, fallbackId));
+    addRowsByCategory(rows);
+    setPartPickerOpen(false);
   }
 
   // 行の ☆ ボタン: その行をマスター（work_menu_items）に登録する。
@@ -484,7 +530,14 @@ export default function ItemsForm({
   );
   const profit = calculateProfit(allItems);
 
-  const itemsToSave = allItems.filter((i) => i.work_name.trim() !== "");
+  // 保存対象: 作業内容があるか、または部品名 / 部品リンクを持つ行（部品在庫から追加した行）。
+  // 完全に空の行のみ除外する（サーバー側 parseItems の緩和条件と揃える）。
+  const itemsToSave = allItems.filter(
+    (i) =>
+      i.work_name.trim() !== "" ||
+      (i.part_name?.trim() ?? "") !== "" ||
+      (i.linked_part_id?.trim() ?? "") !== "",
+  );
 
   return (
     <form action={formAction} className="space-y-6">
@@ -588,8 +641,15 @@ export default function ItemsForm({
           >
             📦 作業セットから追加
           </button>
+          <button
+            type="button"
+            onClick={() => setPartPickerOpen(true)}
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            🔩 部品在庫から追加
+          </button>
           <p className="ml-1 self-center text-xs text-zinc-500 dark:text-zinc-400">
-            選択した項目は業務カテゴリに応じて該当セクションに振り分けられます。
+            選択した項目は業務カテゴリに応じて該当セクションに振り分けられます（部品は「整備」に入ります）。
           </p>
         </div>
       </section>
@@ -820,6 +880,13 @@ export default function ItemsForm({
           onClose={() => setSetPickerOpen(false)}
         />
       )}
+      {partPickerOpen && (
+        <PartPickerModal
+          allParts={allParts}
+          onConfirm={handlePartPickerConfirm}
+          onClose={() => setPartPickerOpen(false)}
+        />
+      )}
     </form>
   );
 }
@@ -893,6 +960,8 @@ function ItemTableEditor({
       ) : (
         rows.map((r, i) => {
           const auto = hasBreakdown(r);
+          // 部品在庫から追加した行（部品リンクあり・作業内容空）。種別バッジ表示に使う。
+          const isPartRow = r.linked_part_id !== "" && r.name.trim() === "";
           // 偶数行（i=1,3,5...）にゼブラ背景。
           const zebra =
             i % 2 === 1 ? "bg-zinc-100 dark:bg-zinc-800/60" : "";
@@ -908,10 +977,18 @@ function ItemTableEditor({
               {/* 最終列（☆ / ×）はモバイルは 36px のアイコン幅のまま（横スクロール防止）、
                   sm 以上では auto にして「☆ メニュー登録」ラベル分だけ広げる。 */}
               <div className="grid items-end gap-x-2 gap-y-1.5 grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_36px] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_auto]">
-                <div className="row-span-2 flex justify-center self-center">
+                <div className="row-span-2 flex flex-col items-center justify-center gap-1 self-center">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
                     {i + 1}
                   </span>
+                  {isPartRow && (
+                    <span
+                      className="rounded bg-sky-100 px-1 py-0.5 text-[9px] font-medium leading-tight text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
+                      title="部品在庫から追加した行（部品マスターにリンク）"
+                    >
+                      部品
+                    </span>
+                  )}
                 </div>
 
                 {/* 列2 上: 作業内容 */}
@@ -1352,6 +1429,153 @@ function MenuPickerModal({
                   </label>
                 </li>
               ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-sm text-zinc-600 dark:text-zinc-400">
+            選択中: {picked.size} 件
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              disabled={picked.size === 0}
+              onClick={confirm}
+              className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              明細に追加
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// 「🔩 部品在庫から追加」モーダル
+// ============================================
+// 表示対象は親（受注詳細ページ）で deleted_at IS NULL かつ show_in_detail = true に
+// 絞った allParts。間接材料（show_in_detail=false）はここには出さず従来通りメニュー経由。
+function PartPickerModal({
+  allParts,
+  onConfirm,
+  onClose,
+}: {
+  allParts: PartsInventory[];
+  onConfirm: (parts: PartsInventory[]) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    if (!q) return allParts;
+    const needle = normalizeForSearch(q);
+    return allParts.filter((p) =>
+      normalizeForSearch(
+        `${p.name} ${p.internal_code ?? ""} ${p.external_code ?? ""}`,
+      ).includes(needle),
+    );
+  }, [allParts, query]);
+
+  function togglePick(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function confirm() {
+    onConfirm(filtered.filter((p) => picked.has(p.id)));
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+            部品在庫から追加
+          </h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="部品名・社内品番・社外品番で検索"
+              className="ml-auto w-64"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+              {allParts.length === 0
+                ? "明細に出せる部品が未登録です。「部品在庫」画面で登録してください。"
+                : "該当する部品がありません。"}
+            </p>
+          ) : (
+            <ul className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {filtered.map((p) => {
+                const available =
+                  Number(p.stock_quantity ?? 0) -
+                  Number(p.reserved_quantity ?? 0);
+                const outOfStock = available <= 0;
+                const codes = [p.internal_code, p.external_code]
+                  .filter((c) => c && c.trim() !== "")
+                  .join(" / ");
+                return (
+                  <li key={p.id} className="px-4 py-2">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={picked.has(p.id)}
+                        onChange={() => togglePick(p.id)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm text-zinc-900 dark:text-zinc-50">
+                          {p.name}
+                        </div>
+                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {codes ? `${codes}・` : ""}
+                          利用可能 {available}
+                          {p.unit ? p.unit : ""}
+                          {outOfStock && (
+                            <span className="ml-1.5 font-medium text-amber-700 dark:text-amber-300">
+                              ⚠️ 在庫切れ（マイナス許容）
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-sm text-zinc-700 dark:text-zinc-300">
+                        {p.sale_price != null
+                          ? formatYen(p.sale_price)
+                          : "売価なし"}
+                      </div>
+                    </label>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

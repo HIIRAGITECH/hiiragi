@@ -146,9 +146,23 @@ function parseItems(
     for (const r of raw) {
       const work_name =
         typeof r?.work_name === "string" ? r.work_name.trim() : "";
+      const part_name_raw =
+        typeof r?.part_name === "string" ? r.part_name.trim() : "";
+      const linked_part_raw =
+        typeof r?.linked_part_id === "string" ? r.linked_part_id.trim() : "";
       const quantity = Number(r?.quantity);
       const unit_price = Number(r?.unit_price);
-      if (!work_name) continue; // 品名空の行はスキップ
+      // 完全に空の行（work_name・part_name・linked_part_id すべて空、かつ金額なし）のみスキップ。
+      // 「部品在庫から追加」した行は work_name が空でも part_name / linked_part_id を持つため残す。
+      const laborNum = Number(r?.labor_cost);
+      const partsNum = Number(r?.parts_cost);
+      const hasAmount =
+        (Number.isFinite(unit_price) && unit_price > 0) ||
+        (Number.isFinite(laborNum) && laborNum > 0) ||
+        (Number.isFinite(partsNum) && partsNum > 0);
+      if (!work_name && !part_name_raw && !linked_part_raw && !hasAmount) {
+        continue;
+      }
       if (!Number.isFinite(quantity) || quantity < 0) return null;
       if (!Number.isFinite(unit_price) || unit_price < 0) return null;
       const item: OrderItem = {
