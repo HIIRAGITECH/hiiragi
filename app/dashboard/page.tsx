@@ -8,7 +8,14 @@ import {
   computeOwedAmount,
   getTodayJst,
 } from "@/lib/payments/classify";
-import type { OrderItem } from "@/lib/types";
+import type { OrderItem, Subscription } from "@/lib/types";
+
+const PLAN_LABEL: Record<string, string> = {
+  free: "Free",
+  paid: "Paid",
+  trial: "Trial",
+  special_free: "Special Free",
+};
 
 export const metadata: Metadata = {
   title: "ダッシュボード | HIIRAGI",
@@ -303,9 +310,26 @@ async function loadDashboard(): Promise<DashboardData> {
   };
 }
 
+async function loadSubscription(): Promise<Subscription | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data } = await supabase
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  return (data as Subscription | null) ?? null;
+}
+
 export default async function DashboardPage() {
-  const data = await loadDashboard();
+  const [data, sub] = await Promise.all([loadDashboard(), loadSubscription()]);
   const today = new Date();
+  const mypageOn = sub?.options?.mypage === true;
+  const planLabel = sub ? (PLAN_LABEL[sub.plan] ?? sub.plan) : "—";
+  const planStatusOk = sub?.status === "active";
 
   const salesDelta = (() => {
     if (data.monthSalesPrev === 0) {
@@ -371,6 +395,35 @@ export default async function DashboardPage() {
           </h1>
         </div>
         <div className="wos-actions">
+          <Link
+            href="/dashboard/billing"
+            className="flex flex-col items-end gap-0.5 border border-[var(--color-line)] px-3 py-1.5 hover:border-[var(--color-line-strong)] no-underline"
+          >
+            <span className="text-[10px] tracking-widest text-[var(--color-ink-light)]">
+              プラン
+            </span>
+            <span className="flex items-center gap-2 text-xs font-medium">
+              <span>{planLabel}</span>
+              <span
+                className="inline-block border px-1.5 py-0.5 text-[10px]"
+                style={{
+                  borderColor: planStatusOk
+                    ? "var(--color-go)"
+                    : "var(--color-warn)",
+                  color: planStatusOk
+                    ? "var(--color-go)"
+                    : "var(--color-warn)",
+                }}
+              >
+                {planStatusOk ? "稼働中" : "停止"}
+              </span>
+              {mypageOn && (
+                <span className="inline-block border border-[var(--color-line-strong)] px-1.5 py-0.5 text-[10px] text-[var(--color-ink-mid)]">
+                  マイページ
+                </span>
+              )}
+            </span>
+          </Link>
           <Link href="/dashboard/sales" className="wos-btn-ghost wos-btn-sm">
             売上集計
           </Link>

@@ -3,6 +3,10 @@
     "supabase-hiiragi-dev": {
       "type": "http",
       "url": "https://mcp.supabase.com/mcp?project_ref=qajrjtdwmxgmvzxecqvg&read_only=false"
+    },
+    "supabase-hiiragi-prod": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=jnhhrdsfsgjquiyxydzv&read_only=false"
     }
   }
 }
