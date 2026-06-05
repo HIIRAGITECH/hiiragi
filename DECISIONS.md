@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-04（夜・全体棚卸し反映）
+最終更新: 2026-06-04（夜・dev/prod差異の棚卸しまで反映）
 
 | 領域 | 状態 |
 |---|---|
@@ -51,7 +51,7 @@
 | Stripe Billing / サブスク課金 | 作りかけ・テスト段階 | ブランチ `stripe-保存_0604`（commit 8e6ad48）。**main未マージ** | ①mainとの大規模マージ衝突解決（特にorders系・ensure.ts・6/4の3マイグレ）②trial期限到達時のアプリ側アクセスロック未実装 ③本番DBへのsubscriptions系3マイグレ適用が未確認 ④Stripe Price IDのenv設定 |
 | 管理画面リニューアル（/dashboard/admin → /admin） | 作りかけ | 同ブランチに同梱 | **Stripeとは独立した別機能**。ユーザごとのplan/status/options（mypage/line_notify/hp_integration）を手動編集するUI |
 | 車種別定価 / 利益エンジン（Step 3） | 設計段階 | まだコードなし | スプレッドシートで2階データ（車種別品番・定価）を育成中 |
-| マイグレーション履歴の整合性回復 | 要対応（緊急ではない） | dev DB | 下記「既知の地雷」参照。Step1/2の3本がdevにschema_migrations未登録。prod適用状況も未裏取り |
+| マイグレーション台帳の整合性回復 | 要対応（緊急ではないが重要） | dev/prod両方 | 台帳と実体が乖離（dev24本/prod4本登録、実体はほぼ全入り）。`db push`不可状態。下記「既知の地雷」参照 |
 
 ### 把握済み・本番稼働中の主要機能（棚卸しで確認）
 認証 / 受注・見積（カンバン+テーブル）/ 受注明細（Step1・2入り）/ 顧客管理 / 部品在庫マスター（原価・売価・品番・発注点）/ 作業メニュー・セット・業務カテゴリ / 入金管理 / 売上集計 / 店舗設定 / 請求書PDF（react-pdf）/ KPIダッシュボード / 簡易管理画面（/dashboard/admin）/ 業務カテゴリ自動seed / レガシーid採番トリガ削除（車両登録不能問題の恒久対策）。
@@ -152,13 +152,24 @@
 
 ## 5. 既知の地雷・注意点（ハマりどころ）
 
-- **【要対応】マイグレーション履歴のズレ**: 2026-06-04のStep1/2の3本
-  （`drop_legacy_id_triggers` / `add_reserved_quantity_to_parts` / `status_linked_reserve_consume`）は
-  **DBにスキーマ効果は適用済みだが、`supabase_migrations.schema_migrations` に未登録**（SQL Editorで直接実行したため）。
-  → 次に `supabase db push` を回すと「未適用」とみなされ再実行され、衝突する恐れ（多くは IF NOT EXISTS で冪等のはずだが要確認）。
-  整合性回復（履歴登録 or 運用方針の統一）を別途行うこと。
-- **【要確認】本番DBの裏取りが未完**: 2026-06-04夜の棚卸しはdev DBのみ接続で実施。
-  prod の Stripe subscriptions系3本・Step1/2の3本の適用状況は未確認。prod接続できる環境で要確認。
+- **【最重要・要対応】マイグレーション台帳が壊れている（dev/prod両方）**: 2026-06-04夜にprod接続で確認。
+  記録簿（`supabase_migrations.schema_migrations`）と実体DBが大きく乖離している。
+  - 台帳登録件数: **dev 24本 / prod 4本**。だが実体スキーマはdev/prodともほぼ全部入っている（SQL Editor直叩きの蓄積）。
+  - 本番には24本相当のDDLが実際に効いているのに、台帳には4本しか記録されていない。
+  - **危険**: 今後 `supabase db push` を打つと、台帳上「未適用」のDDLを再実行しようとし、エラー/上書き/破壊の恐れ大。
+    → 現状 `db push` 運用は事実上不可能。
+  - **対応方針（別の日に腰を据えて判断）**: `supabase migration repair` で台帳を実体に合わせる／
+    いっそ全て手動運用（SQL Editor）に統一して db push を封印する、のいずれか。夜中の疲れた頭でやらないこと。
+  - 補足: `create_subscriptions` は dev(20260530162846)/prod(20260530162608) で version timestamp が異なり、同名でも別物扱い。
+- **【要対応】本番に Stripe 2カラムが欠落**: prod の `subscriptions` テーブルに
+  `stripe_customer_id` / `stripe_subscription_id` が**無い**（devにはある＝`add_stripe_to_subscriptions` がprod未適用）。
+  → このままStripe連携を本番で動かすとカラム不在エラー（42703）で落ちる。**Stripeを本番稼働させる前に必ず追加すること**。
+  ただし現状Stripeはテスト段階・main未マージで本番未稼働なので、今すぐ壊れてはいない。
+- **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
+  `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
+  レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
+- **【要確認】prod の create_default_subscription トリガ**: prod台帳に `revoke_..._execute` があり EXECUTE権限は剥奪
+  された形跡だが、トリガ本体（新規ユーザ作成時の自動INSERT）は dev/prod とも生きている。意図通りか中途半端か要確認。
 - **Stripeブランチ（stripe-保存_0604）のマージ衝突**: main未マージのまま放置されており、マージ時に衝突する箇所が既知:
   - `orders/items-form.tsx` / `orders/actions.ts`（Step1/2で大規模変更 vs stripeブランチの古い版）→ **main側を採用**
   - `lib/work-item-categories/ensure.ts`（mainで後から追加・stripeブランチに無い）→ **main側を残す**
@@ -188,4 +199,5 @@
 - **2026-06-04** ｜ 明細リニューアル ｜ Step 2 実装（ステータス連動の確保/消費・手動UI引退・RPC4本） ｜ commit `2a7fec8`
 - **2026-06-04** ｜ 明細リニューアル ｜ Step 2 dev実値検証 完了（二重引きなし・ロールバック動作を確認。UI表層目視のみ任意で残） ｜ 検証のみ・コード変更なし
 - **2026-06-04（夜）** ｜ 全体把握 ｜ 家PCのStripe作業を `stripe-保存_0604`（commit 8e6ad48）に退避保存→main同期→DECISIONS.mdをリポジトリに配置（commit 1db3982）→リポジトリ全体を棚卸しし本ドキュメントに全戦線・地雷を反映 ｜ commit 1db3982 ほか
+- **2026-06-04（夜）** ｜ 全体把握 ｜ prod用MCPを read_only=true で `.mcp.json` に追加→dev/prodスキーマ差異を棚卸し。受注明細(Step1/2)はprodも実体一致で健全と確認。明確な欠落はStripe2カラムのみ。最大の地雷=マイグレーション台帳の乖離が判明 ｜ 調査のみ・コード変更なし（.mcp.jsonのみ編集） |
 - （以降追記）
