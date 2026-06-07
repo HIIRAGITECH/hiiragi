@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 import { formatYen } from "@/lib/format";
+import { moneyDefault } from "@/lib/forms/money-default";
 import type {
   PartsInventory,
   TaxCategory,
@@ -100,11 +101,12 @@ export default function WorkMenuForm({
   const [manualPartName, setManualPartName] = useState<string>(
     initial?.part_name ?? "",
   );
+  // 0 / 未入力は空表示（placeholder="—"）。正の値のみ初期表示する。
   const [manualPartsCost, setManualPartsCost] = useState<string>(
-    String(initial?.default_parts_cost ?? 0),
+    moneyDefault(initial?.default_parts_cost),
   );
   const [manualPartsCostPrice, setManualPartsCostPrice] = useState<string>(
-    String(initial?.parts_cost_price ?? 0),
+    moneyDefault(initial?.parts_cost_price),
   );
 
   const selectedPart = useMemo(
@@ -393,6 +395,7 @@ export default function WorkMenuForm({
                   step={1}
                   value={manualPartsCost}
                   onChange={(e) => setManualPartsCost(e.target.value)}
+                  placeholder="—"
                   className={`${inputClass} text-right`}
                 />
               </div>
@@ -411,6 +414,7 @@ export default function WorkMenuForm({
                   step={1}
                   value={manualPartsCostPrice}
                   onChange={(e) => setManualPartsCostPrice(e.target.value)}
+                  placeholder="—"
                   className={`${inputClass} text-right`}
                 />
               </div>
@@ -430,8 +434,9 @@ export default function WorkMenuForm({
             id="default_quantity"
             name="default_quantity"
             type="number"
+            inputMode="decimal"
             min={0}
-            step="0.1"
+            step={1}
             defaultValue={initial?.default_quantity ?? 1}
             className={`${inputClass} text-right`}
           />
@@ -446,7 +451,8 @@ export default function WorkMenuForm({
             type="number"
             min={0}
             step={1}
-            defaultValue={initial?.default_unit_price ?? 0}
+            defaultValue={moneyDefault(initial?.default_unit_price)}
+            placeholder="—"
             className={`${inputClass} text-right`}
           />
         </div>
@@ -460,7 +466,8 @@ export default function WorkMenuForm({
             type="number"
             min={0}
             step={1}
-            defaultValue={initial?.default_labor_cost ?? 0}
+            defaultValue={moneyDefault(initial?.default_labor_cost)}
+            placeholder="—"
             className={`${inputClass} text-right`}
           />
           <label
@@ -475,7 +482,8 @@ export default function WorkMenuForm({
             type="number"
             min={0}
             step={1}
-            defaultValue={initial?.labor_cost_price ?? 0}
+            defaultValue={moneyDefault(initial?.labor_cost_price)}
+            placeholder="—"
             className={`${inputClass} text-right`}
           />
         </div>
@@ -529,7 +537,7 @@ export default function WorkMenuForm({
                     type="number"
                     inputMode="decimal"
                     min={0}
-                    step="0.1"
+                    step={1}
                     value={r.quantity}
                     onChange={(e) =>
                       updateIndirectQty(r.part_id, e.target.value)

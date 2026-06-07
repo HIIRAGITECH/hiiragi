@@ -15,6 +15,7 @@ import type {
 } from "@/lib/types";
 import { calculateProfit, calculateTotals, rowSubtotal } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
+import { moneyDefault } from "@/lib/forms/money-default";
 import SearchInput from "@/lib/components/search-input";
 import { registerOrderItemAsMenu } from "../../work-menus/actions";
 import type { FormState } from "../actions";
@@ -371,8 +372,9 @@ export default function ItemsForm({
     return split;
   });
 
-  const [discount, setDiscount] = useState(String(initialDiscount));
-  const [deposit, setDeposit] = useState(String(initialDeposit));
+  // 0 / 未入力は空表示（placeholder="—"）。正の値のみ初期表示する。
+  const [discount, setDiscount] = useState(moneyDefault(initialDiscount));
+  const [deposit, setDeposit] = useState(moneyDefault(initialDeposit));
   const [estimateNotes, setEstimateNotes] = useState(
     initialEstimateNotes ?? "",
   );
@@ -709,6 +711,7 @@ export default function ItemsForm({
               step={1}
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
+              placeholder="—"
               className={`${cellInputClass} text-right`}
             />
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
@@ -727,6 +730,7 @@ export default function ItemsForm({
               step={1}
               value={deposit}
               onChange={(e) => setDeposit(e.target.value)}
+              placeholder="—"
               className={`${cellInputClass} text-right`}
             />
           </div>
@@ -1063,7 +1067,7 @@ function ItemTableEditor({
                     type="number"
                     inputMode="decimal"
                     min={0}
-                    step="0.1"
+                    step={1}
                     value={r.quantity}
                     onChange={(e) =>
                       update(i, { quantity: e.target.value })

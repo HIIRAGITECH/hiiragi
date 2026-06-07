@@ -440,7 +440,7 @@ function StockInModal({
             type="number"
             inputMode="decimal"
             min={0}
-            step="0.1"
+            step={1}
             value={qty}
             onChange={(e) => setQty(e.target.value)}
             className="wos-input"
@@ -530,7 +530,7 @@ function StockAdjustModal({
             type="number"
             inputMode="decimal"
             min={0}
-            step="0.1"
+            step={1}
             value={newQty}
             onChange={(e) => setNewQty(e.target.value)}
             className="wos-input"

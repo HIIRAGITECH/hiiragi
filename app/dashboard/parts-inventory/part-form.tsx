@@ -29,8 +29,23 @@ export default function PartForm({
     initial?.show_in_detail ?? true,
   );
 
+  // 原価未入力での保存は、粗利計算が 0 になる影響が大きいので確認ダイアログを挟む。
+  // OK なら通常通り form action が走り、server action 側の pickNumber が 0 に正規化する。
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    const fd = new FormData(e.currentTarget);
+    const costPriceStr = String(fd.get("cost_price") ?? "").trim();
+    if (costPriceStr === "") {
+      const ok = confirm(
+        "原価が空欄ですが、このまま保存してよろしいですか？\n（粗利計算上は 0 として扱われます）",
+      );
+      if (!ok) {
+        e.preventDefault();
+      }
+    }
+  }
+
   return (
-    <form action={formAction} className="wos-card space-y-5">
+    <form action={formAction} onSubmit={handleSubmit} className="wos-card space-y-5">
       <div>
         <label htmlFor="name" className="wos-label">
           部品名<span className="wos-req">*</span>
@@ -75,7 +90,7 @@ export default function PartForm({
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label htmlFor="cost_price" className="wos-label">
-            原価（仕入値）<span className="wos-req">*</span>
+            原価（仕入値）
           </label>
           <input
             id="cost_price"
@@ -83,10 +98,13 @@ export default function PartForm({
             type="number"
             min={0}
             step={1}
-            required
             defaultValue={initial?.cost_price ?? 0}
+            placeholder="—"
             className="wos-input text-right"
           />
+          <p className="mt-1 text-xs text-[var(--color-ink-light)]">
+            空欄でも保存できますが、粗利計算では 0 として扱われます。
+          </p>
         </div>
         <div>
           <label htmlFor="sale_price" className="wos-label">
@@ -151,8 +169,9 @@ export default function PartForm({
               id="initial_stock_quantity"
               name="initial_stock_quantity"
               type="number"
+              inputMode="decimal"
               min={0}
-              step="0.1"
+              step={1}
               defaultValue={0}
               className="wos-input text-right"
             />
@@ -170,8 +189,9 @@ export default function PartForm({
             id="reorder_point"
             name="reorder_point"
             type="number"
+            inputMode="decimal"
             min={0}
-            step="0.1"
+            step={1}
             defaultValue={initial?.reorder_point ?? 0}
             className="wos-input text-right"
           />
