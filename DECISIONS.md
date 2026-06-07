@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-07（Step 3-1 車種別定価テーブル新設・本番反映）
+最終更新: 2026-06-07（Step 3-2b 明細への車種別呼び出し＋入力欄UX改善 本番反映）
 
 | 領域 | 状態 |
 |---|---|
@@ -37,7 +37,7 @@
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
 | Stripe Billing | 🚧 作りかけ。ブランチ `stripe-保存_0604`（commit 8e6ad48）に保存。main未マージ・テスト段階 |
 | 管理画面リニューアル（/admin） | 🚧 作りかけ。同ブランチに同梱。Stripeとは別機能 |
-| 車種別定価（利益エンジン） | 🚧 Step 3-1（DBテーブル `parts_inventory_variants` 新設）完了・dev/prod反映済み。次はStep 3-2（UI） |
+| 車種別定価（利益エンジン） | 🚧 Step 3-1（テーブル）・3-2a（variant登録UI）・3-2b（明細への⭐呼び出し＋定価反映）完了・本番反映済み。利益エンジンが本番で稼働。次はStep 3-2c（スナップショット・任意） |
 
 ---
 
@@ -62,8 +62,12 @@
 
 - ✅ **Step 1**: 部品在庫から明細に追加（最優先要望）
 - ✅ **Step 2**: ステータス連動の在庫確保／消費
-- 🚧 **Step 3**: 車種別定価（利益エンジン）。**Step 3-1（DBテーブル新設）完了（2026-06-07）**。
-  残り: Step 3-2（UI＝車種版ピッカー・明細への流し込み・variant編集画面）。
+- 🚧 **Step 3**: 車種別定価（利益エンジン）。**Step 3-1（テーブル）・3-2a（variant登録UI）・3-2b（明細への⭐呼び出し＋定価反映）完了（2026-06-07・本番反映・本番で稼働確認済み）**。
+  3-2bの挙動: 受注の車両の `model` を `vehicle_tags` と照合（正規化後の完全一致／記号・大小・全角半角は吸収／makerは未使用）。
+  一致したvariantに⭐＋「車種別 ¥定価」を表示し、選ぶと `parts_cost` に定価が入る（明細に品番は出さない）。
+  一致が無ければ部品在庫の `sale_price` を使用（売価が空なら0になる点に注意）。車両未設定なら⭐は出ない。
+  照合ヘルパー `normalizeForVehicleMatch` は items-form.tsx 内。OrderItem構造は不変（マイグレーション無し）。
+  残り: Step 3-2c（明細へ品番・定価を `linked_variant_id` 等でスナップショット保存。variant改定時の過去保護。任意・急がない）。
   同じ部品でも「車両の車種」ごとに純正パーツ価格が異なり、
   その差が利益になる。受注に車種を持たせ、部品の車種別定価から自動で売価を埋める方向。
   **設計方針（重要）**:
@@ -243,4 +247,7 @@
 - **2026-06-07** ｜ 台帳修復 ｜ 第1段階完了。6/4の3本をdev/prod両台帳に登録（statements空でSQL再実行なし）。dev=MCP直INSERT、prod=SQL Editor手動。スキーマ不変を確認。db push正常化に向けた第一歩 ｜ 台帳のみ・スキーマ変更なし
 - **2026-06-07** ｜ 台帳修復 ｜ 第2段階完了。F01〜F12の重複しない11本をprod台帳にSQL Editor手動INSERT。prod 7→18本でリポジトリと整合。今後db pushで新規マイグレを安全に足せる状態に。残=F06/F13重複・dev側ズレ・孤児（第3段階・急がない） ｜ 台帳のみ・スキーマ変更なし
 - **2026-06-07** ｜ Step 3-1 ｜ 車種別定価テーブル `parts_inventory_variants`（案A：品番＋定価＋vehicle_tags配列／GIN索引／RLS4／part_id・user_id CASCADE）を新設。dev=MCPでDDL＋台帳INSERTを原子適用、prod=SQL Editor手動。台帳もセット登録（dev28本/prod19本）。既存ズレには不干渉。lib/types.tsにPartsInventoryVariant追加。ファイル=supabase/migrations/20260607000000_create_parts_inventory_variants.sql ｜ 加算的（新テーブル1つ）
+- **2026-06-07** ｜ Step 3-2a ｜ variant登録・編集UI実装（部品編集ページに「車種別定価」セクション同居・編集時のみ表示／一覧＋追加／車種タグはチップ入力Enter/カンマ確定・JSON送信／品番・定価・タグの3フィールドMVP／個別即保存）。新規=variants-actions.ts, variants-section.tsx、修正=[id]/edit/page.tsx。DB変更なし（3-1で適用済）。commit 6b5fab5で本番反映 ｜ コードのみ
+- **2026-06-07** ｜ Step 3-2b ｜ 明細への車種別呼び出し。受注の車両modelとvehicle_tagsを正規化完全一致で照合→⭐＋「車種別¥定価」表示→選ぶとparts_costに定価反映（品番は明細非表示）。打ち消し線は出さない。normalizeForVehicleMatch追加（記号/大小/全半角吸収）。page.tsxでvariants並列取得しItemsFormにvehicle/allVariants渡す。OrderItem不変。本番で稼働確認済み。利益エンジン初回転 ｜ コードのみ
+- **2026-06-07** ｜ 入力欄UX改善 ｜ ①数量入力を全7箇所step=1（矢印は1ずつ・小数は手入力可、inputMode維持）②金額のデフォルト0を空(−)に（値引/預り金/作業メニュー各定価。共通ヘルパー lib/forms/money-default.ts=0/null/負は空・正のみ表示）③部品原価はrequired解除＋空保存時confirm。計算・DB・保存ロジックは不変。commit ec68d93で本番反映 ｜ コードのみ
 - （以降追記）
