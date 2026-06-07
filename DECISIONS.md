@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-07（Step 3のデータ構造・表記ゆれ方針まで設計確定）
+最終更新: 2026-06-07（台帳修復 第1段階完了）
 
 | 領域 | 状態 |
 |---|---|
@@ -182,9 +182,19 @@
   - 本番には24本相当のDDLが実際に効いているのに、台帳には4本しか記録されていない。
   - **危険**: 今後 `supabase db push` を打つと、台帳上「未適用」のDDLを再実行しようとし、エラー/上書き/破壊の恐れ大。
     → 現状 `db push` 運用は事実上不可能。
-  - **対応方針（別の日に腰を据えて判断）**: `supabase migration repair` で台帳を実体に合わせる／
-    いっそ全て手動運用（SQL Editor）に統一して db push を封印する、のいずれか。夜中の疲れた頭でやらないこと。
+  - **方針決定（2026-06-07）**: 過去を完璧に清算するより「今後 db push で安全に足せる状態」を作るのが目標。
+    repair（台帳に行を足すだけ・SQL本体は再実行しない。`statements` を空配列 `'{}'::text[]` で INSERT）を段階的に実施する。
+  - **修復の進捗**:
+    - ✅ 第1段階（2026-06-07完了）: 6/4の3本（drop_legacy_id_triggers / add_reserved_quantity_to_parts /
+      status_linked_reserve_consume）を dev/prod 両方の台帳に登録。dev=MCP直INSERT、prod=SQL Editor手動INSERT。
+      スキーマ実体は不変を確認。dev 24→27本、prod 4→7本。
+    - ⬜ 第2段階（未）: ファイルF01〜F13分を prod 台帳に登録（prodは実体ありで14本未登録だった）。
+      timestampズレ解消（既存devエントリを reverted で外し→ファイルversionで applied）を伴うため1本ずつ慎重に。
+    - ⬜ 第3段階（やる/やらない要判断）: 孤児レコード（ファイル無し台帳エントリ）の整理。
+  - **prodへの台帳書き込みは SQL Editor 手動で行う**: prod MCPは `read_only=true` を維持（誤爆防止）。
+    書き込みが必要な操作はブラウザのSQL Editorで一度きり実行する運用。
   - 補足: `create_subscriptions` は dev(20260530162846)/prod(20260530162608) で version timestamp が異なり、同名でも別物扱い。
+  - ⚠️ 別件: `create_shop_assets_bucket` は台帳にあるが dev/prod とも実体（バケット）が無い。画像保存機能が依存していないか別途要確認。
 - **【要対応】本番に Stripe 2カラムが欠落**: prod の `subscriptions` テーブルに
   `stripe_customer_id` / `stripe_subscription_id` が**無い**（devにはある＝`add_stripe_to_subscriptions` がprod未適用）。
   → このままStripe連携を本番で動かすとカラム不在エラー（42703）で落ちる。**Stripeを本番稼働させる前に必ず追加すること**。
@@ -225,4 +235,5 @@
 - **2026-06-04（夜）** ｜ 全体把握 ｜ 家PCのStripe作業を `stripe-保存_0604`（commit 8e6ad48）に退避保存→main同期→DECISIONS.mdをリポジトリに配置（commit 1db3982）→リポジトリ全体を棚卸しし本ドキュメントに全戦線・地雷を反映 ｜ commit 1db3982 ほか
 - **2026-06-04（夜）** ｜ 全体把握 ｜ prod用MCPを read_only=true で `.mcp.json` に追加→dev/prodスキーマ差異を棚卸し。受注明細(Step1/2)はprodも実体一致で健全と確認。明確な欠落はStripe2カラムのみ。最大の地雷=マイグレーション台帳の乖離が判明 ｜ 調査のみ・コード変更なし（.mcp.jsonのみ編集） |
 - **2026-06-05〜07** ｜ Step 3構想 ｜ 車種別定価のデータ構造を設計確定（部品1行に「品番＋定価＋適合車種タグ」の組を複数ぶら下げる／在庫は割らない／車種は正確入力前提＋軽いゆれ吸収・サジェスト、車種マスターは当面作らない／測定値等はスプレッドシートに任せる）。ロードマップに反映 ｜ 構想のみ・実装なし
+- **2026-06-07** ｜ 台帳修復 ｜ 第1段階完了。6/4の3本をdev/prod両台帳に登録（statements空でSQL再実行なし）。dev=MCP直INSERT、prod=SQL Editor手動。スキーマ不変を確認。db push正常化に向けた第一歩 ｜ 台帳のみ・スキーマ変更なし
 - （以降追記）
