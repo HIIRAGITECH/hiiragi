@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { PartsInventory } from "@/lib/types";
+import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
 import PartForm from "../../part-form";
+import VariantsSection from "../../variants-section";
 import { updatePart } from "../../actions";
 
 export const metadata: Metadata = {
@@ -19,15 +20,26 @@ export default async function EditPartPage(props: {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data } = await supabase
-    .from("parts_inventory")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", user!.id)
-    .maybeSingle();
+  const [{ data }, { data: variantsData }] = await Promise.all([
+    supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", user!.id)
+      .maybeSingle(),
+    supabase
+      .from("parts_inventory_variants")
+      .select("*")
+      .eq("part_id", id)
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
 
   if (!data) notFound();
   const initial = data as PartsInventory;
+  const variants = (variantsData ?? []) as PartsInventoryVariant[];
 
   const action = updatePart.bind(null, initial.id);
 
@@ -45,13 +57,14 @@ export default async function EditPartPage(props: {
         </div>
       </div>
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-3xl">
+        <div className="px-8 py-6 max-w-3xl space-y-6">
           <PartForm
             action={action}
             initial={initial}
             submitLabel="更新する"
             cancelHref="/dashboard/parts-inventory"
           />
+          <VariantsSection partId={initial.id} initial={variants} />
         </div>
       </div>
     </>
