@@ -8,6 +8,7 @@ import type {
   IndirectMaterialEntry,
   Order,
   PartsInventory,
+  PartsInventoryVariant,
   Vehicle,
   WorkItemCategory,
   WorkMenuItem,
@@ -60,6 +61,7 @@ export default async function OrderDetailPage(
     partsRes,
     indirectRes,
     pickerPartsRes,
+    variantsRes,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -116,6 +118,16 @@ export default async function OrderDetailPage(
       .eq("show_in_detail", true)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    // Step 3-2b: 車種別定価ピッカー用の variant 一覧（全アクティブ）。
+    // PartPickerModal 内で part_id ごとに「先頭1件の一致 variant」を採用するため
+    // display_order 順で渡す（display_order 同順は created_at で安定化）。
+    supabase
+      .from("parts_inventory_variants")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
   const customer = customerData as Customer | null;
@@ -129,6 +141,7 @@ export default async function OrderDetailPage(
   }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
   const allParts = (pickerPartsRes.data ?? []) as PartsInventory[];
+  const allVariants = (variantsRes.data ?? []) as PartsInventoryVariant[];
 
   const partsCostMap = new Map<string, number>();
   for (const p of (partsRes.data ?? []) as Pick<
@@ -320,6 +333,8 @@ export default async function OrderDetailPage(
                 allSetsWithItems={allSetsWithItems}
                 allCategories={allCategories}
                 allParts={allParts}
+                allVariants={allVariants}
+                vehicle={vehicle}
                 reservedAt={order.reserved_at}
                 consumedAt={order.consumed_at}
                 indirectByMenu={indirectByMenu}

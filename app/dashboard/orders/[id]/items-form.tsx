@@ -6,7 +6,9 @@ import type {
   IndirectMaterialEntry,
   OrderItem,
   PartsInventory,
+  PartsInventoryVariant,
   TaxCategory,
+  Vehicle,
   WorkItemCategory,
   WorkMenuItem,
   WorkMenuSet,
@@ -39,6 +41,12 @@ type Props = {
   // show_in_detail = true のアクティブ部品のみ、display_order 順で渡される前提）。
   // Step 1 で追加。空配列で省略可能（部品未登録環境でもボタンは出すが一覧は空表示）。
   allParts?: PartsInventory[];
+  // 車種別定価ピッカー（Step 3-2b）用の variant 一覧（全ユーザー分。deleted_at IS NULL、
+  // display_order 順）。受注の vehicle.model に一致する variant がある部品行に⭐バッジを出し、
+  // その variant.list_price で parts_cost を上書きする。空配列で省略可能。
+  allVariants?: PartsInventoryVariant[];
+  // 受注の車両（Step 3-2b）。null のときは⭐機能は無効化（通常ピッカーとして動く）。
+  vehicle?: Vehicle | null;
   // 業務カテゴリ（アクティブのみ、display_order 昇順）
   allCategories: WorkItemCategory[];
   // 受注の在庫状態（Step 2）。確保済み(reserved_at)/消費済み(consumed_at)のとき、明細編集に対して
@@ -101,8 +109,19 @@ function rowFromMenu(
 // work_name は空（部品だけの行）。linked_part_id で在庫管理対象になる（在庫減算は Step 2 以降）。
 // parts_cost = 売価（null は 0）、parts_cost_price = 原価。片方でも値があれば単価は自動計算され、
 // 単価は「部品代」欄から編集する（rowFromMenu と同じ自動計算モードに揃える）。
-function rowFromPart(p: PartsInventory, categoryId: string): ItemRow {
-  const sale = p.sale_price ?? 0;
+//
+// Step 3-2b: matchedVariant が渡され、その list_price が数値であれば、parts_cost を
+// その車種別定価で上書きする（part_name は部品名のみで、品番は明細に出さない）。
+// matchedVariant=null or list_price=null のときは従来どおり sale_price を使う。
+function rowFromPart(
+  p: PartsInventory,
+  categoryId: string,
+  matchedVariant: PartsInventoryVariant | null,
+): ItemRow {
+  const sale =
+    matchedVariant?.list_price != null
+      ? matchedVariant.list_price
+      : (p.sale_price ?? 0);
   const cost = p.cost_price ?? 0;
   return {
     name: "",
@@ -317,6 +336,8 @@ export default function ItemsForm({
   allSetsWithItems,
   allCategories,
   allParts = [],
+  allVariants = [],
+  vehicle = null,
   reservedAt = null,
   consumedAt = null,
   indirectByMenu = {},
@@ -440,12 +461,20 @@ export default function ItemsForm({
   // 「部品在庫から追加」: 選択部品を部品行に変換し、業務カテゴリ「整備」（無ければ先頭）の
   // セクションへ載せる。部品行は work_name 空・item_category_id を持つため
   // splitByCategory / addRowsByCategory のどちらでも捨てられず、再読込後も同じ位置に出る。
-  function handlePartPickerConfirm(parts: PartsInventory[]) {
+  //
+  // Step 3-2b: PartPickerModal が車種一致した variant の Map を一緒に渡してくる。
+  // 該当部品があれば rowFromPart に variant を渡して定価を上書きする。一致が無ければ null。
+  function handlePartPickerConfirm(
+    parts: PartsInventory[],
+    matchedByPart: Map<string, PartsInventoryVariant>,
+  ) {
     const fallbackId =
       allCategories.find((c) => c.name === "整備")?.id ??
       allCategories[0]?.id ??
       "";
-    const rows = parts.map((p) => rowFromPart(p, fallbackId));
+    const rows = parts.map((p) =>
+      rowFromPart(p, fallbackId, matchedByPart.get(p.id) ?? null),
+    );
     addRowsByCategory(rows);
     setPartPickerOpen(false);
   }
@@ -895,6 +924,8 @@ export default function ItemsForm({
       {partPickerOpen && (
         <PartPickerModal
           allParts={allParts}
+          allVariants={allVariants}
+          vehicle={vehicle}
           onConfirm={handlePartPickerConfirm}
           onClose={() => setPartPickerOpen(false)}
         />
@@ -1297,6 +1328,17 @@ function normalizeForSearch(s: string): string {
   return s.toLowerCase().normalize("NFKC");
 }
 
+// Step 3-2b: 車種照合用の正規化。検索用 normalizeForSearch の強化版で、
+// 大文字小文字 + 全角半角(NFKC) に加えて記号(ハイフン/アンダースコア/スラッシュ/
+// 空白/ドット類) を除去する。これにより GSXR1000 と GSX-R1000、GSX R1000 を同一視する。
+// 漢字/カナ寄せ等の高度なゆれ吸収は今回スコープ外（DECISIONS.md「Step 3」参照）。
+function normalizeForVehicleMatch(s: string): string {
+  return s
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\-_/\\.]+/g, "");
+}
+
 function menuRowTotal(m: WorkMenuItem): number {
   return m.default_labor_cost > 0 || m.default_parts_cost > 0
     ? m.default_labor_cost + m.default_parts_cost
@@ -1479,11 +1521,18 @@ function MenuPickerModal({
 // 絞った allParts。間接材料（show_in_detail=false）はここには出さず従来通りメニュー経由。
 function PartPickerModal({
   allParts,
+  allVariants,
+  vehicle,
   onConfirm,
   onClose,
 }: {
   allParts: PartsInventory[];
-  onConfirm: (parts: PartsInventory[]) => void;
+  allVariants: PartsInventoryVariant[];
+  vehicle: Vehicle | null;
+  onConfirm: (
+    parts: PartsInventory[],
+    matchedByPart: Map<string, PartsInventoryVariant>,
+  ) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -1500,6 +1549,25 @@ function PartPickerModal({
     );
   }, [allParts, query]);
 
+  // Step 3-2b: 受注の車種 (vehicle.model) と一致する variant を part_id ごとに 1 件だけ
+  // 採用する。allVariants は display_order 順で渡される前提なので、最初にヒットしたものが
+  // その部品の代表 variant になる。vehicle が無い or model 空のときは空 Map を返し、
+  // ⭐機能は自動的に無効化される。
+  const matchedVariantByPart = useMemo(() => {
+    const map = new Map<string, PartsInventoryVariant>();
+    const targetRaw = vehicle?.model ?? "";
+    const target = normalizeForVehicleMatch(targetRaw);
+    if (!target) return map;
+    for (const v of allVariants) {
+      if (map.has(v.part_id)) continue;
+      const hit = v.vehicle_tags.some(
+        (t) => normalizeForVehicleMatch(t) === target,
+      );
+      if (hit) map.set(v.part_id, v);
+    }
+    return map;
+  }, [allVariants, vehicle?.model]);
+
   function togglePick(id: string) {
     setPicked((prev) => {
       const next = new Set(prev);
@@ -1510,7 +1578,10 @@ function PartPickerModal({
   }
 
   function confirm() {
-    onConfirm(filtered.filter((p) => picked.has(p.id)));
+    onConfirm(
+      filtered.filter((p) => picked.has(p.id)),
+      matchedVariantByPart,
+    );
   }
 
   return (
@@ -1555,6 +1626,12 @@ function PartPickerModal({
                 const codes = [p.internal_code, p.external_code]
                   .filter((c) => c && c.trim() !== "")
                   .join(" / ");
+                // Step 3-2b: この部品に車種一致 variant があれば、その list_price で
+                // 表示価格を上書きし、⭐バッジで一目で分かるようにする。
+                // 一致あり・list_price=null（定価未設定）も⭐は出すが価格は通常表示。
+                const matched = matchedVariantByPart.get(p.id) ?? null;
+                const hasVariantPrice =
+                  matched != null && matched.list_price != null;
                 return (
                   <li key={p.id} className="px-4 py-2">
                     <label className="flex cursor-pointer items-start gap-3">
@@ -1565,8 +1642,16 @@ function PartPickerModal({
                         className="mt-1"
                       />
                       <div className="flex-1">
-                        <div className="text-sm text-zinc-900 dark:text-zinc-50">
-                          {p.name}
+                        <div className="flex items-center gap-2 text-sm text-zinc-900 dark:text-zinc-50">
+                          {matched && (
+                            <span
+                              aria-label="車種一致"
+                              title={`${vehicle?.model ?? ""} に合致する組があります`}
+                            >
+                              ⭐
+                            </span>
+                          )}
+                          <span>{p.name}</span>
                         </div>
                         <div className="text-xs text-zinc-500 dark:text-zinc-400">
                           {codes ? `${codes}・` : ""}
@@ -1579,10 +1664,16 @@ function PartPickerModal({
                           )}
                         </div>
                       </div>
-                      <div className="text-sm text-zinc-700 dark:text-zinc-300">
-                        {p.sale_price != null
-                          ? formatYen(p.sale_price)
-                          : "売価なし"}
+                      <div className="text-right text-sm text-zinc-700 dark:text-zinc-300">
+                        {hasVariantPrice ? (
+                          <div className="font-medium text-zinc-900 dark:text-zinc-50">
+                            車種別 {formatYen(matched!.list_price!)}
+                          </div>
+                        ) : p.sale_price != null ? (
+                          formatYen(p.sale_price)
+                        ) : (
+                          "売価なし"
+                        )}
                       </div>
                     </label>
                   </li>
