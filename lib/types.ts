@@ -271,6 +271,30 @@ export type PartsInventory = {
   updated_at: string;
 };
 
+// 車種別定価 (parts_inventory_variants の 1 行)。Step 3-1 で新設。
+//
+// 1部品 (parts_inventory) に対し、「品番＋定価＋適合車種タグ」の組を複数ぶら下げる。
+// 在庫は親 parts_inventory で1行のまま管理し、variant 側は請求情報のみを持つ
+// (stock_quantity / reserved_quantity は持たない)。受注の車種が vehicle_tags に
+// ヒットしたら、その variant の品番・定価を明細に流す (UI は次ステップ)。
+//
+// vehicle_tags は表記揺れ前提の自由テキスト配列。GIN 索引で @> 包含検索を高速化済み。
+// 親 parts_inventory が削除されると ON DELETE CASCADE で variant も消える。
+export type PartsInventoryVariant = {
+  id: string;
+  user_id: string;
+  part_id: string;
+  part_number: string | null;
+  list_price: number | null;
+  vehicle_tags: string[];
+  maker: string | null;
+  note: string | null;
+  display_order: number;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // 在庫移動の種別。
 //   in     = 入庫
 //   out    = 出庫（受注確定で減算する用途。Step 2 では未使用）
