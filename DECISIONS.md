@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-08（業販対応の構想確定・実装これから）
+最終更新: 2026-06-08（業販対応 第一歩・顧客区分 本番反映）
 
 | 領域 | 状態 |
 |---|---|
@@ -51,7 +51,7 @@
 | Stripe Billing / サブスク課金 | 作りかけ・テスト段階 | ブランチ `stripe-保存_0604`（commit 8e6ad48）。**main未マージ** | ①mainとの大規模マージ衝突解決（特にorders系・ensure.ts・6/4の3マイグレ）②trial期限到達時のアプリ側アクセスロック未実装 ③本番DBへのsubscriptions系3マイグレ適用が未確認 ④Stripe Price IDのenv設定 |
 | 管理画面リニューアル（/dashboard/admin → /admin） | 作りかけ | 同ブランチに同梱 | **Stripeとは独立した別機能**。ユーザごとのplan/status/options（mypage/line_notify/hp_integration）を手動編集するUI |
 | 車種別定価 / 利益エンジン（Step 3） | ✅ 実用上完成・本番稼働 | main | Step3-1/2a/2b完了。明細で車種別定価が⭐表示＆反映。3-2c（スナップショット）は「今は不要」判断 |
-| 業販対応（法人/個人で明細の見せ方を変える） | 🔜 構想確定・実装これから | まだコードなし | このチャットで設計（2026-06-08）。下記「意思決定ログ」参照。第一歩=顧客に法人/個人区分を持たせる |
+| 業販対応（法人/個人で明細の見せ方を変える） | 🚧 第一歩（顧客区分）完了・本番反映 | main | 構想は意思決定ログ参照。`customers.customer_type`（personal/business・CHECK・DEFAULT personal）追加済。次=明細の見せ方切替（法人4列/個人3列）＋ItemsFormへのcustomer配線 |
 | マイグレーション台帳の整合性回復 | 第1・2段階完了（実用上OK） | dev/prod両方 | prod台帳18→19本でリポジトリと整合。db pushで新規分を足せる状態。残=F06/F13重複・dev側ズレ・孤児（第3段階・急がない） |
 
 ### 把握済み・本番稼働中の主要機能（棚卸しで確認）
@@ -273,4 +273,5 @@
 - **2026-06-07** ｜ Step 3-2a ｜ variant登録・編集UI実装（部品編集ページに「車種別定価」セクション同居・編集時のみ表示／一覧＋追加／車種タグはチップ入力Enter/カンマ確定・JSON送信／品番・定価・タグの3フィールドMVP／個別即保存）。新規=variants-actions.ts, variants-section.tsx、修正=[id]/edit/page.tsx。DB変更なし（3-1で適用済）。commit 6b5fab5で本番反映 ｜ コードのみ
 - **2026-06-07** ｜ Step 3-2b ｜ 明細への車種別呼び出し。受注の車両modelとvehicle_tagsを正規化完全一致で照合→⭐＋「車種別¥定価」表示→選ぶとparts_costに定価反映（品番は明細非表示）。打ち消し線は出さない。normalizeForVehicleMatch追加（記号/大小/全半角吸収）。page.tsxでvariants並列取得しItemsFormにvehicle/allVariants渡す。OrderItem不変。本番で稼働確認済み。利益エンジン初回転 ｜ コードのみ
 - **2026-06-07** ｜ 入力欄UX改善 ｜ ①数量入力を全7箇所step=1（矢印は1ずつ・小数は手入力可、inputMode維持）②金額のデフォルト0を空(−)に（値引/預り金/作業メニュー各定価。共通ヘルパー lib/forms/money-default.ts=0/null/負は空・正のみ表示）③部品原価はrequired解除＋空保存時confirm。計算・DB・保存ロジックは不変。commit ec68d93で本番反映 ｜ コードのみ
+- **2026-06-08** ｜ 業販対応 第一歩 ｜ 顧客に法人/個人区分を実装。`customers.customer_type`（text・CHECK personal/business・DEFAULT personal・NOT NULL）。prodに死蔵していた同名列を再利用・完成（過去に作りかけ放置していたもの）。既存13件はpersonalにバックフィル。dev=MCP原子適用（台帳28→29）、prod=SQL Editor手動（台帳19→20）。customer-form.tsxに区分セレクト追加、actions.ts/types.ts更新。ファイル=supabase/migrations/20260608000000_add_customer_type.sql ｜ 加算的（1カラム）
 - （以降追記）

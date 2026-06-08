@@ -26,6 +26,20 @@ export default function CustomerForm({
   return (
     <form action={formAction} className="wos-card space-y-5">
       <div className="grid gap-5 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label htmlFor="customer_type" className="wos-label">
+            区分<span className="wos-req">*</span>
+          </label>
+          <select
+            id="customer_type"
+            name="customer_type"
+            defaultValue={initial?.customer_type ?? "personal"}
+            className="wos-input"
+          >
+            <option value="personal">個人</option>
+            <option value="business">法人</option>
+          </select>
+        </div>
         <div>
           <label htmlFor="name" className="wos-label">
             氏名<span className="wos-req">*</span>

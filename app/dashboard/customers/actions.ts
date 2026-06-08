@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { CustomerType } from "@/lib/types";
 
 export type FormState = { error: string } | undefined;
 
@@ -20,6 +21,14 @@ function pickInt(formData: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// 'business' のみ法人扱い、それ以外（'personal' / 不正値 / 未送信）は個人にフォールバック。
+// DB 側にも CHECK 制約があるが、サーバー側で正規化しておくと CHECK 違反を未然に防げる。
+function pickCustomerType(formData: FormData): CustomerType {
+  return pickString(formData, "customer_type") === "business"
+    ? "business"
+    : "personal";
+}
+
 function customerPayload(formData: FormData) {
   return {
     name: pickString(formData, "name"),
@@ -29,6 +38,7 @@ function customerPayload(formData: FormData) {
     postal_code: pickString(formData, "postal_code"),
     address: pickString(formData, "address"),
     notes: pickString(formData, "notes"),
+    customer_type: pickCustomerType(formData),
   };
 }
 

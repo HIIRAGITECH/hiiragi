@@ -1,3 +1,10 @@
+// 顧客区分。業販対応の起点（2026-06-08）。
+//   personal = 個人客（既定）
+//   business = 法人/業者客（業販価格・PDFの見せ方切替などを後段で行う）
+// 既存データは migration で 'personal' にバックフィル済み。
+export const CUSTOMER_TYPES = ["personal", "business"] as const;
+export type CustomerType = (typeof CUSTOMER_TYPES)[number];
+
 export type Customer = {
   id: string;
   user_id: string;
@@ -8,6 +15,8 @@ export type Customer = {
   postal_code: string | null;
   address: string | null;
   notes: string | null;
+  // 2026-06-08 追加。NOT NULL DEFAULT 'personal' + CHECK 制約。
+  customer_type: CustomerType;
   created_at: string;
   updated_at: string;
 };
