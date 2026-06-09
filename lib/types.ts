@@ -182,6 +182,10 @@ export type WorkMenuItem = {
   // 在庫減算（Step 4）はこの id を使って当該行を特定する。
   // 親部品が物理削除されると DB 側 ON DELETE SET NULL で null に戻り、手入力扱いになる。
   linked_part_id: string | null;
+  // 業販対応 第二歩-1 (2026-06-09) で追加。
+  // 業販工賃 = default_labor_cost * markup_rate （DB保存はしない、計算で都度表示）。
+  // null = 「掛け率未設定」。DB内部は小数 (0.95 = 95%)。
+  markup_rate: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -300,6 +304,10 @@ export type PartsInventoryVariant = {
   note: string | null;
   display_order: number;
   deleted_at: string | null;
+  // 業販対応 第二歩-1 (2026-06-09) で追加。
+  // 業販価格 = list_price * markup_rate （DB保存はしない、計算で都度表示）。
+  // null = 「掛け率未設定」。DB内部は小数 (0.95 = 95%)。
+  markup_rate: number | null;
   created_at: string;
   updated_at: string;
 };

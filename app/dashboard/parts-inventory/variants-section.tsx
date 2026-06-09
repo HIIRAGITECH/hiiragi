@@ -105,29 +105,20 @@ function VariantCard({ variant }: { variant: PartsInventoryVariant }) {
       action={formAction}
       className="border border-[var(--color-line)] bg-[var(--color-cream)] p-3 space-y-3"
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="wos-label">品番</label>
-          <input
-            name="part_number"
-            defaultValue={variant.part_number ?? ""}
-            className="wos-input"
-            placeholder="例: 3XV-23135-20"
-          />
-        </div>
-        <div>
-          <label className="wos-label">定価</label>
-          <input
-            name="list_price"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={variant.list_price ?? ""}
-            className="wos-input text-right"
-            placeholder="例: 5590"
-          />
-        </div>
+      <div>
+        <label className="wos-label">品番</label>
+        <input
+          name="part_number"
+          defaultValue={variant.part_number ?? ""}
+          className="wos-input"
+          placeholder="例: 3XV-23135-20"
+        />
       </div>
+
+      <PriceMarkupGroup
+        initialListPrice={variant.list_price}
+        initialMarkupRate={variant.markup_rate}
+      />
 
       <div>
         <label className="wos-label">適合車種</label>
@@ -194,28 +185,17 @@ function NewVariantCard({
       action={formAction}
       className="border border-[var(--color-line)] bg-[var(--color-paper)] p-3 space-y-3"
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="wos-label">品番</label>
-          <input
-            name="part_number"
-            className="wos-input"
-            placeholder="例: 3XV-23135-20"
-            autoFocus
-          />
-        </div>
-        <div>
-          <label className="wos-label">定価</label>
-          <input
-            name="list_price"
-            type="number"
-            min={0}
-            step={1}
-            className="wos-input text-right"
-            placeholder="例: 5590"
-          />
-        </div>
+      <div>
+        <label className="wos-label">品番</label>
+        <input
+          name="part_number"
+          className="wos-input"
+          placeholder="例: 3XV-23135-20"
+          autoFocus
+        />
       </div>
+
+      <PriceMarkupGroup initialListPrice={null} initialMarkupRate={null} />
 
       <div>
         <label className="wos-label">適合車種</label>
@@ -249,6 +229,141 @@ function NewVariantCard({
         </button>
       </div>
     </form>
+  );
+}
+
+// 定価・掛け率(%)・業販価格の3列を双方向に連動させる入力グループ。
+//   定価 (list_price)    : name="list_price" で通常送信
+//   掛け率 (markup_rate) : name="markup_rate" で hidden 送信（%入力を /100 した小数）
+//   業販価格            : 送信しない（計算/表示のみ。markup_rate と list_price から都度算出）
+// 連動ルール:
+//   - 掛け率変更 → 業販 = 定価 × 掛け率/100 を再表示
+//   - 業販変更   → 掛け率 = 業販 / 定価 × 100 を再表示
+//   - 定価変更   → 掛け率が入っていれば業販を追従、なければ業販があれば掛け率を再計算
+//   - 定価が空/0 のとき、業販欄は disabled + 「定価未設定」表示。掛け率だけ入力可。
+function PriceMarkupGroup({
+  initialListPrice,
+  initialMarkupRate,
+}: {
+  initialListPrice: number | null;
+  initialMarkupRate: number | null;
+}) {
+  // 初期 % 表示: 0.95 → "95"、95.5 のような小数 % も許容するため 1 桁まで保持。
+  const initialPct =
+    initialMarkupRate != null && Number.isFinite(initialMarkupRate)
+      ? String(Math.round(initialMarkupRate * 1000) / 10)
+      : "";
+  // 初期 業販価格: 定価 × 掛け率 を整数丸めで表示。どちらか欠ければ空。
+  const initialBulk =
+    initialListPrice != null &&
+    initialMarkupRate != null &&
+    Number.isFinite(initialListPrice * initialMarkupRate)
+      ? String(Math.round(initialListPrice * initialMarkupRate))
+      : "";
+
+  const [listPrice, setListPrice] = useState<string>(
+    initialListPrice != null ? String(initialListPrice) : "",
+  );
+  const [markupPct, setMarkupPct] = useState<string>(initialPct);
+  const [bulkPrice, setBulkPrice] = useState<string>(initialBulk);
+
+  function recalcBulkFromRate(lp: string, pct: string): string {
+    const lpN = Number(lp);
+    const pctN = Number(pct);
+    if (lp.trim() === "" || !Number.isFinite(lpN)) return "";
+    if (pct.trim() === "" || !Number.isFinite(pctN)) return "";
+    const b = lpN * (pctN / 100);
+    return Number.isFinite(b) ? String(Math.round(b)) : "";
+  }
+
+  function recalcRateFromBulk(lp: string, bp: string): string {
+    const lpN = Number(lp);
+    const bpN = Number(bp);
+    if (!Number.isFinite(lpN) || lpN <= 0) return "";
+    if (bp.trim() === "" || !Number.isFinite(bpN)) return "";
+    const pct = (bpN / lpN) * 100;
+    return Number.isFinite(pct) ? String(Math.round(pct * 10) / 10) : "";
+  }
+
+  function onListPriceChange(v: string) {
+    setListPrice(v);
+    if (markupPct !== "") {
+      // 掛け率を優先して業販を追従
+      setBulkPrice(recalcBulkFromRate(v, markupPct));
+    } else if (bulkPrice !== "") {
+      // 掛け率が無くて業販があるなら、新定価に合わせて掛け率を再計算
+      setMarkupPct(recalcRateFromBulk(v, bulkPrice));
+    }
+  }
+
+  function onPctChange(v: string) {
+    setMarkupPct(v);
+    setBulkPrice(recalcBulkFromRate(listPrice, v));
+  }
+
+  function onBulkChange(v: string) {
+    setBulkPrice(v);
+    setMarkupPct(recalcRateFromBulk(listPrice, v));
+  }
+
+  // hidden で送る markup_rate は小数。空 → サーバー側 pickNullableNumber で null になる。
+  const markupRateValue = (() => {
+    if (markupPct.trim() === "") return "";
+    const n = Number(markupPct);
+    if (!Number.isFinite(n)) return "";
+    return String(n / 100);
+  })();
+
+  const listPriceEmpty =
+    listPrice.trim() === "" || !(Number(listPrice) > 0);
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      <div>
+        <label className="wos-label">定価</label>
+        <input
+          name="list_price"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={1}
+          value={listPrice}
+          onChange={(e) => onListPriceChange(e.target.value)}
+          className="wos-input text-right"
+          placeholder="例: 5590"
+        />
+      </div>
+      <div>
+        <label className="wos-label">業販掛け率(%)</label>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step={1}
+          value={markupPct}
+          onChange={(e) => onPctChange(e.target.value)}
+          className="wos-input text-right"
+          placeholder="例: 95"
+        />
+      </div>
+      <div>
+        <label className="wos-label">業販価格</label>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={1}
+          value={listPriceEmpty ? "" : bulkPrice}
+          onChange={(e) => onBulkChange(e.target.value)}
+          disabled={listPriceEmpty}
+          className={`wos-input text-right ${
+            listPriceEmpty ? "cursor-not-allowed opacity-60" : ""
+          }`}
+          placeholder={listPriceEmpty ? "定価未設定" : "例: 5310"}
+        />
+      </div>
+      <input type="hidden" name="markup_rate" value={markupRateValue} />
+    </div>
   );
 }
 

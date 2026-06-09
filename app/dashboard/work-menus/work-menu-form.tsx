@@ -109,6 +109,69 @@ export default function WorkMenuForm({
     moneyDefault(initial?.parts_cost_price),
   );
 
+  // 業販対応 第二歩-1 (2026-06-09): 工賃側の業販掛け率 / 業販工賃 を双方向に連動させる。
+  //   工賃 (default_labor_cost) も同じ state 群に取り込んで controlled 化し、変更時に追従させる。
+  //   保存されるのは markup_rate（小数）と default_labor_cost のみ。業販工賃は表示計算のみ。
+  const [laborCost, setLaborCost] = useState<string>(
+    moneyDefault(initial?.default_labor_cost),
+  );
+  const initialLaborMarkupPct =
+    initial?.markup_rate != null && Number.isFinite(initial.markup_rate)
+      ? String(Math.round(initial.markup_rate * 1000) / 10)
+      : "";
+  const initialBulkLabor =
+    initial?.default_labor_cost != null &&
+    initial?.markup_rate != null &&
+    Number.isFinite(initial.default_labor_cost * initial.markup_rate)
+      ? String(Math.round(initial.default_labor_cost * initial.markup_rate))
+      : "";
+  const [laborMarkupPct, setLaborMarkupPct] =
+    useState<string>(initialLaborMarkupPct);
+  const [bulkLabor, setBulkLabor] = useState<string>(initialBulkLabor);
+
+  function recalcBulkLaborFromRate(lc: string, pct: string): string {
+    const lcN = Number(lc);
+    const pctN = Number(pct);
+    if (lc.trim() === "" || !Number.isFinite(lcN)) return "";
+    if (pct.trim() === "" || !Number.isFinite(pctN)) return "";
+    const b = lcN * (pctN / 100);
+    return Number.isFinite(b) ? String(Math.round(b)) : "";
+  }
+  function recalcRateFromBulkLabor(lc: string, bp: string): string {
+    const lcN = Number(lc);
+    const bpN = Number(bp);
+    if (!Number.isFinite(lcN) || lcN <= 0) return "";
+    if (bp.trim() === "" || !Number.isFinite(bpN)) return "";
+    const pct = (bpN / lcN) * 100;
+    return Number.isFinite(pct) ? String(Math.round(pct * 10) / 10) : "";
+  }
+
+  function onLaborCostChange(v: string) {
+    setLaborCost(v);
+    if (laborMarkupPct !== "") {
+      setBulkLabor(recalcBulkLaborFromRate(v, laborMarkupPct));
+    } else if (bulkLabor !== "") {
+      setLaborMarkupPct(recalcRateFromBulkLabor(v, bulkLabor));
+    }
+  }
+  function onLaborMarkupPctChange(v: string) {
+    setLaborMarkupPct(v);
+    setBulkLabor(recalcBulkLaborFromRate(laborCost, v));
+  }
+  function onBulkLaborChange(v: string) {
+    setBulkLabor(v);
+    setLaborMarkupPct(recalcRateFromBulkLabor(laborCost, v));
+  }
+
+  // hidden で送る markup_rate は小数。空 → サーバー pickNullableNumber で null。
+  const laborMarkupHiddenValue = (() => {
+    if (laborMarkupPct.trim() === "") return "";
+    const n = Number(laborMarkupPct);
+    if (!Number.isFinite(n)) return "";
+    return String(n / 100);
+  })();
+  const laborEmpty = laborCost.trim() === "" || !(Number(laborCost) > 0);
+
   const selectedPart = useMemo(
     () => allParts.find((p) => p.id === linkedPartId) ?? null,
     [allParts, linkedPartId],
@@ -466,10 +529,48 @@ export default function WorkMenuForm({
             type="number"
             min={0}
             step={1}
-            defaultValue={moneyDefault(initial?.default_labor_cost)}
+            value={laborCost}
+            onChange={(e) => onLaborCostChange(e.target.value)}
             placeholder="—"
             className={`${inputClass} text-right`}
           />
+          {/* 業販対応: 工賃側の掛け率(%)と業販工賃を双方向連動で入力する */}
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                業販掛け率(%)
+              </label>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={1}
+                value={laborMarkupPct}
+                onChange={(e) => onLaborMarkupPctChange(e.target.value)}
+                placeholder="例: 80"
+                className={`${inputClass} text-right`}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                業販工賃
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1}
+                value={laborEmpty ? "" : bulkLabor}
+                onChange={(e) => onBulkLaborChange(e.target.value)}
+                disabled={laborEmpty}
+                placeholder={laborEmpty ? "工賃未設定" : "例: 16000"}
+                className={`${inputClass} text-right ${
+                  laborEmpty ? "cursor-not-allowed opacity-60" : ""
+                }`}
+              />
+            </div>
+          </div>
+          <input type="hidden" name="markup_rate" value={laborMarkupHiddenValue} />
           <label
             htmlFor="labor_cost_price"
             className="mt-2 mb-1 block text-xs text-zinc-500 dark:text-zinc-400"

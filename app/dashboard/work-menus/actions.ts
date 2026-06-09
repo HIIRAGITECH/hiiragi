@@ -30,6 +30,14 @@ function pickNumber(formData: FormData, key: string, fallback = 0): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+// 空 / 不正 / 負値 → null。markup_rate のように「未設定 = NULL」を意味づけしたい列に使う。
+function pickNullableNumber(formData: FormData, key: string): number | null {
+  const s = pickString(formData, key);
+  if (s === null) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 function pickTaxCategory(formData: FormData): TaxCategory | null {
   const s = pickString(formData, "tax_category");
   if (!s) return null;
@@ -59,6 +67,9 @@ type Payload = {
   // 部品マスターリンク。'マスターから選ぶ' で部品を選んだ場合のみ非 null。
   // 値は呼び出し側で parts_inventory の存在/所有を検証してから書き込む。
   linked_part_id: string | null;
+  // 業販対応 第二歩-1 (2026-06-09): 工賃側の業販掛け率（小数）。null = 未設定。
+  // クライアントが「%入力 → /100 して小数化」してから markup_rate で送信する。
+  markup_rate: number | null;
 };
 
 function readPayload(formData: FormData): Payload | { error: string } {
@@ -84,6 +95,7 @@ function readPayload(formData: FormData): Payload | { error: string } {
     tax_category,
     item_category_id,
     linked_part_id: pickString(formData, "linked_part_id"),
+    markup_rate: pickNullableNumber(formData, "markup_rate"),
   };
 }
 
@@ -465,7 +477,7 @@ export async function duplicateWorkMenu(formData: FormData) {
   const { data: src } = await supabase
     .from("work_menu_items")
     .select(
-      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id, linked_part_id",
+      "work_name, part_name, category, default_quantity, default_unit_price, default_labor_cost, default_parts_cost, labor_cost_price, parts_cost_price, tax_free, memo, tax_category, item_category_id, linked_part_id, markup_rate",
     )
     .eq("id", id)
     .eq("user_id", user.id)

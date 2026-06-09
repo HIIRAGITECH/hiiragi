@@ -54,6 +54,9 @@ type VariantPayload = {
   part_number: string | null;
   list_price: number | null;
   vehicle_tags: string[];
+  // 業販掛け率（小数）。null = 未設定。クライアントが「%入力 → /100 して小数化」してから
+  // 名前 markup_rate で送信する。pickNullableNumber が空・不正・負値を null に正規化する。
+  markup_rate: number | null;
 };
 
 function readVariantPayload(formData: FormData): VariantPayload {
@@ -61,6 +64,7 @@ function readVariantPayload(formData: FormData): VariantPayload {
     part_number: pickString(formData, "part_number"),
     list_price: pickNullableNumber(formData, "list_price"),
     vehicle_tags: pickStringArray(formData, "vehicle_tags"),
+    markup_rate: pickNullableNumber(formData, "markup_rate"),
   };
 }
 
@@ -107,6 +111,7 @@ export async function createVariant(
     part_number: payload.part_number,
     list_price: payload.list_price,
     vehicle_tags: payload.vehicle_tags,
+    markup_rate: payload.markup_rate,
     display_order: nextOrder,
   });
   if (error) return { error: `追加に失敗しました: ${error.message}` };
@@ -146,6 +151,7 @@ export async function updateVariant(
       part_number: payload.part_number,
       list_price: payload.list_price,
       vehicle_tags: payload.vehicle_tags,
+      markup_rate: payload.markup_rate,
     })
     .eq("id", id)
     .eq("user_id", user.id);
