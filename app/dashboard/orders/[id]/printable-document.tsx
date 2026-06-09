@@ -7,7 +7,11 @@ import type {
   Vehicle,
   WorkItemCategory,
 } from "@/lib/types";
-import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import {
+  calculateListPriceTotals,
+  calculateTotals,
+  rowSubtotal,
+} from "@/lib/orders/totals";
 import { groupItemsByCategory } from "@/lib/orders/sections";
 import { formatDate, formatYen } from "@/lib/format";
 
@@ -58,6 +62,10 @@ export default function PrintableDocument({
   const taxableSubtotalAll =
     totals.sections.normal.subtotal + totals.sections.shakenTaxable.subtotal;
   const shakenNonTaxSubtotal = totals.sections.shakenTaxFree.subtotal;
+  // 業販対応 段2-2: 顧客が法人 (business) のとき、明細を「単価/業販/参考定価」3列で表示し、
+  // 合計欄に「参考定価合計（税込）」を併記する。null/personal は従来通り (個人モード)。
+  const isBusiness = customer?.customer_type === "business";
+  const listPriceTotals = calculateListPriceTotals(allItems);
   const title = type === "estimate" ? "見積書" : "請求書";
   const today = new Date().toISOString().slice(0, 10);
 
@@ -178,26 +186,23 @@ export default function PrintableDocument({
       </section>
 
       {/* 明細: 業務カテゴリ単位で分割。display_order 昇順、orphan 末尾。
-          showBreakdown は税区分で判定（shaken_non_tax のみ単価表示、それ以外は工賃/部品代の内訳表示）。 */}
+          業販対応 段2-2: 列構成は customer_type で分岐 (税区分での分岐は廃止)。
+            個人: 品名/数量/単価/小計 (4列)
+            法人: 品名/数量/単価/業販/参考定価 (5列) */}
       {allItems.length === 0 ? (
         <div className="mb-6 border-y-2 border-black px-2 py-6 text-center text-xs text-zinc-500">
           明細がありません。
         </div>
       ) : (
         <>
-          {sections.map((s) => {
-            const isShakenNonTax = s.items.every(
-              (it) => it.tax_category === "shaken_non_tax",
-            );
-            return (
-              <ItemsSection
-                key={s.key}
-                title={s.isDeleted ? `（削除済み）${s.name}` : s.name}
-                items={s.items}
-                showBreakdown={!isShakenNonTax}
-              />
-            );
-          })}
+          {sections.map((s) => (
+            <ItemsSection
+              key={s.key}
+              title={s.isDeleted ? `（削除済み）${s.name}` : s.name}
+              items={s.items}
+              isBusiness={isBusiness}
+            />
+          ))}
         </>
       )}
 
@@ -233,6 +238,14 @@ export default function PrintableDocument({
           value={formatYen(totals.total)}
           emphasize
         />
+        {/* 業販対応 段2-2: 法人時のみ、参考定価の税込合計を控えめに併記。
+            list_price が1行も保存されていない (過去明細だけの受注) ときは出さない。 */}
+        {isBusiness && listPriceTotals.hasAny && (
+          <TotalsRow
+            label="参考定価合計（税込）"
+            value={formatYen(listPriceTotals.total)}
+          />
+        )}
         {totals.deposit > 0 && (
           <>
             <TotalsRow
@@ -343,49 +356,56 @@ function Row({
   );
 }
 
+// 業販対応 段2-2: 顧客区分 (isBusiness) で列構成を切り替える。
+//   個人 (isBusiness=false): 品名 / 数量 / 単価 / 小計 (4列)
+//   法人 (isBusiness=true):  品名 / 数量 / 単価 / 業販 / 参考定価 (5列)
+// 列幅 % は react-pdf (lib/pdf-react/InvoiceDocument.tsx の styles.colXxx) と必ず一致させる。
 function ItemsSection({
   title,
   items,
-  showBreakdown,
+  isBusiness,
 }: {
   title: string;
   items: OrderItem[];
-  showBreakdown: boolean;
+  isBusiness: boolean;
 }) {
   return (
     <section className="mb-5">
       <h2 className="mb-0 break-after-avoid border-b-[1.2px] border-black pb-0.5 text-xs font-bold tracking-wide">
         【{title}】
       </h2>
-      {/* 列幅は PDF (InvoiceDocument styles.colName/colQty/colLabor/colParts/colSubtotal) と同じ % 比率に揃える。
-          colgroup で固定することで、長文品名でも他の列幅がブレない。 */}
       <table className="w-full table-fixed border-collapse text-xs">
         <colgroup>
-          <col style={{ width: "52%" }} />
-          <col style={{ width: "9%" }} />
-          {showBreakdown ? (
+          {isBusiness ? (
             <>
-              <col style={{ width: "13%" }} />
-              <col style={{ width: "13%" }} />
+              <col style={{ width: "46%" }} /> {/* 品名 */}
+              <col style={{ width: "8%" }} />  {/* 数量 */}
+              <col style={{ width: "14%" }} /> {/* 単価 */}
+              <col style={{ width: "16%" }} /> {/* 業販 */}
+              <col style={{ width: "16%" }} /> {/* 参考定価 */}
             </>
           ) : (
-            <col style={{ width: "26%" }} />
+            <>
+              <col style={{ width: "52%" }} /> {/* 品名 */}
+              <col style={{ width: "9%" }} />  {/* 数量 */}
+              <col style={{ width: "26%" }} /> {/* 単価 */}
+              <col style={{ width: "13%" }} /> {/* 小計 */}
+            </>
           )}
-          <col style={{ width: "13%" }} />
         </colgroup>
         <thead>
           <tr className="border-b-[1.2px] border-black">
             <th className="px-2 py-1 text-left text-[10px]">品名</th>
             <th className="px-2 py-1 text-right text-[10px]">数量</th>
-            {showBreakdown ? (
+            <th className="px-2 py-1 text-right text-[10px]">単価</th>
+            {isBusiness ? (
               <>
-                <th className="px-2 py-1 text-right text-[10px]">工賃</th>
-                <th className="px-2 py-1 text-right text-[10px]">部品代</th>
+                <th className="px-2 py-1 text-right text-[10px]">業販</th>
+                <th className="px-2 py-1 text-right text-[10px]">参考定価</th>
               </>
             ) : (
-              <th className="px-2 py-1 text-right text-[10px]">単価</th>
+              <th className="px-2 py-1 text-right text-[10px]">小計</th>
             )}
-            <th className="px-2 py-1 text-right text-[10px]">小計</th>
           </tr>
         </thead>
         <tbody>
@@ -396,8 +416,11 @@ function ItemsSection({
                 : null;
             const note =
               it.note && it.note.trim() !== "" ? it.note : null;
-            // 数量・金額列を最上段（work_name 行）に揃えるため、各 td に明示的に
-            // align-top を付ける（vertical-align は td 単位のため tr 上では効かない）。
+            const subtotal = rowSubtotal(it);
+            // 業販対応 段2-2: 参考定価 = list_price × quantity。未保存 (過去明細) は「—」。
+            const lp = it.list_price ?? 0;
+            const qty = it.quantity ?? 0;
+            const refTotal = lp > 0 && qty > 0 ? Math.round(qty * lp) : null;
             return (
               <tr
                 key={i}
@@ -415,27 +438,23 @@ function ItemsSection({
                   )}
                 </td>
                 <td className="px-2 py-1 text-right">{it.quantity}</td>
-                {showBreakdown ? (
+                <td className="px-2 py-1 text-right">
+                  {formatYen(it.unit_price)}
+                </td>
+                {isBusiness ? (
                   <>
                     <td className="px-2 py-1 text-right">
-                      {it.labor_cost !== undefined
-                        ? formatYen(it.labor_cost)
-                        : "—"}
+                      {formatYen(subtotal)}
                     </td>
-                    <td className="px-2 py-1 text-right">
-                      {it.parts_cost !== undefined
-                        ? formatYen(it.parts_cost)
-                        : "—"}
+                    <td className="px-2 py-1 text-right text-zinc-500">
+                      {refTotal !== null ? formatYen(refTotal) : "—"}
                     </td>
                   </>
                 ) : (
                   <td className="px-2 py-1 text-right">
-                    {formatYen(it.unit_price)}
+                    {formatYen(subtotal)}
                   </td>
                 )}
-                <td className="px-2 py-1 text-right">
-                  {formatYen(rowSubtotal(it))}
-                </td>
               </tr>
             );
           })}

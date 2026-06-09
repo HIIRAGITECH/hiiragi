@@ -9,7 +9,11 @@ import {
   View,
 } from "@react-pdf/renderer";
 import { formatDate, formatYen } from "@/lib/format";
-import { calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import {
+  calculateListPriceTotals,
+  calculateTotals,
+  rowSubtotal,
+} from "@/lib/orders/totals";
 import { groupItemsByCategory } from "@/lib/orders/sections";
 import type {
   BankInfo,
@@ -254,15 +258,25 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: COLORS.gray,
   },
-  // 5 列構成: 品名 / 数量 / 工賃 / 部品代 / 小計
-  // 利用可能幅 180mm を以下で割り振る（合計 100%）。
+  // 業販対応 段2-2: 顧客区分で列構成を切替。
+  //   個人 (4列): 品名 52% / 数量 9% / 単価 26% / 小計 13%
+  //   法人 (5列): 品名 46% / 数量 8% / 単価 14% / 業販 16% / 参考定価 16%
+  // 印刷用 HTML (app/dashboard/orders/[id]/printable-document.tsx) と必ず同じ % にする。
   colName: { width: "52%", paddingRight: 4 },
   colQty: { width: "9%", textAlign: "right", paddingRight: 4 },
-  colLabor: { width: "13%", textAlign: "right", paddingRight: 4 },
-  colParts: { width: "13%", textAlign: "right", paddingRight: 4 },
-  colSubtotal: { width: "13%", textAlign: "right" },
-  // 工賃+部品代の結合（単価表示）
   colUnit: { width: "26%", textAlign: "right", paddingRight: 4 },
+  colSubtotal: { width: "13%", textAlign: "right" },
+  // 法人モード用 (5列構成)
+  colNameBiz: { width: "46%", paddingRight: 4 },
+  colQtyBiz: { width: "8%", textAlign: "right", paddingRight: 4 },
+  colUnitBiz: { width: "14%", textAlign: "right", paddingRight: 4 },
+  colBulk: { width: "16%", textAlign: "right", paddingRight: 4 },
+  // 参考定価は色を薄めにする (画面と同様)
+  colListPrice: {
+    width: "16%",
+    textAlign: "right",
+    color: COLORS.gray,
+  },
   emptyMessage: {
     textAlign: "center",
     color: COLORS.gray,
@@ -366,33 +380,51 @@ function sanitizeText(s: string | null | undefined): string {
 interface ItemsSectionProps {
   title: string;
   items: OrderItem[];
+  // 業販対応 段2-2: 顧客区分で列構成を切替。
+  //   個人 (false): 品名 / 数量 / 単価 / 小計 (4列)
+  //   法人 (true):  品名 / 数量 / 単価 / 業販 / 参考定価 (5列)
+  isBusiness: boolean;
 }
 
-function ItemsSection({ title, items }: ItemsSectionProps) {
+function ItemsSection({ title, items, isBusiness }: ItemsSectionProps) {
+  // 列スタイルを customer_type で切替 (印刷用 HTML と同じ % 比率)
+  const colNameStyle = isBusiness ? styles.colNameBiz : styles.colName;
+  const colQtyStyle = isBusiness ? styles.colQtyBiz : styles.colQty;
+  const colUnitStyle = isBusiness ? styles.colUnitBiz : styles.colUnit;
+
   return (
     <View>
       <Text style={styles.categoryHeading}>【{title}】</Text>
       <View style={styles.tableHeadRow}>
-        <Text style={styles.colName}>品名</Text>
-        <Text style={styles.colQty}>数量</Text>
-        <Text style={styles.colLabor}>工賃</Text>
-        <Text style={styles.colParts}>部品代</Text>
-        <Text style={styles.colSubtotal}>小計</Text>
+        <Text style={colNameStyle}>品名</Text>
+        <Text style={colQtyStyle}>数量</Text>
+        <Text style={colUnitStyle}>単価</Text>
+        {isBusiness ? (
+          <>
+            <Text style={styles.colBulk}>業販</Text>
+            <Text style={styles.colListPrice}>参考定価</Text>
+          </>
+        ) : (
+          <Text style={styles.colSubtotal}>小計</Text>
+        )}
       </View>
       {items.map((it, i) => {
-        const showBreakdown = it.labor_cost != null || it.parts_cost != null;
         const partName =
           it.part_name && it.part_name.trim() !== "" ? it.part_name : null;
         const note = it.note && it.note.trim() !== "" ? it.note : null;
+        const subtotal = rowSubtotal(it);
+        // 業販対応 段2-2: 参考定価 = list_price × quantity。未保存 (過去明細) は「—」。
+        const lp = it.list_price ?? 0;
+        const qty = it.quantity ?? 0;
+        const refTotal = lp > 0 && qty > 0 ? Math.round(qty * lp) : null;
         return (
           <View
             key={`${title}-${i}`}
             style={styles.tableRow}
             wrap={false}
           >
-            {/* 品名セル: work_name / part_name / note を縦に配置。
-                part_name と note はデータがあるときだけ段が出る。 */}
-            <View style={styles.colName}>
+            {/* 品名セル: work_name / part_name / note を縦に配置。 */}
+            <View style={colNameStyle}>
               <Text>{sanitizeText(it.work_name)}</Text>
               {partName && (
                 <Text style={styles.itemPartName}>
@@ -405,20 +437,18 @@ function ItemsSection({ title, items }: ItemsSectionProps) {
                 </Text>
               )}
             </View>
-            <Text style={styles.colQty}>{it.quantity}</Text>
-            {showBreakdown ? (
+            <Text style={colQtyStyle}>{it.quantity}</Text>
+            <Text style={colUnitStyle}>{formatYen(it.unit_price ?? 0)}</Text>
+            {isBusiness ? (
               <>
-                <Text style={styles.colLabor}>
-                  {it.labor_cost != null ? formatYen(it.labor_cost) : "—"}
-                </Text>
-                <Text style={styles.colParts}>
-                  {it.parts_cost != null ? formatYen(it.parts_cost) : "—"}
+                <Text style={styles.colBulk}>{formatYen(subtotal)}</Text>
+                <Text style={styles.colListPrice}>
+                  {refTotal !== null ? formatYen(refTotal) : "—"}
                 </Text>
               </>
             ) : (
-              <Text style={styles.colUnit}>{formatYen(it.unit_price ?? 0)}</Text>
+              <Text style={styles.colSubtotal}>{formatYen(subtotal)}</Text>
             )}
-            <Text style={styles.colSubtotal}>{formatYen(rowSubtotal(it))}</Text>
           </View>
         );
       })}
@@ -471,6 +501,10 @@ export function InvoiceDocument({
   const taxableSubtotalAll =
     totals.sections.normal.subtotal + totals.sections.shakenTaxable.subtotal;
   const shakenNonTaxSubtotal = totals.sections.shakenTaxFree.subtotal;
+  // 業販対応 段2-2: 顧客が法人 (business) のとき、明細を「単価/業販/参考定価」3列で表示し、
+  // 合計欄に「参考定価合計（税込）」を併記する。null/personal は従来通り (個人モード)。
+  const isBusiness = customer?.customer_type === "business";
+  const listPriceTotals = calculateListPriceTotals(allItems);
 
   const title = documentType === "estimate" ? "見積書" : "請求書";
   const lead =
@@ -646,6 +680,7 @@ export function InvoiceDocument({
                 key={s.key}
                 title={s.isDeleted ? `（削除済み）${s.name}` : s.name}
                 items={s.items}
+                isBusiness={isBusiness}
               />
             ))}
           </>
@@ -683,6 +718,14 @@ export function InvoiceDocument({
             value={formatYen(totals.total)}
             emphasize
           />
+          {/* 業販対応 段2-2: 法人時のみ、参考定価の税込合計を併記。
+              list_price が1行も保存されていない過去明細だけの受注では出さない。 */}
+          {isBusiness && listPriceTotals.hasAny && (
+            <TotalsRow
+              label="参考定価合計（税込）"
+              value={formatYen(listPriceTotals.total)}
+            />
+          )}
           {totals.deposit > 0 && (
             <>
               <TotalsRow
