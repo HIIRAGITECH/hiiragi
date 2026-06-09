@@ -50,31 +50,27 @@ function pickTaxCategory(formData: FormData): TaxCategory | null {
 // WORK_CATEGORIES を import 維持しているのは互換派生 (deriveLegacyCategory) のため。
 void WORK_CATEGORIES;
 
-// フォームから受け取る生 payload。旧 category / tax_free は派生で計算するため含めない。
+// メニュー単機能化 段1 (2026-06-10):
+//   フォームから受け取る生 payload。「1メニュー＝1金額の項目」に簡略化済み。
+//   旧フィールド (part_name / default_labor_cost / default_parts_cost / parts_cost_price /
+//   linked_part_id) はフォームから送られないが、DB側は段1ではまだ列が残っているため
+//   INSERT/UPDATE 時に後方互換値で埋める (toLegacyCompat 参照)。
 type Payload = {
   work_name: string;
-  part_name: string | null;
   default_quantity: number;
-  default_unit_price: number;
-  default_labor_cost: number;
-  default_parts_cost: number;
-  // 原価（社内管理用、粗利計算に使用）
-  labor_cost_price: number;
-  parts_cost_price: number;
+  default_unit_price: number; // メニューの売値 (1金額の主軸)
+  labor_cost_price: number;   // メニューの原価 (社内管理用、粗利計算)
   memo: string | null;
   tax_category: TaxCategory;
   item_category_id: string;
-  // 部品マスターリンク。'マスターから選ぶ' で部品を選んだ場合のみ非 null。
-  // 値は呼び出し側で parts_inventory の存在/所有を検証してから書き込む。
-  linked_part_id: string | null;
-  // 業販対応 第二歩-1 (2026-06-09): 工賃側の業販掛け率（小数）。null = 未設定。
-  // クライアントが「%入力 → /100 して小数化」してから markup_rate で送信する。
+  // 業販掛け率 (小数)。null = 未設定。意味づけが段1で「メニュー売値全体の掛け率」に変更された
+  // (第二歩-1 では工賃用だった)。rowFromMenu の業販計算は default_unit_price × markup_rate。
   markup_rate: number | null;
 };
 
 function readPayload(formData: FormData): Payload | { error: string } {
   const work_name = pickString(formData, "work_name");
-  if (!work_name) return { error: "作業内容は必須です。" };
+  if (!work_name) return { error: "項目名は必須です。" };
   const item_category_id = pickString(formData, "item_category_id");
   if (!item_category_id) {
     return { error: "業務カテゴリを選択してください。" };
@@ -84,18 +80,32 @@ function readPayload(formData: FormData): Payload | { error: string } {
 
   return {
     work_name,
-    part_name: pickString(formData, "part_name"),
     default_quantity: pickNumber(formData, "default_quantity", 1),
     default_unit_price: pickNumber(formData, "default_unit_price", 0),
-    default_labor_cost: pickNumber(formData, "default_labor_cost", 0),
-    default_parts_cost: pickNumber(formData, "default_parts_cost", 0),
     labor_cost_price: pickNumber(formData, "labor_cost_price", 0),
-    parts_cost_price: pickNumber(formData, "parts_cost_price", 0),
     memo: pickString(formData, "memo"),
     tax_category,
     item_category_id,
-    linked_part_id: pickString(formData, "linked_part_id"),
     markup_rate: pickNullableNumber(formData, "markup_rate"),
+  };
+}
+
+// 段1で退役した旧カラムを後方互換のため埋める。
+//   default_labor_cost = default_unit_price (売値と同値)
+//   default_parts_cost = 0
+//   parts_cost_price   = 0
+//   linked_part_id     = null
+//   part_name          = null
+// なぜ default_labor_cost に売値を入れるか:
+//   万一段1コードを巻き戻して旧コードに戻ったとき、メニューが「工賃のみのメニュー」として
+//   既存ロジックで自然に表示・展開される (prod の既存2件と同じ姿)。データ復元の保険。
+function toLegacyCompat(p: Payload) {
+  return {
+    part_name: null,
+    default_labor_cost: p.default_unit_price,
+    default_parts_cost: 0,
+    parts_cost_price: 0,
+    linked_part_id: null,
   };
 }
 
@@ -273,17 +283,7 @@ export async function createWorkMenu(
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
-  // linked_part_id が指定されていれば検証してマスター値を反映（スナップショット）。
-  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
-  if ("error" in partRes) return partRes;
-  if (partRes.part) {
-    result.part_name = partRes.part.name;
-    result.default_parts_cost = partRes.part.sale_price ?? 0;
-    result.parts_cost_price = partRes.part.cost_price;
-    result.linked_part_id = partRes.part.id;
-  } else {
-    result.linked_part_id = null;
-  }
+  // 段1: 部品リンク (linked_part_id) は退役。フォームから送られない。
 
   // display_order は既存最大値 + 1（同 user_id 内）
   const { data: maxRow } = await supabase
@@ -296,11 +296,12 @@ export async function createWorkMenu(
   const nextOrder =
     typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
 
-  // 1) work_menu_items を挿入し id を取得
+  // 1) work_menu_items を挿入し id を取得 (旧カラムも後方互換値で埋める)
   const { data: inserted, error } = await supabase
     .from("work_menu_items")
     .insert({
       ...result,
+      ...toLegacyCompat(result),
       category: legacy.category,
       tax_free: legacy.tax_free,
       display_order: nextOrder,
@@ -346,22 +347,14 @@ export async function updateWorkMenu(
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
-  // 編集時もマスター選択なら最新値で上書き、手入力なら linked_part_id を null に戻す。
-  const partRes = await resolveLinkedPart(supabase, user.id, result.linked_part_id);
-  if ("error" in partRes) return partRes;
-  if (partRes.part) {
-    result.part_name = partRes.part.name;
-    result.default_parts_cost = partRes.part.sale_price ?? 0;
-    result.parts_cost_price = partRes.part.cost_price;
-    result.linked_part_id = partRes.part.id;
-  } else {
-    result.linked_part_id = null;
-  }
+  // 段1: 部品リンクは退役。旧カラムも後方互換値で埋め直す (既存メニューが両方ありでも
+  // 更新後は単機能化形式に揃う)。
 
   const { error } = await supabase
     .from("work_menu_items")
     .update({
       ...result,
+      ...toLegacyCompat(result),
       category: legacy.category,
       tax_free: legacy.tax_free,
     })

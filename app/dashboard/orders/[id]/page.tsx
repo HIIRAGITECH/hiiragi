@@ -335,6 +335,7 @@ export default async function OrderDetailPage(
                 allParts={allParts}
                 allVariants={allVariants}
                 vehicle={vehicle}
+                customer={customer}
                 reservedAt={order.reserved_at}
                 consumedAt={order.consumed_at}
                 indirectByMenu={indirectByMenu}

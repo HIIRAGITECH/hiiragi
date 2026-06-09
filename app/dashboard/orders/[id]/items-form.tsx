@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
 import type {
+  Customer,
   IndirectMaterialEntry,
   OrderItem,
   PartsInventory,
@@ -48,6 +49,10 @@ type Props = {
   allVariants?: PartsInventoryVariant[];
   // 受注の車両（Step 3-2b）。null のときは⭐機能は無効化（通常ピッカーとして動く）。
   vehicle?: Vehicle | null;
+  // 受注の顧客（業販対応 第二歩-2a）。customer.customer_type === 'business' のとき、
+  // 部品(variant)と作業メニューの markup_rate を適用して業販価格で明細に入れる。
+  // null や 'personal' のときは従来どおり（掛け率を一切かけない）。
+  customer?: Customer | null;
   // 業務カテゴリ（アクティブのみ、display_order 昇順）
   allCategories: WorkItemCategory[];
   // 受注の在庫状態（Step 2）。確保済み(reserved_at)/消費済み(consumed_at)のとき、明細編集に対して
@@ -71,35 +76,56 @@ function legacyCategoryNameFromOldFields(item: OrderItem): string {
   return "整備";
 }
 
-// マスターのデフォルト値から ItemRow を作る
+// マスターのデフォルト値から ItemRow を作る。
+//
+// メニュー単機能化 段1 (2026-06-10):
+//   メニューは「1金額の項目」になった。売値は default_unit_price 一本。
+//   旧 default_labor_cost / default_parts_cost はフォーム上は退役したが、DB側は段1ではまだ
+//   列が残っているため、後方互換のため売値の取り出しは下記の優先順で行う:
+//     1) default_unit_price > 0 ならそれを採用 (新仕様で保存されたメニュー)
+//     2) それが 0 のときは default_labor_cost + default_parts_cost を合算 (旧データ救済)
+//   業販対応 (段1で意味変更): isBusiness && m.markup_rate があれば 売値 × markup_rate を採用。
+//   明細フォーム側は段1では既存の労務/部品代スロットを保持しているため、メニュー由来の売値は
+//   「labor_cost」スロットに入れる (旧「工賃」相当の見た目を維持)。段2で列統合する際に
+//   「金額」スロットへ正式に移行する予定。
 function rowFromMenu(
   m: WorkMenuItem,
   indirectByMenu: Record<string, IndirectMaterialEntry[]>,
+  isBusiness: boolean,
 ): ItemRow {
-  const labor = m.default_labor_cost > 0 ? String(m.default_labor_cost) : "";
-  const parts = m.default_parts_cost > 0 ? String(m.default_parts_cost) : "";
-  // 原価は 0 でも明細上で見えるようにする（空文字ではなく "0" を初期値に）。
-  const laborCp = m.labor_cost_price ?? 0;
-  const partsCp = m.parts_cost_price ?? 0;
+  const baseAmount =
+    m.default_unit_price > 0
+      ? m.default_unit_price
+      : m.default_labor_cost + m.default_parts_cost;
+  const rate = m.markup_rate;
+  const amountNum =
+    isBusiness && rate != null && Number.isFinite(rate)
+      ? Math.round(baseAmount * rate)
+      : baseAmount;
+  const amountStr = amountNum > 0 ? String(amountNum) : "";
+
+  // 原価には掛け率をかけない (粗利計算は素の原価で行う)。
+  // メニューの原価は labor_cost_price に統一済み (段1)。
+  const costPrice = m.labor_cost_price ?? 0;
   return {
     name: m.work_name,
+    // 段1: メニューは部品リンク (linked_part_id) を持たない設計に変更。
+    // 既存データで part_name が入っているメニューは残存表示する (新規からは空)。
     part_name: m.part_name ?? "",
     note: "",
     quantity: String(m.default_quantity ?? 1),
-    labor_cost: labor,
-    parts_cost: parts,
-    unit_price:
-      labor !== "" || parts !== ""
-        ? String((Number(labor) || 0) + (Number(parts) || 0))
-        : String(m.default_unit_price ?? 0),
-    labor_cost_price: laborCp > 0 ? String(laborCp) : "",
-    parts_cost_price: partsCp > 0 ? String(partsCp) : "",
+    // 売値は「labor_cost」スロットに入れる (段2の列統合まで暫定)。部品代スロットは空。
+    labor_cost: amountStr,
+    parts_cost: "",
+    // unit_price は既存の自動計算ロジック (labor + parts) に乗る。
+    unit_price: amountStr !== "" ? amountStr : String(m.default_unit_price ?? 0),
+    labor_cost_price: costPrice > 0 ? String(costPrice) : "",
+    parts_cost_price: "",
     source_menu_id: m.id,
-    // メニューが部品マスターにリンクされていれば、明細にも引き継ぐ。
-    // Step 4 で受注確定時に当該部品の在庫を減らす特定子になる。
+    // 段1: 部品リンクは退役。新規メニューは linked_part_id を持たないが、
+    // 既存データに残っている場合は明細にもそのまま引き継ぐ (在庫連動の互換のため)。
     linked_part_id: m.linked_part_id ?? "",
-    // 間接材料はメニュー登録時の cost_price を含めてスナップショット（Step 5）。
-    // 以後マスターが変わってもこの明細では固定値で在庫減算 / 粗利計算する。
+    // 間接材料は段1でも維持 (在庫の確保/消費・粗利計算で使用)。
     indirect_materials: indirectByMenu[m.id] ?? [],
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
@@ -114,15 +140,26 @@ function rowFromMenu(
 // Step 3-2b: matchedVariant が渡され、その list_price が数値であれば、parts_cost を
 // その車種別定価で上書きする（part_name は部品名のみで、品番は明細に出さない）。
 // matchedVariant=null or list_price=null のときは従来どおり sale_price を使う。
+//
+// 業販対応 第二歩-2a: isBusiness=true かつ matchedVariant.markup_rate が数値のとき、
+// parts_cost を「list_price × markup_rate」（四捨五入）で入れる＝業販価格。
+// 個人(personal)や rate が無い variant のときは従来どおり定価をそのまま入れる。
+// 原価(parts_cost_price)には掛け率をかけない（素の原価で粗利計算する）。
 function rowFromPart(
   p: PartsInventory,
   categoryId: string,
   matchedVariant: PartsInventoryVariant | null,
+  isBusiness: boolean,
 ): ItemRow {
-  const sale =
+  const listPrice =
     matchedVariant?.list_price != null
       ? matchedVariant.list_price
       : (p.sale_price ?? 0);
+  const rate = matchedVariant?.markup_rate;
+  const partsCostNum =
+    isBusiness && rate != null && Number.isFinite(rate)
+      ? Math.round(listPrice * rate)
+      : listPrice;
   const cost = p.cost_price ?? 0;
   return {
     name: "",
@@ -131,10 +168,10 @@ function rowFromPart(
     quantity: "1",
     labor_cost: "",
     // 売価は 0 でも明示的に入れて「自動計算（内訳あり）」モードにする。
-    parts_cost: String(sale),
+    parts_cost: String(partsCostNum),
     parts_cost_price: cost > 0 ? String(cost) : "",
     labor_cost_price: "",
-    unit_price: String(sale),
+    unit_price: String(partsCostNum),
     source_menu_id: "",
     linked_part_id: p.id,
     indirect_materials: [],
@@ -339,10 +376,14 @@ export default function ItemsForm({
   allParts = [],
   allVariants = [],
   vehicle = null,
+  customer = null,
   reservedAt = null,
   consumedAt = null,
   indirectByMenu = {},
 }: Props) {
+  // 業販対応 第二歩-2a: 顧客が法人のとき、マスターの markup_rate を適用して
+  // 業販価格で明細に入れる。null/personal のときは従来どおり（掛けない）。
+  const isBusiness = customer?.customer_type === "business";
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
     undefined,
@@ -441,7 +482,7 @@ export default function ItemsForm({
     // メニューに item_category_id が無い極稀ケースは「整備」相当に振る。
     const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
     const rows = menus.map((m) => {
-      const row = rowFromMenu(m, indirectByMenu);
+      const row = rowFromMenu(m, indirectByMenu, isBusiness);
       if (!row.item_category_id) row.item_category_id = fallbackId;
       return row;
     });
@@ -452,7 +493,7 @@ export default function ItemsForm({
   function handleSetPickerConfirm(set: SetWithItems) {
     const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
     const rows = set.items.map((x) => {
-      const row = rowFromMenu(x.menu, indirectByMenu);
+      const row = rowFromMenu(x.menu, indirectByMenu, isBusiness);
       if (!row.item_category_id) row.item_category_id = fallbackId;
       return row;
     });
@@ -475,7 +516,7 @@ export default function ItemsForm({
       allCategories[0]?.id ??
       "";
     const rows = parts.map((p) =>
-      rowFromPart(p, fallbackId, matchedByPart.get(p.id) ?? null),
+      rowFromPart(p, fallbackId, matchedByPart.get(p.id) ?? null, isBusiness),
     );
     addRowsByCategory(rows);
     setPartPickerOpen(false);
@@ -930,6 +971,7 @@ export default function ItemsForm({
           allParts={allParts}
           allVariants={allVariants}
           vehicle={vehicle}
+          isBusiness={isBusiness}
           onConfirm={handlePartPickerConfirm}
           onClose={() => setPartPickerOpen(false)}
         />
@@ -1527,12 +1569,15 @@ function PartPickerModal({
   allParts,
   allVariants,
   vehicle,
+  isBusiness,
   onConfirm,
   onClose,
 }: {
   allParts: PartsInventory[];
   allVariants: PartsInventoryVariant[];
   vehicle: Vehicle | null;
+  // 業販対応 第二歩-2a: 法人時のみ variant の markup_rate を反映した「業販 ¥」を表示する。
+  isBusiness: boolean;
   onConfirm: (
     parts: PartsInventory[],
     matchedByPart: Map<string, PartsInventoryVariant>,
@@ -1636,6 +1681,17 @@ function PartPickerModal({
                 const matched = matchedVariantByPart.get(p.id) ?? null;
                 const hasVariantPrice =
                   matched != null && matched.list_price != null;
+                // 業販対応 第二歩-2a: 法人時かつ variant に markup_rate があれば、
+                // 「業販 ¥{round(list_price×markup_rate)}」を主表示、その下に「定価 ¥」を小さく表示。
+                const matchedRate = matched?.markup_rate;
+                const showBulkPrice =
+                  isBusiness &&
+                  hasVariantPrice &&
+                  matchedRate != null &&
+                  Number.isFinite(matchedRate);
+                const bulkPrice = showBulkPrice
+                  ? Math.round(matched!.list_price! * matchedRate!)
+                  : null;
                 return (
                   <li key={p.id} className="px-4 py-2">
                     <label className="flex cursor-pointer items-start gap-3">
@@ -1669,7 +1725,16 @@ function PartPickerModal({
                         </div>
                       </div>
                       <div className="text-right text-sm text-zinc-700 dark:text-zinc-300">
-                        {hasVariantPrice ? (
+                        {showBulkPrice ? (
+                          <>
+                            <div className="font-medium text-zinc-900 dark:text-zinc-50">
+                              業販 {formatYen(bulkPrice!)}
+                            </div>
+                            <div className="text-xs text-zinc-400 dark:text-zinc-500">
+                              定価 {formatYen(matched!.list_price!)}
+                            </div>
+                          </>
+                        ) : hasVariantPrice ? (
                           <div className="font-medium text-zinc-900 dark:text-zinc-50">
                             車種別 {formatYen(matched!.list_price!)}
                           </div>

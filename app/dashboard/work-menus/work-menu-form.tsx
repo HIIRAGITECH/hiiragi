@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useActionState, useMemo, useState } from "react";
-import { formatYen } from "@/lib/format";
 import { moneyDefault } from "@/lib/forms/money-default";
 import type {
   PartsInventory,
@@ -19,11 +18,9 @@ type Props = {
   // initial.item_category_id が deleted_at 等で含まれない場合に備えて、
   // 親ページ側で initial のカテゴリも合流させて渡してもよい。
   allCategories: WorkItemCategory[];
-  // 部品マスター（deleted_at IS NULL のアクティブ行のみ、display_order 順）。
-  // initial.linked_part_id が非アクティブを指すケースもあり、その時は親で合流させて渡す。
+  // 部品マスター（間接材料セレクト用。deleted_at IS NULL のアクティブ行のみ、display_order 順）。
   allParts: PartsInventory[];
-  // 初期の間接材料リスト（編集時のみ。新規時は []）。
-  // part_id は parts_inventory に存在する想定。
+  // 初期の間接材料リスト（編集時のみ。新規時は []）。part_id は parts_inventory に存在する想定。
   initialIndirectMaterials?: { part_id: string; quantity: number }[];
   submitLabel: string;
   cancelHref: string;
@@ -36,8 +33,6 @@ type IndirectRow = {
 };
 
 const inputClass = "wos-input";
-const readonlyClass =
-  "w-full border border-[var(--color-line)] bg-[var(--color-cream)] px-3 py-2 text-sm text-[var(--color-ink-soft)]";
 const labelClass = "wos-label";
 
 // カテゴリ名から推奨される税区分を返す。
@@ -47,8 +42,15 @@ function defaultTaxCategoryFor(name: string | undefined): TaxCategory {
   return name === "車検法定費用" ? "shaken_non_tax" : "taxable";
 }
 
-type PartsMode = "master" | "manual";
-
+// メニュー単機能化 段1 (2026-06-10):
+//   「1メニュー＝1金額の項目」に簡略化したフォーム。
+//   - 売値1欄 (default_unit_price)
+//   - 原価1欄 (labor_cost_price を再利用)
+//   - 業販掛け率1欄 + 業販価格1欄 (双方向連動、保存は markup_rate（小数）のみ)
+//   - 数量1欄 (default_quantity)
+//   旧「工賃 / 部品代の二重構造」「部品リンク (linked_part_id) のマスター/手入力切替」は退役。
+//   後方互換のため、保存側で default_labor_cost = default_unit_price、default_parts_cost = 0、
+//   parts_cost_price = 0、linked_part_id = null をセットする (actions.ts 側で実施)。
 export default function WorkMenuForm({
   action,
   initial,
@@ -80,125 +82,97 @@ export default function WorkMenuForm({
 
   function handleCategoryChange(id: string) {
     setCategoryId(id);
-    // カテゴリ変更時、税区分を推奨値で上書き（ユーザーが直前に手動で変えていた場合は
-    // 上書きされるが、UX として「カテゴリ＝税区分の組」を更新する挙動の方が直感的）。
     const next = allCategories.find((c) => c.id === id) ?? null;
     setTaxCategory(defaultTaxCategoryFor(next?.name));
   }
 
-  // 部品モード: 編集時 initial.linked_part_id があれば 'master'、それ以外は 'manual'（新規も含む）。
-  const [partsMode, setPartsMode] = useState<PartsMode>(
-    initial?.linked_part_id ? "master" : "manual",
+  // 売値の初期値: 既存メニューでは default_unit_price > 0 ならそれを採用。
+  // それが 0 のときは (旧二重構造の) default_labor_cost+default_parts_cost を合算して救済する
+  // → これで「工賃のみメニュー」「両方ありメニュー」「単価のみメニュー」のいずれを開いても
+  //    売値1欄に妥当な値が入る。新規は空 (placeholder="—")。
+  const initialAmount = (() => {
+    const u = initial?.default_unit_price ?? 0;
+    if (u > 0) return u;
+    const fromLegacy =
+      (initial?.default_labor_cost ?? 0) + (initial?.default_parts_cost ?? 0);
+    return fromLegacy > 0 ? fromLegacy : null;
+  })();
+
+  // 原価の初期値: labor_cost_price をそのままメニューの原価として再利用する。
+  // 旧 parts_cost_price は 0 で埋まっている前提のため合算は行わない (今回は単純化)。
+  const [amount, setAmount] = useState<string>(moneyDefault(initialAmount));
+  const [costPrice, setCostPrice] = useState<string>(
+    moneyDefault(initial?.labor_cost_price),
   );
 
-  // マスターから選んだ部品 id（master モード時のみ意味あり）。
-  const [linkedPartId, setLinkedPartId] = useState<string>(
-    initial?.linked_part_id ?? "",
-  );
-
-  // 手入力モード時の部品名・部品代・部品代原価。
-  // master モードに切り替えても入力中の値は捨てない（戻したときに復元できる）。
-  const [manualPartName, setManualPartName] = useState<string>(
-    initial?.part_name ?? "",
-  );
-  // 0 / 未入力は空表示（placeholder="—"）。正の値のみ初期表示する。
-  const [manualPartsCost, setManualPartsCost] = useState<string>(
-    moneyDefault(initial?.default_parts_cost),
-  );
-  const [manualPartsCostPrice, setManualPartsCostPrice] = useState<string>(
-    moneyDefault(initial?.parts_cost_price),
-  );
-
-  // 業販対応 第二歩-1 (2026-06-09): 工賃側の業販掛け率 / 業販工賃 を双方向に連動させる。
-  //   工賃 (default_labor_cost) も同じ state 群に取り込んで controlled 化し、変更時に追従させる。
-  //   保存されるのは markup_rate（小数）と default_labor_cost のみ。業販工賃は表示計算のみ。
-  const [laborCost, setLaborCost] = useState<string>(
-    moneyDefault(initial?.default_labor_cost),
-  );
-  const initialLaborMarkupPct =
+  // 業販掛け率 / 業販価格の双方向連動 (PriceMarkupGroup と同じパターン)。
+  // 保存されるのは markup_rate (小数)。業販価格は表示計算のみ。
+  // 段1で markup_rate の意味は「メニュー売値全体の掛け率」に統一 (第二歩-1の工賃用から拡張)。
+  const initialMarkupPct =
     initial?.markup_rate != null && Number.isFinite(initial.markup_rate)
       ? String(Math.round(initial.markup_rate * 1000) / 10)
       : "";
-  const initialBulkLabor =
-    initial?.default_labor_cost != null &&
+  const initialBulkPrice =
+    initialAmount != null &&
     initial?.markup_rate != null &&
-    Number.isFinite(initial.default_labor_cost * initial.markup_rate)
-      ? String(Math.round(initial.default_labor_cost * initial.markup_rate))
+    Number.isFinite(initialAmount * initial.markup_rate)
+      ? String(Math.round(initialAmount * initial.markup_rate))
       : "";
-  const [laborMarkupPct, setLaborMarkupPct] =
-    useState<string>(initialLaborMarkupPct);
-  const [bulkLabor, setBulkLabor] = useState<string>(initialBulkLabor);
+  const [markupPct, setMarkupPct] = useState<string>(initialMarkupPct);
+  const [bulkPrice, setBulkPrice] = useState<string>(initialBulkPrice);
 
-  function recalcBulkLaborFromRate(lc: string, pct: string): string {
-    const lcN = Number(lc);
-    const pctN = Number(pct);
-    if (lc.trim() === "" || !Number.isFinite(lcN)) return "";
-    if (pct.trim() === "" || !Number.isFinite(pctN)) return "";
-    const b = lcN * (pctN / 100);
+  function recalcBulkFromRate(amt: string, pct: string): string {
+    const a = Number(amt);
+    const p = Number(pct);
+    if (amt.trim() === "" || !Number.isFinite(a)) return "";
+    if (pct.trim() === "" || !Number.isFinite(p)) return "";
+    const b = a * (p / 100);
     return Number.isFinite(b) ? String(Math.round(b)) : "";
   }
-  function recalcRateFromBulkLabor(lc: string, bp: string): string {
-    const lcN = Number(lc);
-    const bpN = Number(bp);
-    if (!Number.isFinite(lcN) || lcN <= 0) return "";
-    if (bp.trim() === "" || !Number.isFinite(bpN)) return "";
-    const pct = (bpN / lcN) * 100;
+  function recalcRateFromBulk(amt: string, bp: string): string {
+    const a = Number(amt);
+    const b = Number(bp);
+    if (!Number.isFinite(a) || a <= 0) return "";
+    if (bp.trim() === "" || !Number.isFinite(b)) return "";
+    const pct = (b / a) * 100;
     return Number.isFinite(pct) ? String(Math.round(pct * 10) / 10) : "";
   }
 
-  function onLaborCostChange(v: string) {
-    setLaborCost(v);
-    if (laborMarkupPct !== "") {
-      setBulkLabor(recalcBulkLaborFromRate(v, laborMarkupPct));
-    } else if (bulkLabor !== "") {
-      setLaborMarkupPct(recalcRateFromBulkLabor(v, bulkLabor));
+  function onAmountChange(v: string) {
+    setAmount(v);
+    if (markupPct !== "") {
+      setBulkPrice(recalcBulkFromRate(v, markupPct));
+    } else if (bulkPrice !== "") {
+      setMarkupPct(recalcRateFromBulk(v, bulkPrice));
     }
   }
-  function onLaborMarkupPctChange(v: string) {
-    setLaborMarkupPct(v);
-    setBulkLabor(recalcBulkLaborFromRate(laborCost, v));
+  function onMarkupPctChange(v: string) {
+    setMarkupPct(v);
+    setBulkPrice(recalcBulkFromRate(amount, v));
   }
-  function onBulkLaborChange(v: string) {
-    setBulkLabor(v);
-    setLaborMarkupPct(recalcRateFromBulkLabor(laborCost, v));
+  function onBulkPriceChange(v: string) {
+    setBulkPrice(v);
+    setMarkupPct(recalcRateFromBulk(amount, v));
   }
 
   // hidden で送る markup_rate は小数。空 → サーバー pickNullableNumber で null。
-  const laborMarkupHiddenValue = (() => {
-    if (laborMarkupPct.trim() === "") return "";
-    const n = Number(laborMarkupPct);
+  const markupRateHiddenValue = (() => {
+    if (markupPct.trim() === "") return "";
+    const n = Number(markupPct);
     if (!Number.isFinite(n)) return "";
     return String(n / 100);
   })();
-  const laborEmpty = laborCost.trim() === "" || !(Number(laborCost) > 0);
+  const amountEmpty = amount.trim() === "" || !(Number(amount) > 0);
 
-  const selectedPart = useMemo(
-    () => allParts.find((p) => p.id === linkedPartId) ?? null,
-    [allParts, linkedPartId],
-  );
-
-  // master モード用の表示値（読み取り専用）。選択前は空表示。
-  // sale_price が null の部品（間接材料）はリンク不可。UI 側で選択肢から除外する。
-  const masterPartName = selectedPart?.name ?? "";
-  const masterPartsCost = selectedPart?.sale_price ?? 0;
-  const masterPartsCostPrice = selectedPart?.cost_price ?? 0;
-
-  // master モードで「明細に出す」=false の部品が選ばれた場合の警告（間接材料は明細に乗らない）。
-  // Step 3 では選択肢から除外する方針。ここではガード表示のみ。
-  const selectedPartIsIndirect =
-    selectedPart !== null && selectedPart.show_in_detail === false;
-
-  // 間接材料: メニューの標準使用量。送信時は JSON 文字列にして 1 個の hidden input にまとめる。
+  // ============ 間接材料 (Step 5 から継続・在庫の確保/消費に必須) ============
   const [indirectRows, setIndirectRows] = useState<IndirectRow[]>(() =>
     initialIndirectMaterials.map((m) => ({
       part_id: m.part_id,
       quantity: String(m.quantity),
     })),
   );
-  // 追加用ドロップダウンの選択値。
   const [addPartId, setAddPartId] = useState<string>("");
 
-  // 既に追加済みの part_id は二重登録を避けて選択肢から除外する。
   const selectablePartsForIndirect = useMemo(() => {
     const taken = new Set(indirectRows.map((r) => r.part_id));
     return allParts.filter((p) => !taken.has(p.id));
@@ -220,7 +194,6 @@ export default function WorkMenuForm({
     );
   }
 
-  // 送信用 JSON。サーバー側でパース・検証する。
   const indirectMaterialsJson = useMemo(
     () =>
       JSON.stringify(
@@ -234,7 +207,6 @@ export default function WorkMenuForm({
     [indirectRows],
   );
 
-  // 表示用: part_id → 部品行 のマップ。
   const partsById = useMemo(() => {
     const m = new Map<string, PartsInventory>();
     for (const p of allParts) m.set(p.id, p);
@@ -245,7 +217,7 @@ export default function WorkMenuForm({
     <form action={formAction} className="wos-card space-y-5">
       <div>
         <label htmlFor="work_name" className={labelClass}>
-          作業内容 <span className="text-red-600">*</span>
+          項目名 <span className="text-red-600">*</span>
         </label>
         <input
           id="work_name"
@@ -253,8 +225,11 @@ export default function WorkMenuForm({
           required
           defaultValue={initial?.work_name ?? ""}
           className={inputClass}
-          placeholder="例: エンジンオイル交換"
+          placeholder="例: エンジンオイル交換 / 技術料 / 廃油処理費"
         />
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          部品以外の費目を登録します（工賃・技術料・送料など）。部品は「部品在庫」から登録してください。
+        </p>
       </div>
 
       <div>
@@ -315,179 +290,6 @@ export default function WorkMenuForm({
         </p>
       </div>
 
-      {/* 部品セクション: マスターから選ぶ / 手入力 の切り替え。
-          いずれのモードでも最終的に name="part_name" / "default_parts_cost" /
-          "parts_cost_price" / "linked_part_id" を formData に乗せて送信する。 */}
-      <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            部品 <span className="text-xs text-zinc-500">（任意）</span>
-          </span>
-          <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="parts_mode"
-              checked={partsMode === "master"}
-              onChange={() => setPartsMode("master")}
-            />
-            <span>マスターから選ぶ</span>
-          </label>
-          <label className="flex cursor-pointer items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="parts_mode"
-              checked={partsMode === "manual"}
-              onChange={() => setPartsMode("manual")}
-            />
-            <span>手入力</span>
-          </label>
-        </div>
-
-        {partsMode === "master" ? (
-          <div className="space-y-3">
-            {allParts.length === 0 ? (
-              <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                部品マスターが未登録です。
-                <Link
-                  href="/dashboard/parts-inventory/new"
-                  className="ml-1 underline-offset-2 hover:underline"
-                >
-                  部品在庫から登録
-                </Link>
-                してください。
-              </p>
-            ) : (
-              <div>
-                <label htmlFor="linked_part_select" className={labelClass}>
-                  部品マスターを選択
-                </label>
-                <select
-                  id="linked_part_select"
-                  value={linkedPartId}
-                  onChange={(e) => setLinkedPartId(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">（未選択）</option>
-                  {allParts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.show_in_detail === false ? "（間接材料）" : ""}
-                      {p.sale_price != null
-                        ? ` — 売価 ${formatYen(p.sale_price)}`
-                        : " — 売価なし"}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  選択した部品の名前・売価・原価が自動で入ります。マスターを変更すると次回の編集時に反映されます。
-                </p>
-                {selectedPartIsIndirect && (
-                  <p className="mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                    この部品は「間接材料」設定です。明細にはこのメニュー経由で表示されますが、運用上は工賃メニューへの紐付けを推奨します。
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <span className={labelClass}>部品名</span>
-                <div className={readonlyClass}>{masterPartName || "—"}</div>
-              </div>
-              <div>
-                <span className={labelClass}>部品代（売価）</span>
-                <div className={`${readonlyClass} text-right`}>
-                  {selectedPart ? formatYen(masterPartsCost) : "—"}
-                </div>
-              </div>
-              <div className="sm:col-span-2">
-                <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
-                  部品代 原価 <span className="text-[10px]">（社内管理用）</span>
-                </span>
-                <div className={`${readonlyClass} text-right`}>
-                  {selectedPart ? formatYen(masterPartsCostPrice) : "—"}
-                </div>
-              </div>
-            </div>
-
-            {/* 送信用の hidden フィールド。
-                未選択 (linkedPartId === "") の場合は空送信される。
-                サーバー側でその場合は手入力扱い（linked_part_id=null, 部品名/値は空/0）にする。 */}
-            <input type="hidden" name="linked_part_id" value={linkedPartId} />
-            <input
-              type="hidden"
-              name="part_name"
-              value={selectedPart ? masterPartName : ""}
-            />
-            <input
-              type="hidden"
-              name="default_parts_cost"
-              value={selectedPart ? masterPartsCost : 0}
-            />
-            <input
-              type="hidden"
-              name="parts_cost_price"
-              value={selectedPart ? masterPartsCostPrice : 0}
-            />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="part_name" className={labelClass}>
-                部品名
-              </label>
-              <input
-                id="part_name"
-                name="part_name"
-                value={manualPartName}
-                onChange={(e) => setManualPartName(e.target.value)}
-                className={inputClass}
-                placeholder="例: モチュール 300V 5W-40 4L"
-              />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="default_parts_cost" className={labelClass}>
-                  部品代デフォルト
-                </label>
-                <input
-                  id="default_parts_cost"
-                  name="default_parts_cost"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={manualPartsCost}
-                  onChange={(e) => setManualPartsCost(e.target.value)}
-                  placeholder="—"
-                  className={`${inputClass} text-right`}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="parts_cost_price"
-                  className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
-                >
-                  部品代 原価 <span className="text-[10px]">（社内管理用）</span>
-                </label>
-                <input
-                  id="parts_cost_price"
-                  name="parts_cost_price"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={manualPartsCostPrice}
-                  onChange={(e) => setManualPartsCostPrice(e.target.value)}
-                  placeholder="—"
-                  className={`${inputClass} text-right`}
-                />
-              </div>
-            </div>
-            {/* 手入力モードでは linked_part_id を空にして送信 */}
-            <input type="hidden" name="linked_part_id" value="" />
-          </div>
-        )}
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="default_quantity" className={labelClass}>
@@ -506,92 +308,80 @@ export default function WorkMenuForm({
         </div>
         <div>
           <label htmlFor="default_unit_price" className={labelClass}>
-            単価デフォルト
+            金額（売値）
           </label>
           <input
             id="default_unit_price"
             name="default_unit_price"
             type="number"
+            inputMode="numeric"
             min={0}
             step={1}
-            defaultValue={moneyDefault(initial?.default_unit_price)}
-            placeholder="—"
-            className={`${inputClass} text-right`}
-          />
-        </div>
-        <div>
-          <label htmlFor="default_labor_cost" className={labelClass}>
-            工賃デフォルト
-          </label>
-          <input
-            id="default_labor_cost"
-            name="default_labor_cost"
-            type="number"
-            min={0}
-            step={1}
-            value={laborCost}
-            onChange={(e) => onLaborCostChange(e.target.value)}
-            placeholder="—"
-            className={`${inputClass} text-right`}
-          />
-          {/* 業販対応: 工賃側の掛け率(%)と業販工賃を双方向連動で入力する */}
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <div>
-              <label className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
-                業販掛け率(%)
-              </label>
-              <input
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step={1}
-                value={laborMarkupPct}
-                onChange={(e) => onLaborMarkupPctChange(e.target.value)}
-                placeholder="例: 80"
-                className={`${inputClass} text-right`}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
-                業販工賃
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={laborEmpty ? "" : bulkLabor}
-                onChange={(e) => onBulkLaborChange(e.target.value)}
-                disabled={laborEmpty}
-                placeholder={laborEmpty ? "工賃未設定" : "例: 16000"}
-                className={`${inputClass} text-right ${
-                  laborEmpty ? "cursor-not-allowed opacity-60" : ""
-                }`}
-              />
-            </div>
-          </div>
-          <input type="hidden" name="markup_rate" value={laborMarkupHiddenValue} />
-          <label
-            htmlFor="labor_cost_price"
-            className="mt-2 mb-1 block text-xs text-zinc-500 dark:text-zinc-400"
-          >
-            工賃 原価 <span className="text-[10px]">（社内管理用）</span>
-          </label>
-          <input
-            id="labor_cost_price"
-            name="labor_cost_price"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={moneyDefault(initial?.labor_cost_price)}
+            value={amount}
+            onChange={(e) => onAmountChange(e.target.value)}
             placeholder="—"
             className={`${inputClass} text-right`}
           />
         </div>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>業販掛け率(%)</label>
+          <input
+            type="number"
+            inputMode="decimal"
+            min={0}
+            step={1}
+            value={markupPct}
+            onChange={(e) => onMarkupPctChange(e.target.value)}
+            placeholder="例: 80"
+            className={`${inputClass} text-right`}
+          />
+        </div>
+        <div>
+          <label className={labelClass}>業販価格</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={amountEmpty ? "" : bulkPrice}
+            onChange={(e) => onBulkPriceChange(e.target.value)}
+            disabled={amountEmpty}
+            placeholder={amountEmpty ? "金額未設定" : "例: 16000"}
+            className={`${inputClass} text-right ${
+              amountEmpty ? "cursor-not-allowed opacity-60" : ""
+            }`}
+          />
+        </div>
+      </div>
+      <input type="hidden" name="markup_rate" value={markupRateHiddenValue} />
       <p className="-mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-        原価は粗利計算用です。見積書・請求書には表示されません。
+        業販掛け率は、法人顧客で受注したとき「金額 × 掛け率」を業販価格として明細に入れます。
+        個人顧客には影響しません。
       </p>
+
+      <div>
+        <label htmlFor="labor_cost_price" className={labelClass}>
+          原価 <span className="text-xs text-zinc-500">（社内管理用）</span>
+        </label>
+        <input
+          id="labor_cost_price"
+          name="labor_cost_price"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          step={1}
+          value={costPrice}
+          onChange={(e) => setCostPrice(e.target.value)}
+          placeholder="—"
+          className={`${inputClass} text-right`}
+        />
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          原価は粗利計算用です。見積書・請求書には表示されません。
+        </p>
+      </div>
 
       {/* 標準間接材料セクション（Step 5）。明細に出さず、在庫減算と粗利計算にだけ使う。 */}
       <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
@@ -604,7 +394,7 @@ export default function WorkMenuForm({
           </span>
         </div>
         <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-          明細に出さず工賃に含む部品（Oリング・グリス等）です。受注確定で在庫が
+          明細に出さずに付随して使う部品（Oリング・グリス等）です。受注確定で在庫が
           <span className="px-0.5 font-mono">標準使用量 × 明細数量</span>
           減ります。見積書・請求書には表示されません。
         </p>
