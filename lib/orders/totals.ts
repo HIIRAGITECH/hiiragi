@@ -153,3 +153,53 @@ export function calculateProfit(items: OrderItem[]): ProfitSummary {
   const profitRatePercent = revenue > 0 ? (profit / revenue) * 100 : 0;
   return { revenue, cost, profit, profitRatePercent };
 }
+
+// 業販対応 段2-1 (2026-06-10): 法人受注で「参考定価の税込合計」を併記するための集計。
+//   各行 list_price × quantity を税区分別に合算し、業販合計と同じ流儀で税を計算する
+//   (割引は適用しない＝参考値なので素の定価合計)。
+//   list_price を持たない行 (過去明細・定価未設定) はスキップ。
+//   個人受注では呼び出し側で表示しない (hasAny も false なら何も出さなくてよい)。
+function rowListPriceSubtotal(item: OrderItem): number {
+  const lp = item.list_price ?? 0;
+  if (lp <= 0) return 0;
+  return Math.round((item.quantity ?? 0) * lp);
+}
+
+export type ListPriceSummary = {
+  hasAny: boolean;             // list_price が1行でも設定されているか
+  subtotal: number;            // 全行 list_price × quantity の合計 (税抜・割引前)
+  taxableAmount: number;       // 課税対象 (taxable系)
+  tax: number;                 // 消費税
+  total: number;               // 税込合計
+};
+
+export function calculateListPriceTotals(items: OrderItem[]): ListPriceSummary {
+  let normalSub = 0;
+  let shakenTaxableSub = 0;
+  let shakenTaxFreeSub = 0;
+  let hasAny = false;
+
+  for (const it of items) {
+    const sub = rowListPriceSubtotal(it);
+    if (sub <= 0) continue;
+    hasAny = true;
+    if (itemType(it) === "shaken") {
+      if (it.tax_free) shakenTaxFreeSub += sub;
+      else shakenTaxableSub += sub;
+    } else {
+      normalSub += sub;
+    }
+  }
+
+  const taxableAmount = normalSub + shakenTaxableSub;
+  const tax = Math.floor(taxableAmount * TAX_RATE);
+  const total = taxableAmount + tax + shakenTaxFreeSub;
+
+  return {
+    hasAny,
+    subtotal: normalSub + shakenTaxableSub + shakenTaxFreeSub,
+    taxableAmount,
+    tax,
+    total,
+  };
+}

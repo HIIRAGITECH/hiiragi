@@ -14,7 +14,12 @@ import type {
   WorkMenuItem,
   WorkMenuSet,
 } from "@/lib/types";
-import { calculateProfit, calculateTotals, rowSubtotal } from "@/lib/orders/totals";
+import {
+  calculateListPriceTotals,
+  calculateProfit,
+  calculateTotals,
+  rowSubtotal,
+} from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
 import { moneyDefault } from "@/lib/forms/money-default";
 import SearchInput from "@/lib/components/search-input";
@@ -114,7 +119,7 @@ function rowFromMenu(
     part_name: m.part_name ?? "",
     note: "",
     quantity: String(m.default_quantity ?? 1),
-    // 売値は「labor_cost」スロットに入れる (段2の列統合まで暫定)。部品代スロットは空。
+    // 売値は「labor_cost」スロットに入れる (段2-1で UI 上は「単価」1列に統合済み)。
     labor_cost: amountStr,
     parts_cost: "",
     // unit_price は既存の自動計算ロジック (labor + parts) に乗る。
@@ -129,6 +134,9 @@ function rowFromMenu(
     indirect_materials: indirectByMenu[m.id] ?? [],
     tax_category: m.tax_category ?? "taxable",
     item_category_id: m.item_category_id ?? "",
+    // 業販対応 段2-1: 参考定価は掛け率をかける前の素の売値 (baseAmount)。
+    // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
+    list_price: baseAmount > 0 ? String(baseAmount) : "",
   };
 }
 
@@ -177,6 +185,9 @@ function rowFromPart(
     indirect_materials: [],
     tax_category: "taxable",
     item_category_id: categoryId,
+    // 業販対応 段2-1: 参考定価は掛け率をかける前の素の定価 (listPrice)。
+    // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
+    list_price: listPrice > 0 ? String(listPrice) : "",
   };
 }
 
@@ -207,6 +218,8 @@ type ItemRow = {
   tax_category: TaxCategory;
   // 業務カテゴリ id。空文字 = 未設定（互換目的、通常は必ず設定される）。
   item_category_id: string;
+  // 業販対応 段2-1: 1個あたりの参考定価 (法人受注のみ表示)。空文字 = 未保存（過去明細）。
+  list_price: string;
   // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
   // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
   _noteExpanded?: boolean;
@@ -254,6 +267,11 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
       : [],
     tax_category: taxCategory,
     item_category_id: itemCategoryId,
+    // 業販対応 段2-1: 既存 OrderItem に list_price があれば引き継ぐ (過去明細は未定義)。
+    list_price:
+      i.list_price !== undefined && i.list_price > 0
+        ? String(i.list_price)
+        : "",
   };
 }
 
@@ -298,6 +316,11 @@ function toItem(r: ItemRow, categoryName: string | null): OrderItem {
   if (r.parts_cost_price !== "") {
     base.parts_cost_price = Number(r.parts_cost_price) || 0;
   }
+  // 業販対応 段2-1: 参考定価は空でなければ数値化。保存しておけば後で法人化したとき使える。
+  if (r.list_price !== "") {
+    const n = Number(r.list_price);
+    if (Number.isFinite(n) && n > 0) base.list_price = Math.round(n);
+  }
   // 新フィールド
   base.tax_category = r.tax_category;
   if (r.item_category_id) base.item_category_id = r.item_category_id;
@@ -329,6 +352,7 @@ const emptyRow = (
   indirect_materials: [],
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
+  list_price: "",
 });
 
 // 既存 items を category id ベースの Record に振り分ける。
@@ -603,6 +627,10 @@ export default function ItemsForm({
     Number(deposit) || 0,
   );
   const profit = calculateProfit(allItems);
+  // 業販対応 段2-1: 法人受注で「参考定価の税込合計」を併記する。
+  //   個人受注では使わない（表示しない）。list_price 未保存の過去明細は hasAny=false に寄与せず、
+  //   過去受注を法人モードで開いても 0 表示にはならない（行が無ければ何も出さない仕様）。
+  const listPriceTotals = calculateListPriceTotals(allItems);
 
   // 保存対象: 作業内容があるか、または部品名 / 部品リンクを持つ行（部品在庫から追加した行）。
   // 完全に空の行のみ除外する（サーバー側 parseItems の緩和条件と揃える）。
@@ -703,6 +731,7 @@ export default function ItemsForm({
               defaultTaxCategory={sectionTaxCategory}
               onRegisterRow={handleRegisterRow}
               registeringRow={registeringRow}
+              isBusiness={isBusiness}
             />
           </section>
         );
@@ -811,6 +840,14 @@ export default function ItemsForm({
           />
           <Row label="消費税(10%)" value={formatYen(totals.tax)} />
           <Row label="合計" value={formatYen(totals.total)} emphasize />
+          {/* 業販対応 段2-1: 法人時のみ、参考定価の税込合計を併記。
+              list_price が1行も保存されていない（過去明細だけの受注など）ときは出さない。 */}
+          {isBusiness && listPriceTotals.hasAny && (
+            <Row
+              label="参考定価合計（税込）"
+              value={formatYen(listPriceTotals.total)}
+            />
+          )}
           {totals.deposit > 0 && (
             <>
               <Row label="預かり金" value={`− ${formatYen(totals.deposit)}`} />
@@ -988,6 +1025,7 @@ function ItemTableEditor({
   defaultTaxCategory,
   onRegisterRow,
   registeringRow,
+  isBusiness,
 }: {
   rows: ItemRow[];
   onChange: (rows: ItemRow[]) => void;
@@ -998,28 +1036,35 @@ function ItemTableEditor({
   defaultTaxCategory: TaxCategory;
   onRegisterRow: (categoryId: string, index: number) => Promise<void>;
   registeringRow: { categoryId: string; index: number } | null;
+  // 業販対応 段2-1: 法人時は「単価/業販/参考定価」3列、個人時は「単価」1列に切替。
+  isBusiness: boolean;
 }) {
-  // 工賃 / 部品代 が編集された場合、片方でも値があれば単価を自動計算で上書き。
-  // 両方クリアされたときは最後の計算値（または元の単価）を残して手動入力可能に戻る。
   function update(i: number, patch: Partial<ItemRow>) {
     onChange(
       rows.map((r, idx) => {
         if (idx !== i) return r;
-        const updated = { ...r, ...patch };
-        const touchedBreakdown =
-          "labor_cost" in patch || "parts_cost" in patch;
-        if (touchedBreakdown) {
-          const hasBD =
-            updated.labor_cost !== "" || updated.parts_cost !== "";
-          if (hasBD) {
-            const labor = Number(updated.labor_cost) || 0;
-            const parts = Number(updated.parts_cost) || 0;
-            updated.unit_price = String(labor + parts);
-          }
-        }
-        return updated;
+        return { ...r, ...patch };
       }),
     );
+  }
+  // 業販対応 段2-1: 「単価」を直接編集する経路。
+  //   labor_cost に新値を書き、parts_cost をクリアし、unit_price も新値に揃える。
+  //   こうすることで rowSubtotal = quantity × unit_price がそのまま正しく動く。
+  //   ItemRow の labor_cost / parts_cost フィールド名は過去 jsonb 互換のため残置している。
+  function updateUnitPrice(i: number, v: string) {
+    update(i, {
+      labor_cost: v,
+      parts_cost: "",
+      unit_price: v,
+    });
+  }
+  // 業販対応 段2-1: 「原価」を直接編集する経路。labor_cost_price に新値を書き、
+  //   parts_cost_price をクリア。表示時は labor + parts を合算するので過去データも自然に出る。
+  function updateCostPrice(i: number, v: string) {
+    update(i, {
+      labor_cost_price: v,
+      parts_cost_price: "",
+    });
   }
   function add() {
     onChange([...rows, emptyRow(categoryId, defaultTaxCategory)]);
@@ -1048,7 +1093,6 @@ function ItemTableEditor({
         </p>
       ) : (
         rows.map((r, i) => {
-          const auto = hasBreakdown(r);
           // 部品在庫から追加した行（部品リンクあり・作業内容空）。種別バッジ表示に使う。
           const isPartRow = r.linked_part_id !== "" && r.name.trim() === "";
           // 偶数行（i=1,3,5...）にゼブラ背景。
@@ -1119,42 +1163,21 @@ function ItemTableEditor({
                   />
                 </div>
 
-                {/* 列5 上: 単価（ラベル上 / 自動バッジ右上 / readonly when auto） */}
+                {/* 列5 上: 単価 (段2-1: 常時編集可能。1個あたりの売値=業販単価) */}
                 <div>
-                  <div className="mb-0.5 flex items-end justify-between gap-1">
-                    <label className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      単価
-                    </label>
-                    {auto && (
-                      <span
-                        aria-hidden
-                        className="rounded bg-zinc-200 px-1 text-[9px] font-medium leading-tight text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                      >
-                        自動
-                      </span>
-                    )}
-                  </div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    単価
+                  </label>
                   <input
                     type="number"
                     inputMode="numeric"
                     min={0}
                     step={1}
                     value={r.unit_price}
-                    onChange={(e) =>
-                      update(i, { unit_price: e.target.value })
-                    }
-                    readOnly={auto}
-                    title={
-                      auto
-                        ? "工賃と部品代から自動計算されます（両方を空にすると手動入力可能）"
-                        : undefined
-                    }
+                    onChange={(e) => updateUnitPrice(i, e.target.value)}
+                    placeholder="—"
                     aria-label="単価"
-                    className={`${cellInputClass} text-right ${
-                      auto
-                        ? "cursor-not-allowed bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400"
-                        : ""
-                    }`}
+                    className={`${cellInputClass} text-right`}
                   />
                 </div>
 
@@ -1180,96 +1203,73 @@ function ItemTableEditor({
                   </span>
                 </button>
 
-                {/* 列2 下: 工賃 + 工賃原価（縦並び） */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      工賃
-                    </span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.labor_cost}
-                      onChange={(e) =>
-                        update(i, { labor_cost: e.target.value })
-                      }
-                      placeholder="—"
-                      aria-label="工賃"
-                      className={`${cellInputClass} text-right`}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
-                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
-                    >
-                      原価
-                    </span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.labor_cost_price}
-                      onChange={(e) =>
-                        update(i, { labor_cost_price: e.target.value })
-                      }
-                      placeholder="—"
-                      aria-label="工賃原価（社内管理用）"
-                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
-                      className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
-                    />
-                  </div>
+                {/* 列2 下: 原価 (段2-1: 1欄に統合。labor_cost_price 単独で編集、過去データの
+                    parts_cost_price は読み取り時のみフォールバック表示) */}
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
+                    title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                  >
+                    原価
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1}
+                    value={
+                      r.labor_cost_price !== ""
+                        ? r.labor_cost_price
+                        : r.parts_cost_price
+                    }
+                    onChange={(e) => updateCostPrice(i, e.target.value)}
+                    placeholder="—"
+                    aria-label="原価（社内管理用）"
+                    title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                    className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
+                  />
                 </div>
 
-                {/* 列3 下: 部品代 + 部品代原価（縦並び） */}
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="w-9 shrink-0 text-[11px] text-zinc-500 dark:text-zinc-400">
-                      部品代
-                    </span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.parts_cost}
-                      onChange={(e) =>
-                        update(i, { parts_cost: e.target.value })
-                      }
-                      placeholder="—"
-                      aria-label="部品代"
-                      className={`${cellInputClass} text-right`}
-                    />
+                {/* 列3 下: 業販 (法人時のみ表示・readonly。行の業販合計＝小計と同じ値) */}
+                {isBusiness ? (
+                  <div>
+                    <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      業販
+                    </div>
+                    <div className="px-2 py-1.5 text-right text-sm text-zinc-700 dark:text-zinc-300">
+                      {formatYen(rowSubtotal(toItem(r, categoryName)))}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
-                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
-                    >
-                      原価
-                    </span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      step={1}
-                      value={r.parts_cost_price}
-                      onChange={(e) =>
-                        update(i, { parts_cost_price: e.target.value })
-                      }
-                      placeholder="—"
-                      aria-label="部品代原価（社内管理用）"
-                      title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
-                      className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <div aria-hidden />
+                )}
 
-                {/* 列4 下: 空（数量2段目のスペーサ） */}
-                <div aria-hidden />
+                {/* 列4 下: 参考定価 (法人時のみ表示・readonly。list_price × quantity)
+                    list_price 未保存（過去明細など）の行は「—」表示 */}
+                {isBusiness ? (
+                  <div>
+                    <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      参考定価
+                    </div>
+                    <div className="px-2 py-1.5 text-right text-sm text-zinc-500 dark:text-zinc-400">
+                      {(() => {
+                        const lp = Number(r.list_price);
+                        const qty = Number(r.quantity);
+                        if (
+                          !Number.isFinite(lp) ||
+                          lp <= 0 ||
+                          !Number.isFinite(qty) ||
+                          qty <= 0
+                        ) {
+                          return "—";
+                        }
+                        return formatYen(Math.round(qty * lp));
+                      })()}
+                    </div>
+                  </div>
+                ) : (
+                  <div aria-hidden />
+                )}
 
                 {/* 列5 下: 小計（ラベル上 / 値表示） */}
                 <div>

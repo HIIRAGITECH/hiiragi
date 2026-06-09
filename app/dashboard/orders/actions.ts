@@ -227,6 +227,13 @@ function parseItems(
         if (!Number.isFinite(n) || n < 0) return null;
         item.parts_cost_price = Math.round(n);
       }
+      // 業販対応 段2-1: 参考定価 (1個あたり)。法人受注の「参考定価」列で表示する。
+      // 過去明細は持っていないので未定義 = 未保存としてフォールバック扱いになる。
+      if (r?.list_price !== undefined && r?.list_price !== null) {
+        const n = Number(r.list_price);
+        if (!Number.isFinite(n) || n < 0) return null;
+        item.list_price = Math.round(n);
+      }
       if (typeof r?.part_name === "string") {
         const v = r.part_name.trim();
         item.part_name = v === "" ? null : v;
