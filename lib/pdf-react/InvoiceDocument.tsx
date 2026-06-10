@@ -111,19 +111,22 @@ const styles = StyleSheet.create({
   },
   continuationTableHeadInner: {
     flexDirection: "row",
-    // width:"100%" を明示しないと、position:absolute の Outer 内で flexDirection:"row" の Inner が
-    // 「子の合計幅」基準になり、子は % 指定で親幅を見るため Inner の実幅が 0 になり border が
-    // 描画されなかった。明示で Outer の計算済み幅いっぱいに広げる。
     width: "100%",
-    borderBottomWidth: 1.2,
-    // borderBottomStyle:"solid" を明示しないと Adobe Reader 等で線が描画されない事象がある
-    // (tableRow と同じ理由)。
-    borderBottomStyle: "solid",
-    borderBottomColor: COLORS.black,
+    // borderBottom 系は撤去。fixed + position:absolute(Outer) 配下では react-pdf の border 描画が
+    // 不安定で「文字は出るが線だけ消える」事象が再現した。代わりに線専用 View
+    // (continuationTableHeadBottomRule) を直下に置いて確実に矩形として描画する。
     paddingVertical: 3,
     fontSize: 8,
     fontWeight: "bold",
     backgroundColor: "#fff",
+  },
+  // 1ページ目 tableHeadRow の borderBottom (1.2pt / COLORS.black) と同じ見た目を再現する
+  // ための「線専用 View」。高さ・色・幅を全て明示した単なる矩形なので、描画順や折り返しの
+  // 影響を受けず確実に出る。
+  continuationTableHeadBottomRule: {
+    width: "100%",
+    height: 1.2,
+    backgroundColor: COLORS.black,
   },
 
   // ─── 1ページ目 ヘッダー領域 ───────────────────────────
@@ -587,30 +590,34 @@ export function InvoiceDocument({
 
         {/* 2ページ目以降の明細列見出し (繰り返しヘッダ)。
             1ページ目には描画しない（各 ItemsSection 内の tableHeadRow と二重表示を避ける）。
-            列構成・列幅は ItemsSection と完全に同じ (個人=4列 / 法人=5列)。 */}
+            列構成・列幅は ItemsSection と完全に同じ (個人=4列 / 法人=5列)。
+            線は borderBottom ではなく「線専用 View」で描画する (描画安定化のため・上記 styles のコメント参照)。 */}
         <View
           style={styles.continuationTableHeadOuter}
           fixed
           render={({ pageNumber }) =>
             pageNumber > 1 ? (
-              <View style={styles.continuationTableHeadInner}>
-                <Text style={isBusiness ? styles.colNameBiz : styles.colName}>
-                  品名
-                </Text>
-                <Text style={isBusiness ? styles.colQtyBiz : styles.colQty}>
-                  数量
-                </Text>
-                <Text style={isBusiness ? styles.colUnitBiz : styles.colUnit}>
-                  単価
-                </Text>
-                {isBusiness ? (
-                  <>
-                    <Text style={styles.colBulk}>業販</Text>
-                    <Text style={styles.colListPrice}>参考定価</Text>
-                  </>
-                ) : (
-                  <Text style={styles.colSubtotal}>小計</Text>
-                )}
+              <View>
+                <View style={styles.continuationTableHeadInner}>
+                  <Text style={isBusiness ? styles.colNameBiz : styles.colName}>
+                    品名
+                  </Text>
+                  <Text style={isBusiness ? styles.colQtyBiz : styles.colQty}>
+                    数量
+                  </Text>
+                  <Text style={isBusiness ? styles.colUnitBiz : styles.colUnit}>
+                    単価
+                  </Text>
+                  {isBusiness ? (
+                    <>
+                      <Text style={styles.colBulk}>業販</Text>
+                      <Text style={styles.colListPrice}>参考定価</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.colSubtotal}>小計</Text>
+                  )}
+                </View>
+                <View style={styles.continuationTableHeadBottomRule} />
               </View>
             ) : null
           }
