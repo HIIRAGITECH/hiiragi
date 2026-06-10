@@ -111,7 +111,14 @@ const styles = StyleSheet.create({
   },
   continuationTableHeadInner: {
     flexDirection: "row",
+    // width:"100%" を明示しないと、position:absolute の Outer 内で flexDirection:"row" の Inner が
+    // 「子の合計幅」基準になり、子は % 指定で親幅を見るため Inner の実幅が 0 になり border が
+    // 描画されなかった。明示で Outer の計算済み幅いっぱいに広げる。
+    width: "100%",
     borderBottomWidth: 1.2,
+    // borderBottomStyle:"solid" を明示しないと Adobe Reader 等で線が描画されない事象がある
+    // (tableRow と同じ理由)。
+    borderBottomStyle: "solid",
     borderBottomColor: COLORS.black,
     paddingVertical: 3,
     fontSize: 8,
