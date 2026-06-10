@@ -393,7 +393,10 @@ function ItemsSection({
             </>
           )}
         </colgroup>
-        <thead>
+        {/* table-header-group を明示することで、テーブルがページを跨いだとき
+            ブラウザが thead を 2ページ目以降の上部に自動で繰り返し描画する。
+            Chrome 等で挙動が不安定だったため明示している。 */}
+        <thead style={{ display: "table-header-group" }}>
           <tr className="border-b-[1.2px] border-black">
             <th className="px-2 py-1 text-left text-[10px]">品名</th>
             <th className="px-2 py-1 text-right text-[10px]">数量</th>

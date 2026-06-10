@@ -54,7 +54,9 @@ const COLORS = {
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 25 * 2.83465, // 25mm（continuation header 用に確保）
+    // 30mm: 上部に「継続ヘッダ (タイトル/ページ番号/顧客名)」と「2ページ目以降の列見出し」
+    // を両方収めるため、従来 25mm から拡張した。
+    paddingTop: 30 * 2.83465,
     paddingBottom: 15 * 2.83465,
     paddingLeft: 15 * 2.83465,
     paddingRight: 15 * 2.83465,
@@ -95,6 +97,27 @@ const styles = StyleSheet.create({
   },
   continuationCenter: { fontSize: 9, color: COLORS.gray },
   continuationRight: { fontSize: 9, color: COLORS.gray },
+
+  // 2ページ目以降の上部に繰り返し表示する「明細テーブルの列見出し」。
+  //   continuation header (タイトル/ページ番号バー) の下に置く。1ページ目には描画しない
+  //   (各 ItemsSection 内の tableHeadRow を二重表示しないため)。
+  //   位置 top:20mm は paddingTop:30mm の中で「継続ヘッダ (約 12mm) + 余白 + 列見出し」が
+  //   ちょうど収まるよう調整。
+  continuationTableHeadOuter: {
+    position: "absolute",
+    top: 20 * 2.83465,
+    left: 15 * 2.83465,
+    right: 15 * 2.83465,
+  },
+  continuationTableHeadInner: {
+    flexDirection: "row",
+    borderBottomWidth: 1.2,
+    borderBottomColor: COLORS.black,
+    paddingVertical: 3,
+    fontSize: 8,
+    fontWeight: "bold",
+    backgroundColor: "#fff",
+  },
 
   // ─── 1ページ目 ヘッダー領域 ───────────────────────────
   headerRow: {
@@ -550,6 +573,37 @@ export function InvoiceDocument({
                     `${pn} / ${totalPages}`
                   }
                 />
+              </View>
+            ) : null
+          }
+        />
+
+        {/* 2ページ目以降の明細列見出し (繰り返しヘッダ)。
+            1ページ目には描画しない（各 ItemsSection 内の tableHeadRow と二重表示を避ける）。
+            列構成・列幅は ItemsSection と完全に同じ (個人=4列 / 法人=5列)。 */}
+        <View
+          style={styles.continuationTableHeadOuter}
+          fixed
+          render={({ pageNumber }) =>
+            pageNumber > 1 ? (
+              <View style={styles.continuationTableHeadInner}>
+                <Text style={isBusiness ? styles.colNameBiz : styles.colName}>
+                  品名
+                </Text>
+                <Text style={isBusiness ? styles.colQtyBiz : styles.colQty}>
+                  数量
+                </Text>
+                <Text style={isBusiness ? styles.colUnitBiz : styles.colUnit}>
+                  単価
+                </Text>
+                {isBusiness ? (
+                  <>
+                    <Text style={styles.colBulk}>業販</Text>
+                    <Text style={styles.colListPrice}>参考定価</Text>
+                  </>
+                ) : (
+                  <Text style={styles.colSubtotal}>小計</Text>
+                )}
               </View>
             ) : null
           }
