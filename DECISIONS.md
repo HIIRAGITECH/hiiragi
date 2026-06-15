@@ -114,6 +114,39 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-06-15 ── Googleドライブ連携 段階4〜5-A（実装・dev動作確認済み・commit `92ec406` / `4d9dfaf`）
+
+段階1〜3の基盤の上に、受注ごとの写真フォルダ作成と連携体験の仕上げを実装。dev確認済み・prod未反映。
+
+- **受注子フォルダの自動作成（段階4・migration `20260615020000`）**: `orders` に `drive_folder_id text` を1本追加
+  （採番トリガ `assign_order_id`・既存データ・RLS/GRANTには触れず ADD COLUMN のみ）。
+  受注詳細の「📁 写真フォルダを作成」で、親「HIIRAGI受注写真」配下に子フォルダをワンクリック作成。
+  `lib/google/drive.ts` の `ensureOrderFolder(userId, orderId)` が担う（冪等）。
+- **子フォルダ命名**: `受注番号_顧客名様_車両名`（例 `26MB-0001_山田太郎様_CB400SF`）。
+  - 受注番号は完全な `order.id`（`26MB-0001` 形式。ヘッダ表示の `slice(0,8)` は使わない）。
+  - **顧客名に敬称「様」を一律付与**。顧客名がNULLなら様も付けない（"様"だけ残さない）。
+  - 車両名は maker+model。顧客/車両が未登録なら該当セグメントを省略して名前が破綻しないようにする。
+  - サニタイズ: `/ \ : * ? " < > |` を `_` に置換、連続空白・連続`_`・前後の余分記号を整理。
+- **共有設定（anyone:reader）**: 子フォルダを「リンクを知っている人は閲覧可」にする。
+  `ensureAnyoneReader` が **permissions.list → `type==='anyone'` 無ければ create** で冪等付与（重複createを回避）。
+  新規作成時と既存フォルダ返却時の両方で確保（様なしで作った古いフォルダも押下時に共有を自己修復）。
+  共有付与は best-effort（失敗してもフォルダ作成は壊さない）。`drive.file` スコープのまま実行可（追加スコープ不要）。
+  保存する `photo_folder_url` は webViewLink（閲覧用リンク。お客様に渡せば閲覧できる想定）。
+- **orders の書き込みは authenticated クライアント**（service_role ではなく）: この project は
+  業務テーブルに service_role DML を付けない流儀。orders に GRANT を増やさず、RLS owner ポリシー＋
+  `.eq("user_id")` 明示で安全に書く（`updateOrderItems` と同作法）。トークン側(`google_integrations`)のみ admin/service_role。
+- **受注詳細UIの出し分け（段階4）**: 未連携=ボタン無効＋設定誘導 / 連携済み・未作成=「作成」/ 作成済=「開く」。
+  既存の手貼りURL欄はフォールバックとして残置（自動作成と排他にしない）。fail-soft（`createOrderPhotoFolder`）。
+- **連携時に親フォルダ自動作成（段階5-A）**: callback の upsert 成功直後に `ensureRootFolder` を **best-effort** 実行。
+  「連携した瞬間に親フォルダもできる」自然な体験。親作成が失敗しても連携自体は success で返す
+  （トークンは保存済み。後で settings/受注の作成ボタンから自己修復）。冪等なので再連携で二重作成しない。
+- **settings の連携カード 状態別UI（段階5-A）**: 未連携=連携ボタン / 連携済み=「✅連携済み」＋連携先メール表示＋
+  親フォルダを開くリンク（`https://drive.google.com/drive/folders/{root_folder_id}`、root未作成のみ作成導線）＋
+  「連携を解除」ボタン。`disconnectGoogleIntegration` は自分の行を削除して未連携に戻す（admin/service_role、user_id明示）。
+  **解除はトークン削除のみ**で Drive 上のフォルダ・写真は消さない。
+- **残**: prod 反映（テーブル/GRANT/`orders.drive_folder_id` を SQL Editor手動、Vercel env、
+  OAuthクライアントの prod リダイレクトURI、同意画面の本番公開）。
+
 ### 2026-06-15 ── Googleドライブ連携 段階1〜3（実装・dev動作確認済み・commit `caf5c4c`）
 
 段階0の方針に沿って段階1〜3を実装し、dev（qajr…）で動作確認済み。prod未反映。
