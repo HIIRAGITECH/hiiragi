@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { getShopInfo } from "@/lib/shop";
+import DeleteButton from "@/lib/components/delete-button";
 import SettingsForm from "./settings-form";
+import { disconnectGoogleIntegration } from "./actions";
 
 export const metadata: Metadata = {
   title: "店舗設定 | HIIRAGI",
@@ -24,13 +26,27 @@ export default async function SettingsPage({
 
   const shop = await getShopInfo();
 
-  // 段階2/3: Googleドライブ連携の動作確認用の最小導線。本設置は段階4。
   const {
     google: googleResult,
     reason: googleReason,
     drive: driveResult,
-    folder_id: driveFolderId,
   } = await searchParams;
+
+  // 段階5-A: 連携状態を取得して settings カードを状態別に出し分ける。
+  const { data: integrationRow } = await supabase
+    .from("google_integrations")
+    .select("google_email, root_folder_id, refresh_token")
+    .eq("user_id", user!.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  const integration = integrationRow as {
+    google_email: string | null;
+    root_folder_id: string | null;
+    refresh_token: string | null;
+  } | null;
+  const googleConnected = !!integration?.refresh_token;
+  const googleEmail = integration?.google_email ?? null;
+  const rootFolderId = integration?.root_folder_id ?? null;
 
   return (
     <>
@@ -48,12 +64,13 @@ export default async function SettingsPage({
         <div className="px-8 py-6 max-w-4xl">
           <SettingsForm initial={shop} userId={user!.id} />
 
-          {/* 段階2: Googleドライブ連携の動作確認用導線（最小）。正式UIは段階4。 */}
+          {/* 段階5-A: Googleドライブ連携カード。連携状態で出し分け。 */}
           <div className="mt-8 rounded-lg border border-[var(--color-line)] bg-white p-5">
-            <div className="font-medium mb-1">Googleドライブ連携（テスト）</div>
+            <div className="font-medium mb-1">Googleドライブ連携</div>
             <div className="wos-gloss mb-3">
-              連携すると受注の写真フォルダを作成できます（フォルダ機能は段階3以降）。
+              連携すると、受注詳細から写真フォルダをワンクリックで作成できます。
             </div>
+
             {googleResult === "success" && (
               <div className="mb-3 text-sm text-green-700">
                 連携に成功しました。
@@ -64,34 +81,66 @@ export default async function SettingsPage({
                 連携に失敗しました{googleReason ? `（${googleReason}）` : ""}。
               </div>
             )}
-            <a
-              href="/api/google/oauth/start"
-              className="inline-block rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm text-white"
-            >
-              Googleドライブと連携する
-            </a>
 
-            {/* 段階3: 親フォルダ「HIIRAGI受注写真」を確保する動作確認用ボタン。 */}
-            <div className="mt-5 border-t border-[var(--color-line)] pt-4">
-              {driveResult === "ok" && (
-                <div className="mb-3 text-sm text-green-700">
-                  親フォルダを確認しました
-                  {driveFolderId ? `（folder_id: ${driveFolderId}）` : ""}。
+            {googleConnected ? (
+              <div className="space-y-3">
+                <div className="text-sm text-green-700">
+                  ✅ Googleドライブ連携済み
                 </div>
-              )}
-              {driveResult === "error" && (
-                <div className="mb-3 text-sm text-red-700">
-                  親フォルダの作成に失敗しました
-                  {googleReason ? `（${googleReason}）` : ""}。
+                {googleEmail && (
+                  <div className="text-sm text-[var(--color-ink-mid)]">
+                    <span className="break-all font-medium">{googleEmail}</span>{" "}
+                    と連携中
+                  </div>
+                )}
+
+                {rootFolderId ? (
+                  <a
+                    href={`https://drive.google.com/drive/folders/${rootFolderId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block rounded-md border border-[var(--color-ink)] px-4 py-2 text-sm text-[var(--color-ink)]"
+                  >
+                    📂 写真フォルダ（HIIRAGI受注写真）を開く ↗
+                  </a>
+                ) : (
+                  // 親フォルダ未作成（通常は連携時に自動作成済）。フォールバックの作成導線。
+                  <div>
+                    {driveResult === "error" && (
+                      <div className="mb-2 text-sm text-red-700">
+                        親フォルダの作成に失敗しました
+                        {googleReason ? `（${googleReason}）` : ""}。
+                      </div>
+                    )}
+                    <a
+                      href="/api/google/drive/ensure-root"
+                      className="inline-block rounded-md border border-[var(--color-ink)] px-4 py-2 text-sm text-[var(--color-ink)]"
+                    >
+                      📁 親フォルダ（HIIRAGI受注写真）を作成する
+                    </a>
+                  </div>
+                )}
+
+                <div className="border-t border-[var(--color-line)] pt-3">
+                  <DeleteButton
+                    action={disconnectGoogleIntegration}
+                    hidden={{}}
+                    confirmMessage="Googleドライブ連携を解除しますか？写真フォルダの自動作成ができなくなります。（Driveに既にあるフォルダや写真は削除されません）"
+                    label="連携を解除"
+                  />
+                  <p className="wos-gloss mt-2">
+                    解除しても Drive 上の既存フォルダ・写真は残ります（トークンのみ削除）。
+                  </p>
                 </div>
-              )}
+              </div>
+            ) : (
               <a
-                href="/api/google/drive/ensure-root"
-                className="inline-block rounded-md border border-[var(--color-ink)] px-4 py-2 text-sm text-[var(--color-ink)]"
+                href="/api/google/oauth/start"
+                className="inline-block rounded-md bg-[var(--color-ink)] px-4 py-2 text-sm text-white"
               >
-                親フォルダを作成／確認する
+                Googleドライブと連携する
               </a>
-            </div>
+            )}
           </div>
         </div>
       </div>

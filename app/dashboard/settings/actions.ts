@@ -1,12 +1,38 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   BANK_ACCOUNT_TYPES,
   type BankAccountType,
   type BankInfo,
 } from "@/lib/types";
+
+// Googleドライブ連携 段階5-A: 連携解除。自分の行を削除して「未連携」状態に戻す。
+// トークンの削除のみ（Drive 上の既存フォルダやデータは消さない）。
+// google_integrations は service_role で書く流儀なので admin client を使い、user_id を明示する。
+export async function disconnectGoogleIntegration(): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("google_integrations")
+    .delete()
+    .eq("user_id", user.id);
+  if (error) {
+    console.error("[settings] disconnectGoogleIntegration failed", {
+      message: error.message,
+      code: error.code,
+    });
+  }
+
+  revalidatePath("/dashboard/settings");
+}
 
 export type SettingsFormState =
   | { error: string }

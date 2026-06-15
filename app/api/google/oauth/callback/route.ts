@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { ensureRootFolder } from "@/lib/google/drive";
 import {
   OAUTH_RETURN_PATH,
   OAUTH_STATE_COOKIE,
@@ -94,6 +95,16 @@ export async function GET(request: NextRequest) {
       hint: error.hint,
     });
     return back(origin, "error", "save_failed");
+  }
+
+  // 段階5-A: 連携できた瞬間に親フォルダ「HIIRAGI受注写真」も作る（自然な体験）。
+  // best-effort: トークンは既に保存済みなので、親フォルダ作成が失敗しても連携自体は成功扱い。
+  // 親フォルダは後で settings の「親フォルダを作成」や受注の「写真フォルダを作成」押下時にも
+  // ensureRootFolder 経由で作られる（自己修復）。冪等なので再連携で二重作成もしない。
+  try {
+    await ensureRootFolder(user.id);
+  } catch (e) {
+    console.error("[google-oauth] ensureRootFolder after connect failed", e);
   }
 
   return back(origin, "success");
