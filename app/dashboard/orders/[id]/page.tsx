@@ -17,6 +17,7 @@ import type {
 import { formatDate } from "@/lib/format";
 import {
   archiveOrderFormAction,
+  createOrderPhotoFolder,
   deleteOrder,
   openEstimate,
   restoreOrderFormAction,
@@ -62,6 +63,7 @@ export default async function OrderDetailPage(
     indirectRes,
     pickerPartsRes,
     variantsRes,
+    integrationRes,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -128,6 +130,13 @@ export default async function OrderDetailPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    // Googleドライブ連携 段階4: 連携済みか（refresh_token の有無）を判定するための1行。
+    supabase
+      .from("google_integrations")
+      .select("refresh_token")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .maybeSingle(),
   ]);
 
   const customer = customerData as Customer | null;
@@ -177,6 +186,12 @@ export default async function OrderDetailPage(
       .filter((x): x is { menu: WorkMenuItem; position: number } => !!x)
       .sort((a, b) => a.position - b.position),
   }));
+
+  // Googleドライブ連携 段階4: 連携状態と子フォルダ作成アクション。
+  const googleConnected = !!(
+    integrationRes.data as { refresh_token: string | null } | null
+  )?.refresh_token;
+  const createFolderAction = createOrderPhotoFolder.bind(null, order.id);
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
@@ -329,6 +344,9 @@ export default async function OrderDetailPage(
                 initialEstimateNotes={order.estimate_notes}
                 initialInvoiceNotes={order.invoice_notes}
                 initialPhotoFolderUrl={order.photo_folder_url}
+                googleConnected={googleConnected}
+                initialDriveFolderId={order.drive_folder_id}
+                createFolderAction={createFolderAction}
                 allMenus={allMenus}
                 allSetsWithItems={allSetsWithItems}
                 allCategories={allCategories}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useMemo, useState, useTransition } from "react";
 import type {
   Customer,
   IndirectMaterialEntry,
@@ -24,7 +24,7 @@ import { formatYen } from "@/lib/format";
 import { moneyDefault } from "@/lib/forms/money-default";
 import SearchInput from "@/lib/components/search-input";
 import { registerOrderItemAsMenu } from "../../work-menus/actions";
-import type { FormState } from "../actions";
+import type { FolderActionResult, FormState } from "../actions";
 
 type SetWithItems = {
   set: WorkMenuSet;
@@ -41,6 +41,13 @@ type Props = {
   initialEstimateNotes: string | null;
   initialInvoiceNotes: string | null;
   initialPhotoFolderUrl: string | null;
+  // Googleドライブ連携 段階4: 連携状態と子フォルダ作成。
+  //   googleConnected     : 店舗が Google ドライブを連携済みか（未連携ならボタン無効）。
+  //   initialDriveFolderId: アプリが作った受注子フォルダの Drive ID（あれば「開く」表示）。
+  //   createFolderAction  : 子フォルダを作成/確認するサーバーアクション（order.id バインド済）。
+  googleConnected?: boolean;
+  initialDriveFolderId?: string | null;
+  createFolderAction?: () => Promise<FolderActionResult>;
   // 「メニューから追加」「セットから追加」picker 用のマスター一覧
   allMenus: WorkMenuItem[];
   allSetsWithItems: SetWithItems[];
@@ -394,6 +401,9 @@ export default function ItemsForm({
   initialEstimateNotes,
   initialInvoiceNotes,
   initialPhotoFolderUrl,
+  googleConnected = false,
+  initialDriveFolderId = null,
+  createFolderAction,
   allMenus,
   allSetsWithItems,
   allCategories,
@@ -447,6 +457,28 @@ export default function ItemsForm({
   const [photoFolderUrl, setPhotoFolderUrl] = useState(
     initialPhotoFolderUrl ?? "",
   );
+
+  // Googleドライブ連携 段階4: 受注子フォルダの作成状態。
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(
+    initialDriveFolderId,
+  );
+  const [folderError, setFolderError] = useState<string | null>(null);
+  const [folderPending, startFolder] = useTransition();
+
+  function handleCreateFolder() {
+    if (!createFolderAction) return;
+    setFolderError(null);
+    startFolder(async () => {
+      const res = await createFolderAction();
+      if ("success" in res) {
+        setDriveFolderId(res.folderId);
+        // 既存の「整備写真フォルダ」表示UI（URL欄）にも反映する。
+        setPhotoFolderUrl(res.url);
+      } else {
+        setFolderError(res.error);
+      }
+    });
+  }
 
   // ピッカーモーダルの開閉
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
@@ -893,12 +925,56 @@ export default function ItemsForm({
           各 input/textarea の name 属性が server action（updateOrderItems）の
           formData.get(...) に対応する。 */}
       <div className="space-y-4">
+        {/* Googleドライブ連携 段階4: 親「HIIRAGI受注写真」配下に受注子フォルダを自動作成。
+            状態別に出し分け。手貼りURL欄（下）はフォールバックとして従来通り残す（排他にしない）。 */}
+        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/40">
+          <div className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Google ドライブ 写真フォルダ
+          </div>
+          {!googleConnected ? (
+            <div>
+              <button
+                type="button"
+                disabled
+                className="cursor-not-allowed rounded-md bg-zinc-300 px-3 py-1.5 text-sm text-zinc-600 opacity-70 dark:bg-zinc-700 dark:text-zinc-400"
+              >
+                📁 写真フォルダを作成
+              </button>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                設定で Google ドライブを連携すると写真フォルダを自動作成できます。
+              </p>
+            </div>
+          ) : driveFolderId ? (
+            <a
+              href={photoFolderUrl || "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-white dark:border-zinc-600 dark:text-zinc-200"
+            >
+              📂 写真フォルダを開く ↗
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={handleCreateFolder}
+              disabled={folderPending}
+              className="rounded-md bg-zinc-800 px-3 py-1.5 text-sm text-white hover:bg-zinc-700 disabled:opacity-60 dark:bg-zinc-200 dark:text-zinc-900"
+            >
+              {folderPending ? "作成中…" : "📁 写真フォルダを作成"}
+            </button>
+          )}
+          {folderError && (
+            <p className="mt-1 text-xs text-red-600 dark:text-red-400">
+              {folderError}
+            </p>
+          )}
+        </div>
         <div>
           <label
             htmlFor="photo_folder_url"
             className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
           >
-            整備写真フォルダ
+            整備写真フォルダ（URL手入力）
           </label>
           <p className="mb-1 text-xs text-zinc-500 dark:text-zinc-400">
             Google Drive 等の整備写真を保管しているフォルダ URL。

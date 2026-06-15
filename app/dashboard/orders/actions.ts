@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { GoogleNotConnectedError, ensureOrderFolder } from "@/lib/google/drive";
 import {
   ESTIMATE_STATUSES,
   INVOICE_STATUSES,
@@ -17,6 +18,10 @@ import {
 } from "@/lib/types";
 
 export type FormState = { error: string } | undefined;
+
+export type FolderActionResult =
+  | { success: true; url: string; folderId: string }
+  | { error: string; code?: "not_connected" };
 
 function pickString(formData: FormData, key: string): string | null {
   const v = formData.get(key);
@@ -360,6 +365,39 @@ export async function updateOrderItems(
   revalidatePath(`/dashboard/orders/${id}/estimate`);
   revalidatePath(`/dashboard/orders/${id}/invoice`);
   return undefined;
+}
+
+// Googleドライブ連携 段階4: 受注の写真フォルダ（親「HIIRAGI受注写真」配下の子フォルダ）を
+// 作成/確認する。冪等。失敗してもページは壊さず結果オブジェクトで返す（fail-soft）。
+export async function createOrderPhotoFolder(
+  id: string,
+): Promise<FolderActionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return { error: "認証エラー: 再度ログインしてください。" };
+  }
+
+  try {
+    const { url, folderId } = await ensureOrderFolder(user.id, id);
+    revalidatePath(`/dashboard/orders/${id}`);
+    return { success: true, url, folderId };
+  } catch (e) {
+    // 握りつぶさずサーバーログに出す（段階2/3のデバッグで有効だった方針）。
+    console.error("[orders] createOrderPhotoFolder failed", e);
+    if (e instanceof GoogleNotConnectedError) {
+      return {
+        error:
+          "Googleドライブが未連携です。設定画面で連携すると写真フォルダを作成できます。",
+        code: "not_connected",
+      };
+    }
+    return {
+      error: "写真フォルダの作成に失敗しました。時間をおいて再度お試しください。",
+    };
+  }
 }
 
 // ステータス更新に伴う在庫RPC（reserve/release/consume/unconsume）を呼ぶ。

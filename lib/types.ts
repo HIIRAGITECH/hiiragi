@@ -249,6 +249,10 @@ export type Order = {
   discount_amount: number;
   deposit_amount: number;
   photo_folder_url: string | null;
+  // Googleドライブ連携 段階4: アプリが作った受注子フォルダの Drive ID（冪等判定用）。
+  // 手貼り photo_folder_url とは別。子フォルダ作成時は webViewLink を photo_folder_url にも入れて
+  // 既存の「整備写真フォルダ」表示UIを流用する。
+  drive_folder_id: string | null;
   // Step 4 で追加。在庫引き済みフラグと実施日時。
   //   stock_deducted=true で linked_part_id 付き明細の在庫が parts_inventory から減算済み。
   //   取消すと false / null に戻る。明細編集時の「取消して引き直し」案内に使用。
