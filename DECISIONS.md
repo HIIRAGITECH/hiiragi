@@ -114,6 +114,69 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-06-15 ── Googleドライブ連携 段階1〜3（実装・dev動作確認済み・commit `caf5c4c`）
+
+段階0の方針に沿って段階1〜3を実装し、dev（qajr…）で動作確認済み。prod未反映。
+
+- **方式B（各店舗が自分のドライブ・各自持ち）**: 連携した店舗自身のGoogleドライブに保存する。
+  `drive.file` スコープで完結（アプリが作成したファイル/フォルダのみ触れる）。**ピッカー不要**＝
+  連携時にアプリが親フォルダ「HIIRAGI受注写真」を作り、以後その配下に受注子フォルダを作る。
+  既存フォルダを選ばせる仕様にはしない（drive.file の最小権限と整合）。
+- **テーブル `google_integrations`**（段階1・migration `20260615000000`）: `user_id` UNIQUE（1店舗1連携）、
+  `provider`（'google'固定）、`refresh_token`/`access_token`/`token_expiry`、`root_folder_id`、`deleted_at`。
+  RLS有効＋owner ポリシー4本（user_id=auth.uid()）。**refresh_token は当面平文**＋RLS＋service_role経由で保護
+  （暗号化は後付け方針）。秘匿情報なので user_metadata ではなくテーブルに置く。
+- **【教訓・重要】service_role には DML GRANT が必要だった**（段階2デバッグで判明・migration `20260615010000`）:
+  連携成功後の保存が `42501 permission denied for table google_integrations` で失敗した。
+  原因は **この project は全テーブルで DML を `authenticated` のみに付与し、`service_role` には付けない流儀**
+  （orders/customers/parts_inventory_variants すべて service_role は REFERENCES/TRIGGER/TRUNCATE のみ）。
+  業務テーブルは authenticated クライアント（RLS準拠）でアクセスするため service_role DML が不要だった。
+  google_integrations だけ admin/service_role で書くため GRANT が要る。
+  → **admin/service_role で書くテーブルを新設する際は `GRANT ... TO service_role` を必ずセットで追加する。**
+  GRANT はRLSの手前のアクセス権なので、付けてもRLS（ポリシー4本）はそのまま機能する。
+  Stripe の「service_role GRANT 未適用」（§5 既知の地雷）と同種の問題。
+- **OAuth（段階2）**: `/api/google/oauth/start`・`/api/google/oauth/callback`（ともに runtime=nodejs）。
+  - `access_type:"offline"` + `prompt:"consent"` で refresh_token を確実に取得。
+  - **state（CSRF対策）**: ランダム値を httpOnly cookie に保存→callbackで照合。user.id は state とは独立に
+    `getUser()` でサーバー再確認。
+  - **refresh_token は再同意時しか返らない**ため、callback の upsert では「今回取得できた時だけ更新」し、
+    **null で既存を上書きして消さない**（access_token/token_expiry/google_email は毎回更新）。
+  - 保存は service_role（admin client）で user_id を明示して書く。
+- **Drive（段階3）**: `lib/google/drive.ts`（server-only）。
+  - `getAuthorizedClient(userId)`: refresh_token をセットした OAuth2 client を返す。API呼び出し時に
+    googleapis が自動リフレッシュし、`tokens` イベントで新 access_token/expiry を保存（refresh_token は触らない）。
+  - `ensureRootFolder(userId)`: **冪等**。既存 root_folder_id が Drive 上で実在（未ゴミ箱）か確認→OKなら返す、
+    無い/削除済みなら作成して保存。親フォルダ未作成の店舗でも親ごと作られる。
+  - 動作確認用の手動トリガ `/api/google/drive/ensure-root` と settings の最小導線で dev 確認済み。
+- **受注子フォルダ命名（段階4で実装）**: `受注番号_顧客名_車両名`。`/``\` 等の不可文字はサニタイズ、
+  顧客/車両がNULLなら該当部を省略しても破綻しないようにする。
+- **教訓（googleapis 型）**: `google-auth-library` を直接 import すると googleapis-common 同梱コピーと型が
+  二重化して衝突する。OAuth2Client 型は `createOAuthClient()` の戻り型から導出し、Credentials は
+  `Auth.Credentials`（googleapis）を使う。
+- **残**: ①callback への `ensureRootFolder` 統合（連携＝親フォルダ自動作成。段階4が通ってから最後に回す）
+  ②OAuth同意画面の本番公開 ③prod へのテーブル/GRANT/列の反映（SQL Editor手動）。
+
+### 2026-06-15 ── Googleドライブ連携 段階0（下準備・方針確定）
+
+- **全体方針**: 受注詳細から「フォルダ作成ボタン」でGoogleドライブに案件フォルダを作る機能を全5段階で実装。
+  段階0=下準備、段階1=テーブル、段階2=OAuthフロー、段階3=親フォルダ作成、段階4=受注詳細の作成ボタン。
+  各段階で必ず止まって動作確認する（先走り実装しない）。
+- **prod MCP read_only維持**: 段階0で `.mcp.json` の prod を `read_only=true` に戻した（commit `e6a3c67`）。
+  prodへの書き込みはSQL Editor手動の既存運用を継続（既知の地雷・台帳修復の方針と一致）。
+- **依存ライブラリ**: `googleapis` 単体を採用（`google-auth-library` は内包されるので明示追加しない）。
+  Node runtime の route handler に閉じ込めればクライアントバンドルには載らない（バンドルサイズ懸念は実質ゼロ）。
+  将来削りたければ `@googleapis/drive` サブパッケージに差し替え可。**段階1で `npm i googleapis` の1行のみ。**
+- **スコープ**: `drive.file`（アプリが作成・開いたファイルのみ）。Drive全体権限は要求しない最小権限。
+- **リダイレクトURIパス確定（重要）**: `/api/google/oauth/callback` で確定（変更なし）。
+  段階2でこのパスにコールバックroute handlerを実装する前提。Google Cloud Console の承認済みリダイレクトURIには
+  dev/prod両方を登録: `http://localhost:3000/api/google/oauth/callback` と
+  `https://app.hiiragi-tech.app/api/google/oauth/callback`。完全一致照合のため両方必須。
+- **必要なenv**（`.env.local`・dev値、prodはVercel環境変数）: `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` /
+  `GOOGLE_REDIRECT_URI`。`GOOGLE_REDIRECT_URI`は環境ごとに1値（dev=localhost、prod=appドメイン）。
+- **小野寺さんのConsole手作業（段階1着手の前提条件）**: ①Google Drive API有効化 ②OAuth同意画面（External/
+  `drive.file`スコープ/自分をテストユーザー登録・当面「テスト」状態） ③OAuthクライアントID（Webアプリ）作成と
+  上記リダイレクトURI両方の登録→Client ID/Secretを`.env.local`へ。**この作業完了の連絡を待ってから段階1に進む。**
+
 ### 2026-06-09 ── 業販対応 段2 明細の見せ方（設計確定・実装は次回）
 
 - **個人明細**: 内容 / 数量 / 単価 / 小計（「工賃/部品代」の2列を「単価」1列に統合）。
