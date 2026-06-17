@@ -98,36 +98,73 @@ const styles = StyleSheet.create({
   continuationCenter: { fontSize: 9, color: COLORS.gray },
   continuationRight: { fontSize: 9, color: COLORS.gray },
 
-  // 2ページ目以降の上部に繰り返し表示する「明細テーブルの列見出し」。
-  //   continuation header (タイトル/ページ番号バー) の下に置く。1ページ目には描画しない
-  //   (各 ItemsSection 内の tableHeadRow を二重表示しないため)。
-  //   位置 top:20mm は paddingTop:30mm の中で「継続ヘッダ (約 12mm) + 余白 + 列見出し」が
-  //   ちょうど収まるよう調整。
+  // 2ページ目以降の上部に繰り返し表示する「明細テーブルの列見出し」の位置決め。
+  //   render の戻り値は「見出し行 (borderなし) + 線専用View」の縦積み。
+  //   Outer は position:absolute、height 明示で高さ確定 (子の幅計算が安定する)。
+  //
+  // 過去の経緯 (2026-06-10):
+  //   ① 当初 borderBottom 付き Inner を組んだが、fixed + position:absolute 配下では
+  //      react-pdf の border が描画されない構造的制約に遭遇。
+  //   ② 線専用 View を導入したが、Inner の width:100% + backgroundColor が拡張して
+  //      黄色帯がページ全体に広がる事象 (検証マーカーで特定)。
+  //   ③ tableHeadRow 流用に戻したが border が出ず、線専用 View に再挑戦したが今度は
+  //      線が見えない事象に。
+  //   ④ 真因判明: react-pdf (Yoga) では position:absolute 配下で「親に確定幅が無い View」
+  //      は alignItems:stretch が当てにならず「幅 0」になる。線専用 View が幅 0 だと
+  //      高さがあっても可視矩形にならない (Text は文字幅で描画されるので見えるだけ)。
+  //   ⑤ 対策: Outer に height、ラッパー / Row / Rule すべてに width:"100%" を明示。
+  //      これで全要素の幅と高さが確定し、線専用 View が確実に描画される。
   continuationTableHeadOuter: {
     position: "absolute",
     top: 20 * 2.83465,
     left: 15 * 2.83465,
     right: 15 * 2.83465,
+    // 24pt ≒ 8.5mm。中身の必要高さは「見出し行 (paddingTop:3 + Text lineHeight 約11pt
+    // + paddingBottom:3 ≒ 17pt) + 線 1.2pt ≒ 18.2pt」。前回 height:18 では窮屈で
+    // 見出し文字が切れて見えなかったため、余白込みで 24pt に拡張。高さを完全に外すと
+    // Yoga が「親の余白を埋める」と解釈してレイアウト崩れ (黄色帯事象) になるため、
+    // 必ず明示値を持たせる。
+    height: 24,
   },
-  continuationTableHeadInner: {
+  // 列見出し行 (border なし)。tableHeadRow から borderBottom 系を抜いた version。
+  // width:"100%" を明示しないと absolute 配下で幅 0 になり、線専用 View も連鎖して消える。
+  continuationTableHeadRow: {
     flexDirection: "row",
     width: "100%",
-    // borderBottom 系は撤去。fixed + position:absolute(Outer) 配下では react-pdf の border 描画が
-    // 不安定で「文字は出るが線だけ消える」事象が再現した。代わりに線専用 View
-    // (continuationTableHeadBottomRule) を直下に置いて確実に矩形として描画する。
     paddingVertical: 3,
     fontSize: 8,
     fontWeight: "bold",
-    backgroundColor: "#fff",
   },
-  // 1ページ目 tableHeadRow の borderBottom (1.2pt / COLORS.black) と同じ見た目を再現する
-  // ための「線専用 View」。高さ・色・幅を全て明示した単なる矩形なので、描画順や折り返しの
-  // 影響を受けず確実に出る。
-  continuationTableHeadBottomRule: {
+  // 線スロット (透明な箱)。高さ 1.2pt だけ確保し、中身は render で pageNumber>1 のときだけ
+  // 黒い矩形を返す。1ページ目は中身 null で見えない。
+  continuationTableHeadRuleSlot: {
+    width: "100%",
+    height: 1.2,
+  },
+  // 線本体 (黒い矩形)。1ページ目 tableHeadRow.borderBottom と同じ 1.2pt / COLORS.black。
+  continuationTableHeadRuleBar: {
     width: "100%",
     height: 1.2,
     backgroundColor: COLORS.black,
   },
+  // ─── 継続ヘッダ専用 列スタイル (paddingRight 抜き) ─────────────────────────
+  // 本文用 colXxx は width:% に加えて paddingRight:4 を持つ。本文では各セルが
+  // 独立 View でレンダリングされるため幅超過しても安全だが、継続ヘッダの見出し行
+  // (flexDirection:row + Text 群) で同じスタイルを当てると合計幅が 100% + 4pt × 列数を
+  // 超え、Yoga が Text レイアウトを潰して文字が消える。
+  // → ヘッダ専用に padding なし・合計ぴったり 100% の列スタイルを別途定義する。
+  // 列幅 % / textAlign / 色は本文と完全に揃え、列ズレや見た目の不一致を防ぐ。
+  // 個人 (4列): 52 + 9 + 26 + 13 = 100%
+  colNameHeader: { width: "52%" },
+  colQtyHeader: { width: "9%", textAlign: "right" },
+  colUnitHeader: { width: "26%", textAlign: "right" },
+  colSubtotalHeader: { width: "13%", textAlign: "right" },
+  // 法人 (5列): 46 + 8 + 14 + 16 + 16 = 100%
+  colNameBizHeader: { width: "46%" },
+  colQtyBizHeader: { width: "8%", textAlign: "right" },
+  colUnitBizHeader: { width: "14%", textAlign: "right" },
+  colBulkHeader: { width: "16%", textAlign: "right" },
+  colListPriceHeader: { width: "16%", textAlign: "right", color: COLORS.gray },
 
   // ─── 1ページ目 ヘッダー領域 ───────────────────────────
   headerRow: {
@@ -589,39 +626,64 @@ export function InvoiceDocument({
         />
 
         {/* 2ページ目以降の明細列見出し (繰り返しヘッダ)。
-            1ページ目には描画しない（各 ItemsSection 内の tableHeadRow と二重表示を避ける）。
-            列構成・列幅は ItemsSection と完全に同じ (個人=4列 / 法人=5列)。
-            線は borderBottom ではなく「線専用 View」で描画する (描画安定化のため・上記 styles のコメント参照)。 */}
-        <View
-          style={styles.continuationTableHeadOuter}
-          fixed
-          render={({ pageNumber }) =>
-            pageNumber > 1 ? (
-              <View>
-                <View style={styles.continuationTableHeadInner}>
-                  <Text style={isBusiness ? styles.colNameBiz : styles.colName}>
-                    品名
-                  </Text>
-                  <Text style={isBusiness ? styles.colQtyBiz : styles.colQty}>
-                    数量
-                  </Text>
-                  <Text style={isBusiness ? styles.colUnitBiz : styles.colUnit}>
-                    単価
-                  </Text>
-                  {isBusiness ? (
-                    <>
-                      <Text style={styles.colBulk}>業販</Text>
-                      <Text style={styles.colListPrice}>参考定価</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.colSubtotal}>小計</Text>
-                  )}
-                </View>
-                <View style={styles.continuationTableHeadBottomRule} />
-              </View>
-            ) : null
-          }
-        />
+            【重要・採用】Text render 方式: View render の戻り値ツリー内の Text は
+            react-pdf v4 で描画が不安定 (矩形 View は出るが Text が潰れる事象に遭遇)。
+            既存の continuationOuter のページ番号 Text が「Text 自身の render」で正常に
+            出ているのと同じ流儀に揃え、各 Text に render prop を持たせる。
+            外側 Outer は fixed のみで render なし → 中の Text/線が個別に
+            pageNumber>1 のときだけ実体化する。
+            列構成・列幅は ItemsSection と完全に同じ (個人=4列 / 法人=5列)。 */}
+        <View style={styles.continuationTableHeadOuter} fixed>
+          <View style={styles.continuationTableHeadRow}>
+            <Text
+              style={
+                isBusiness ? styles.colNameBizHeader : styles.colNameHeader
+              }
+              render={({ pageNumber }) => (pageNumber > 1 ? "品名" : "")}
+            />
+            <Text
+              style={
+                isBusiness ? styles.colQtyBizHeader : styles.colQtyHeader
+              }
+              render={({ pageNumber }) => (pageNumber > 1 ? "数量" : "")}
+            />
+            <Text
+              style={
+                isBusiness ? styles.colUnitBizHeader : styles.colUnitHeader
+              }
+              render={({ pageNumber }) => (pageNumber > 1 ? "単価" : "")}
+            />
+            {isBusiness ? (
+              <>
+                <Text
+                  style={styles.colBulkHeader}
+                  render={({ pageNumber }) => (pageNumber > 1 ? "業販" : "")}
+                />
+                <Text
+                  style={styles.colListPriceHeader}
+                  render={({ pageNumber }) =>
+                    pageNumber > 1 ? "参考定価" : ""
+                  }
+                />
+              </>
+            ) : (
+              <Text
+                style={styles.colSubtotalHeader}
+                render={({ pageNumber }) => (pageNumber > 1 ? "小計" : "")}
+              />
+            )}
+          </View>
+          {/* 線: 透明スロット(高さ1.2のみ)に render で黒矩形を返す。
+              1ページ目は中身 null = 線が見えない (スロットだけ存在)。 */}
+          <View
+            style={styles.continuationTableHeadRuleSlot}
+            render={({ pageNumber }) =>
+              pageNumber > 1 ? (
+                <View style={styles.continuationTableHeadRuleBar} />
+              ) : null
+            }
+          />
+        </View>
 
         {/* 1ページ目: タイトル + 文書情報 */}
         <View style={styles.headerRow}>
