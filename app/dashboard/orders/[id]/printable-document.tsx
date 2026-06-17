@@ -369,30 +369,34 @@ function ItemsSection({
   items: OrderItem[];
   isBusiness: boolean;
 }) {
+  // <colgroup> 直下に空白テキストノードが入ると React の hydration エラー
+  // ("whitespace text nodes cannot be a child of <colgroup>") が出るため、
+  // 条件分岐を JSX 外に出して <colgroup>{cols}</colgroup> の形でクリーンに描画する。
+  // 列幅は法人=5列 / 個人=4列。本文・1ページ目見出しと完全同期。
+  const cols = isBusiness ? (
+    <>
+      <col style={{ width: "46%" }} />
+      <col style={{ width: "8%" }} />
+      <col style={{ width: "14%" }} />
+      <col style={{ width: "16%" }} />
+      <col style={{ width: "16%" }} />
+    </>
+  ) : (
+    <>
+      <col style={{ width: "52%" }} />
+      <col style={{ width: "9%" }} />
+      <col style={{ width: "26%" }} />
+      <col style={{ width: "13%" }} />
+    </>
+  );
+
   return (
     <section className="mb-5">
       <h2 className="mb-0 break-after-avoid border-b-[1.2px] border-black pb-0.5 text-xs font-bold tracking-wide">
         【{title}】
       </h2>
       <table className="w-full table-fixed border-collapse text-xs">
-        <colgroup>
-          {isBusiness ? (
-            <>
-              <col style={{ width: "46%" }} /> {/* 品名 */}
-              <col style={{ width: "8%" }} />  {/* 数量 */}
-              <col style={{ width: "14%" }} /> {/* 単価 */}
-              <col style={{ width: "16%" }} /> {/* 業販 */}
-              <col style={{ width: "16%" }} /> {/* 参考定価 */}
-            </>
-          ) : (
-            <>
-              <col style={{ width: "52%" }} /> {/* 品名 */}
-              <col style={{ width: "9%" }} />  {/* 数量 */}
-              <col style={{ width: "26%" }} /> {/* 単価 */}
-              <col style={{ width: "13%" }} /> {/* 小計 */}
-            </>
-          )}
-        </colgroup>
+        <colgroup>{cols}</colgroup>
         {/* table-header-group を明示することで、テーブルがページを跨いだとき
             ブラウザが thead を 2ページ目以降の上部に自動で繰り返し描画する。
             Chrome 等で挙動が不安定だったため明示している。 */}
