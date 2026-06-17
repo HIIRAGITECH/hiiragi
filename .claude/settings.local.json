@@ -9,7 +9,11 @@
       "Bash(npx eslint *)",
       "mcp__supabase-hiiragi-dev__list_tables",
       "Bash(echo \"tsc_exit=$?\")",
-      "Bash(echo \"eslint_exit=$?\")"
+      "Bash(echo \"eslint_exit=$?\")",
+      "Bash(corepack pnpm *)",
+      "Bash(git add *)",
+      "Bash(git restore *)",
+      "Bash(git commit *)"
     ]
   },
   "enabledMcpjsonServers": [

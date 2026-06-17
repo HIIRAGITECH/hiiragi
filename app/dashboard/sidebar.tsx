@@ -89,7 +89,10 @@ export default function Sidebar({
     },
     {
       group: "システム",
-      items: [{ jp: "設定", href: "/dashboard/settings" }],
+      items: [
+        { jp: "プラン", href: "/dashboard/billing" },
+        { jp: "設定", href: "/dashboard/settings" },
+      ],
     },
   ];
 

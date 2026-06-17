@@ -342,6 +342,43 @@ export type StockMovement = {
   created_at: string;
 };
 
+// ====== サブスクリプション（管理者画面で参照・編集する） ======
+export const SUBSCRIPTION_PLANS = [
+  "free",
+  "paid",
+  "trial",
+  "special_free",
+] as const;
+export type SubscriptionPlan = (typeof SUBSCRIPTION_PLANS)[number];
+
+export const SUBSCRIPTION_STATUSES = ["active", "suspended"] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+// オプション機能フラグ。今後の追加に備えて jsonb で持つ。
+// 未定義キーは false 相当として扱う。
+export const SUBSCRIPTION_OPTION_KEYS = [
+  "mypage",
+  "line_notify",
+  "hp_integration",
+] as const;
+export type SubscriptionOptionKey = (typeof SUBSCRIPTION_OPTION_KEYS)[number];
+export type SubscriptionOptions = Partial<Record<SubscriptionOptionKey, boolean>>;
+
+export type Subscription = {
+  id: string;
+  user_id: string;
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  trial_ends_at: string | null;
+  options: SubscriptionOptions;
+  memo: string | null;
+  // Stripe 連携。未契約は null。
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export const BANK_ACCOUNT_TYPES = ["普通", "当座"] as const;
 export type BankAccountType = (typeof BANK_ACCOUNT_TYPES)[number];
 
