@@ -48,8 +48,8 @@
 | ワークストリーム | 状態 | 在りか | 残課題・備考 |
 |---|---|---|---|
 | 受注明細リニューアル（在庫連携） | Step1/2完了、Step3も実用上完成 | main | このチャット。下記ロードマップ参照 |
-| Stripe Billing / サブスク課金 | 作りかけ・テスト段階 | ブランチ `stripe-保存_0604`（commit 8e6ad48）。**main未マージ** | ①mainとの大規模マージ衝突解決（特にorders系・ensure.ts・6/4の3マイグレ）②trial期限到達時のアプリ側アクセスロック未実装 ③本番DBへのsubscriptions系3マイグレ適用が未確認 ④Stripe Price IDのenv設定 |
-| 管理画面リニューアル（/dashboard/admin → /admin） | 作りかけ | 同ブランチに同梱 | **Stripeとは独立した別機能**。ユーザごとのplan/status/options（mypage/line_notify/hp_integration）を手動編集するUI |
+| Stripe Billing / サブスク課金 | ✅ mainマージ済み（2026-06-17・`08f8b1e`）・ビルド通過・dev動作未確認 | main（stripe-保存_0604=`8e6ad48` を取込／backupタグ `backup-before-stripe-merge`=`b853f87` 残置） | ①dev動作確認（前回5/31はテスト課金成功まで到達済み） ②trial期限到達時のアプリ側アクセスロック未実装 ③prodにStripe2カラム＋service_role GRANT未適用 ④Vercel本番デプロイ＋本番Webhook＋本番price ID |
+| 管理画面リニューアル（/dashboard/admin → /admin） | ✅ mainマージ済み（2026-06-17・`08f8b1e` に同梱） | main | **Stripeとは独立した別機能**。ユーザごとのplan/status/options（mypage/line_notify/hp_integration）を手動編集するUI。`subscriptions.options.mypage` トグルはマイページ実装時の課金連動に再利用予定 |
 | 車種別定価 / 利益エンジン（Step 3） | ✅ 実用上完成・本番稼働 | main | Step3-1/2a/2b完了。明細で車種別定価が⭐表示＆反映。3-2c（スナップショット）は「今は不要」判断 |
 | 業販対応（法人/個人で明細の見せ方を変える） | ✅ 完成・本番稼働 | main | 顧客区分→マスター掛け率→明細業販反映→画面個人/法人切替→PDF個人/法人切替まで全通し。個人=単価1列、法人=単価/業販/参考定価＋合計欄に参考定価税込併記。PDFも同様。残課題=PDF複数ページのヘッダ繰り返し（別テーマ・下記） |
 | メニュー単機能化／部品在庫一本化 | 🚧 段1（メニューを1金額の項目に）本番反映済 | main | メニュー＝売値1・原価1・掛け率1の単一項目に。旧カラムは後方互換で温存（DROP未）。次=段2（明細の列を金額1列に統合・「技術料」へ文言変更・PDF・旧カラムDROP） |
@@ -412,19 +412,20 @@
 - **【要対応】本番に Stripe 2カラムが欠落**: prod の `subscriptions` テーブルに
   `stripe_customer_id` / `stripe_subscription_id` が**無い**（devにはある＝`add_stripe_to_subscriptions` がprod未適用）。
   → このままStripe連携を本番で動かすとカラム不在エラー（42703）で落ちる。**Stripeを本番稼働させる前に必ず追加すること**。
-  ただし現状Stripeはテスト段階・main未マージで本番未稼働なので、今すぐ壊れてはいない。
+  Stripeコードは 2026-06-17 に main マージ済み（`08f8b1e`）だが、本番Webhook/Vercelデプロイ・prod DB反映は未投入のため今すぐ壊れてはいない。本番稼働を始める前に必ず適用すること。
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
 - **【要確認】prod の create_default_subscription トリガ**: prod台帳に `revoke_..._execute` があり EXECUTE権限は剥奪
   された形跡だが、トリガ本体（新規ユーザ作成時の自動INSERT）は dev/prod とも生きている。意図通りか中途半端か要確認。
-- **Stripeブランチ（stripe-保存_0604）のマージ衝突**: main未マージのまま放置されており、マージ時に衝突する箇所が既知:
-  - `orders/items-form.tsx` / `orders/actions.ts`（Step1/2で大規模変更 vs stripeブランチの古い版）→ **main側を採用**
-  - `lib/work-item-categories/ensure.ts`（mainで後から追加・stripeブランチに無い）→ **main側を残す**
-  - 6/4の3マイグレーション → main側を残す
+- **【解消済み】Stripeブランチ（stripe-保存_0604）のマージ衝突**: 2026-06-17 に main へマージ完了（merge commit `08f8b1e`）。
+  事前に origin 最新（Googleドライブ連携入り）を rebase で取り込んだ結果、実際の衝突は **`.mcp.json` 1ファイルのみ**で済んだ
+  （事前予想していた orders系・`ensure.ts`・6/4の3マイグレの衝突は全て auto-merge で吸収された）。
+  `.mcp.json` は main側の `read_only=true` を採用（prod誤爆防止）。`npm run build` も一発通過。
+  参考: backupタグ `backup-before-stripe-merge`=`b853f87` を残置（万一の戻し用）。
 - **`docs/原価粗利在庫管理_設計書.md` は歴史的資料（古い）**: 2026-05-22作成。Step1〜5は実装済みの「元ネタ」。
   この設計書の「在庫の引当2段階はやらない」という記述は**古く、今は逆**（DECISIONSで2段階reserve→consumeに決定済み）。
-  惑わされないこと。Step6（月次粗利レポート）・Step7（棚卸し履歴UI）は未着手の可能性。設計書はstripeブランチ側にだけ存在。
+  惑わされないこと。Step6（月次粗利レポート）・Step7（棚卸し履歴UI）は未着手の可能性。設計書は 2026-06-17 の Stripe マージで main にも取り込まれた（`docs/原価粗利在庫管理_設計書.md`）。
 - **旧 `deduct_order_stock` は型不整合で元々動いていなかった**: `orders.id` は text だが
   既存 `stock_movements.related_order_id` は uuid。Step 2で `related_order_text_id`(text) を
   追加して解決。過去「在庫引きが効いていない」前提で考えること。
