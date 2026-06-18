@@ -225,6 +225,9 @@ CREATE TABLE IF NOT EXISTS orders (
   discount_amount   integer NOT NULL DEFAULT 0,
   deposit_amount    integer NOT NULL DEFAULT 0,
   photo_folder_url  text,
+  drive_folder_id   text,        -- アプリが作った受注子フォルダの Drive ID（冪等判定用）
+  mypage_token      text,        -- お客様マイページURLのトークン（発行時セット、未発行はNULL）
+  mypage_expires_at timestamptz, -- マイページURLの有効期限（発行日+45日、未発行はNULL）
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, id),
@@ -237,6 +240,9 @@ CREATE INDEX IF NOT EXISTS orders_customer_id_idx ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS orders_vehicle_id_idx  ON orders(vehicle_id);
 CREATE INDEX IF NOT EXISTS orders_invoiced_at_idx ON orders(invoiced_at);
 CREATE INDEX IF NOT EXISTS orders_is_archived_idx ON orders(is_archived);
+-- 発行済みマイページトークンの一意性を保証（未発行=NULL は対象外）。
+CREATE UNIQUE INDEX IF NOT EXISTS orders_mypage_token_key
+  ON orders (mypage_token) WHERE mypage_token IS NOT NULL;
 
 -- 管理番号採番 trigger
 -- INSERT...ON CONFLICT で last_seq をアトミックにインクリメントし、
@@ -286,6 +292,59 @@ CREATE POLICY orders_owner_update ON orders
                               WITH CHECK (user_id = auth.uid());
 CREATE POLICY orders_owner_delete ON orders
   FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- =============================================================
+-- お客様マイページ（段階3）: トークンで1件＋関連顧客・車両の「見せてよい列」を返す
+-- SECURITY DEFINER 関数。service_role には orders/customers/vehicles の GRANT を与えず、
+-- この関数だけ EXECUTE を service_role に許可する（最小権限）。
+-- 期限切れ判定は loader 側（mypage_expires_at を返すだけ）。
+-- =============================================================
+CREATE OR REPLACE FUNCTION public.mypage_get_by_token(p_token text)
+RETURNS TABLE (
+  order_id            text,
+  work_status         text,
+  estimate_status     text,
+  invoice_status      text,
+  reception_date      date,
+  items               jsonb,
+  discount_amount     integer,
+  deposit_amount      integer,
+  photo_folder_url    text,
+  payment_due_date    date,
+  invoice_notes       text,
+  invoiced_at         timestamptz,
+  paid_at             timestamptz,
+  mypage_expires_at   timestamptz,
+  order_user_id       uuid,
+  customer_id         text,
+  customer_name       text,
+  vehicle_maker       text,
+  vehicle_model       text,
+  vehicle_model_year  integer,
+  vehicle_color       text
+)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = ''
+AS $$
+  SELECT
+    o.id, o.work_status, o.estimate_status, o.invoice_status, o.reception_date,
+    o.items, o.discount_amount, o.deposit_amount, o.photo_folder_url,
+    o.payment_due_date, o.invoice_notes, o.invoiced_at, o.paid_at,
+    o.mypage_expires_at, o.user_id, o.customer_id,
+    c.name, v.maker, v.model, v.model_year, v.color
+  FROM public.orders o
+  LEFT JOIN public.customers c ON c.user_id = o.user_id AND c.id = o.customer_id
+  LEFT JOIN public.vehicles  v ON v.user_id = o.user_id AND v.id = o.vehicle_id
+  WHERE o.mypage_token = p_token
+  LIMIT 1;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.mypage_get_by_token(text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.mypage_get_by_token(text) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.mypage_get_by_token(text) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.mypage_get_by_token(text) TO service_role;
 
 -- =============================================================
 -- 作業メニュー（マスター）と作業セット（テンプレート）2026-05 追加

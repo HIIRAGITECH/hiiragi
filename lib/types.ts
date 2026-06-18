@@ -253,6 +253,10 @@ export type Order = {
   // 手貼り photo_folder_url とは別。子フォルダ作成時は webViewLink を photo_folder_url にも入れて
   // 既存の「整備写真フォルダ」表示UIを流用する。
   drive_folder_id: string | null;
+  // お客様マイページ 段階1。マイページURLのトークンと有効期限（発行日+45日）。
+  //   未発行は両方 null。発行済みトークンは部分ユニークインデックスで一意性を保証。
+  mypage_token: string | null;
+  mypage_expires_at: string | null; // ISO timestamptz、マイページURLの有効期限
   // Step 4 で追加。在庫引き済みフラグと実施日時。
   //   stock_deducted=true で linked_part_id 付き明細の在庫が parts_inventory から減算済み。
   //   取消すと false / null に戻る。明細編集時の「取消して引き直し」案内に使用。
