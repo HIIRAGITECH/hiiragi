@@ -22,10 +22,13 @@ import {
   updateInvoiceStatus,
   updateWorkStatus,
 } from "./actions";
+import { issueMypageToken } from "./[id]/mypage-actions";
 import { estimateClass, invoiceClass, workClass } from "./status-badge";
 
 export type OrderKanbanRow = OrderListRow & {
   amount: number | null;
+  mypage_token: string | null;
+  mypage_expires_at: string | null;
 };
 
 function normalize(s: string): string {
@@ -60,9 +63,11 @@ const COLUMNS: { key: WorkStatus; desc: string }[] = [
 
 type Props = {
   rows: OrderKanbanRow[];
+  baseUrl: string;
+  mypageEnabled: boolean;
 };
 
-export default function OrdersTable({ rows }: Props) {
+export default function OrdersTable({ rows, baseUrl, mypageEnabled }: Props) {
   const [query, setQuery] = useState("");
   const [paymentDueFor, setPaymentDueFor] = useState<string | null>(null);
 
@@ -176,6 +181,8 @@ export default function OrdersTable({ rows }: Props) {
                         key={o.id}
                         o={o}
                         active={ci === 1}
+                        baseUrl={baseUrl}
+                        mypageEnabled={mypageEnabled}
                         onRequestInvoiceDue={(id) => setPaymentDueFor(id)}
                       />
                     ))
@@ -209,16 +216,45 @@ export default function OrdersTable({ rows }: Props) {
 function BoardCard({
   o,
   active,
+  baseUrl,
+  mypageEnabled,
   onRequestInvoiceDue,
 }: {
   o: OrderKanbanRow;
   active: boolean;
+  baseUrl: string;
+  mypageEnabled: boolean;
   onRequestInvoiceDue: (id: string) => void;
 }) {
   const overdue =
     o.invoice_status === "請求済" &&
     o.payment_due_date != null &&
     new Date(o.payment_due_date) < new Date(new Date().toISOString().slice(0, 10));
+
+  // マイページURL 導線（一覧では発行 or コピーのみ。詳細画面ほど作り込まない）。
+  const [mypageBusy, setMypageBusy] = useState(false);
+  const [mypageCopied, setMypageCopied] = useState(false);
+
+  async function copyMypageUrl(token: string) {
+    try {
+      await navigator.clipboard.writeText(`${baseUrl}/mypage/${token}`);
+      setMypageCopied(true);
+      setTimeout(() => setMypageCopied(false), 2000);
+    } catch {
+      // クリップボード不可環境では何もしない（詳細画面でコピー可能）。
+    }
+  }
+
+  async function issueAndCopyMypage() {
+    setMypageBusy(true);
+    const res = await issueMypageToken(o.id);
+    setMypageBusy(false);
+    if ("error" in res) {
+      window.alert(res.error);
+      return;
+    }
+    await copyMypageUrl(res.token);
+  }
 
   return (
     <div
@@ -349,6 +385,27 @@ function BoardCard({
           >
             編集
           </Link>
+          {/* 発行済みなら誰でもコピー可（既存URLの共有）。未発行は使用権がある時だけ発行導線を出す。 */}
+          {o.mypage_token ? (
+            <button
+              type="button"
+              onClick={() => copyMypageUrl(o.mypage_token!)}
+              className="wos-btn-ghost wos-btn-xs"
+              title="お客様マイページURLをコピー"
+            >
+              {mypageCopied ? "コピー済" : "🔗 URLコピー"}
+            </button>
+          ) : mypageEnabled ? (
+            <button
+              type="button"
+              onClick={issueAndCopyMypage}
+              disabled={mypageBusy}
+              className="wos-btn-ghost wos-btn-xs"
+              title="お客様マイページURLを発行してコピー"
+            >
+              {mypageBusy ? "発行中…" : "🔗 URL発行"}
+            </button>
+          ) : null}
           <DeleteButton
             action={deleteOrder}
             hidden={{ id: o.id }}

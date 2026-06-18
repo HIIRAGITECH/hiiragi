@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { calculateTotals } from "@/lib/orders/totals";
+import { getSiteUrl } from "@/lib/site-url";
+import { canUseMypage } from "@/lib/entitlements";
 import type { OrderItem, OrderListRow } from "@/lib/types";
 import OrdersTable, { type OrderKanbanRow } from "./orders-table";
 
@@ -18,7 +20,7 @@ export default async function OrdersPage() {
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, reception_date, work_status, estimate_status, invoice_status, invoiced_at, paid_at, payment_due_date, invoice_subject, is_archived, notes, items, discount_amount, deposit_amount, customer:customers(id,name,name_kana), vehicle:vehicles(id,maker,model,plate_number)",
+      "id, reception_date, work_status, estimate_status, invoice_status, invoiced_at, paid_at, payment_due_date, invoice_subject, is_archived, notes, items, discount_amount, deposit_amount, mypage_token, mypage_expires_at, customer:customers(id,name,name_kana), vehicle:vehicles(id,maker,model,plate_number)",
     )
     .eq("user_id", user!.id)
     .eq("is_archived", false)
@@ -28,6 +30,8 @@ export default async function OrdersPage() {
     items: OrderItem[] | null;
     discount_amount: number | null;
     deposit_amount: number | null;
+    mypage_token: string | null;
+    mypage_expires_at: string | null;
   };
 
   const raw = (data ?? []) as unknown as FetchedRow[];
@@ -54,8 +58,15 @@ export default async function OrdersPage() {
       customer: o.customer,
       vehicle: o.vehicle,
       amount: totals.total > 0 ? totals.total : null,
+      mypage_token: o.mypage_token,
+      mypage_expires_at: o.mypage_expires_at,
     };
   });
+
+  // マイページURL コピー/発行 導線のベースURL（NEXT_PUBLIC_SITE_URL 優先、無ければヘッダ推測）。
+  const baseUrl = await getSiteUrl();
+  // 段階4: マイページ機能の使用権（未発行の発行ボタンの出し分けに使う）。
+  const mypageEnabled = await canUseMypage();
 
   return (
     <>
@@ -88,7 +99,7 @@ export default async function OrdersPage() {
         </div>
       )}
 
-      <OrdersTable rows={orders} />
+      <OrdersTable rows={orders} baseUrl={baseUrl} mypageEnabled={mypageEnabled} />
     </>
   );
 }

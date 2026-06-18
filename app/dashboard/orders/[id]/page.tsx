@@ -15,6 +15,8 @@ import type {
   WorkMenuSet,
 } from "@/lib/types";
 import { formatDate } from "@/lib/format";
+import { getSiteUrl } from "@/lib/site-url";
+import { canUseMypage } from "@/lib/entitlements";
 import {
   archiveOrderFormAction,
   createOrderPhotoFolder,
@@ -24,6 +26,7 @@ import {
   updateOrderItems,
 } from "../actions";
 import ItemsForm from "./items-form";
+import MypageSection from "./mypage-section";
 import OrderStatusBar from "./order-status-bar";
 import SaveAsSetButton from "./save-as-set-button";
 // 在庫はステータス連動（了承済=確保 / 完了=消費）に一本化したため、手動在庫引きUI
@@ -195,6 +198,12 @@ export default async function OrderDetailPage(
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
+
+  // お客様マイページ 段階2: 発行 UI のベースURL。NEXT_PUBLIC_SITE_URL 優先、無ければ
+  // リクエストヘッダから推測（dev/localhost でも動く）。
+  const baseUrl = await getSiteUrl();
+  // 段階4: マイページ機能の使用権（管理者は無制限 / それ以外は options.mypage）。
+  const mypageEnabled = await canUseMypage();
 
   return (
     <>
@@ -381,6 +390,16 @@ export default async function OrderDetailPage(
               </Link>
             </div>
           </section>
+
+          {/* お客様マイページ（作業状況の共有URL） */}
+          <MypageSection
+            orderId={order.id}
+            customerName={customer?.name ?? null}
+            baseUrl={baseUrl}
+            token={order.mypage_token}
+            expiresAt={order.mypage_expires_at}
+            enabled={mypageEnabled}
+          />
         </div>
       </div>
     </>
