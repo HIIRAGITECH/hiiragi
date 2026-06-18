@@ -36,8 +36,10 @@ export async function updateSession(request: NextRequest) {
   const isAuthCallback = path.startsWith("/auth/callback");
   const isPublicAsset =
     path.startsWith("/_next") || path.startsWith("/favicon");
+  // お客様マイページ（段階3）はログイン不要の公開ページ。トークンを知っている＝閲覧権限。
+  const isMypage = path.startsWith("/mypage");
 
-  if (!user && !isAuthEntry && !isAuthCallback && !isPublicAsset) {
+  if (!user && !isAuthEntry && !isAuthCallback && !isPublicAsset && !isMypage) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
