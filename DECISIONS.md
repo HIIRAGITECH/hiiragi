@@ -28,11 +28,12 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-17（Stripe Billingをmainにマージ＋マイページ設計確定）
+最終更新: 2026-06-18（お客様マイページ機能 dev実装・動作確認完了）
 
 | 領域 | 状態 |
 |---|---|
 | 受注・見積・請求・顧客・部品在庫・作業メニュー・入金・売上・PDF・ダッシュボード | ✅ 本番稼働中（SaaSの基本機能は一通り揃っている） |
+| お客様マイページ（作業状況の共有URL） | ✅ dev実装・動作確認完了（prod未反映）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000） |
 | 受注明細：部品在庫から追加 | ✅ 完了・本番反映済み（Step 1 / commit a60e1bf） |
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
 | Stripe Billing | ✅ mainにマージ済み（merge commit `08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認 |
@@ -113,6 +114,42 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-18 ── お客様マイページ機能 dev完成
+
+- **方式**: URLトークン（受注ごと・45日・ログイン不要・閲覧のみ）。設計確定は6/17。
+- **DB**: `orders` に `mypage_token` / `mypage_expires_at` 追加（migration `20260618000000`）。
+  `mypage_token` に部分ユニークインデックス（発行済みのみ一意・未発行NULLは対象外）。
+- **表示**: `app/mypage/[token]/`（サーバーコンポーネント・公開ルート）。ステータス連動で
+  見積／作業中／完了／請求／入金を出し分け：
+  - `estimate_status=発行済/了承済` → 見積セクション（明細＋金額）
+  - `work_status=作業中` → 「作業を進めております」、`work_status=完了` → 「作業完了」＋最終明細
+  - `invoice_status=請求済` → お支払い金額・振込期限・振込先（手動操作がトリガー）
+  - `invoice_status=入金済` → お礼＋入金確認日
+  - `photo_folder_url` あり（作業中/完了）→「作業写真を見る」リンク
+- **表示はPDF非貼付・画面に明細HTML表示（案A）**。原価粗利・お客様の住所/電話・内部メモ（intake notes・
+  estimate_notes）は非表示（invoice_notesのみ表示可）。モバイルファースト・max-width中央寄せ。
+- **【セキュリティ・重要】service role読み取りは案B（SECURITY DEFINER 関数 `mypage_get_by_token`）で実装**
+  （migration `20260618010000`）。`orders`/`customers`/`vehicles` に service_role の GRANT は付与せず、
+  関数1つだけを公開窓口にする最小権限構成。鍵漏洩時も他テナント情報が芋づる式に漏れない。
+  `search_path=''` 固定・全テーブルをスキーマ修飾、EXECUTE は service_role のみ
+  （anon/authenticated/PUBLIC は REVOKE）。関数は「お客様に見せてよい列だけ」を返し、
+  アプリ側 `toMypageItem` のサニタイズと合わせて二重防御。期限切れ判定は loader 側。
+- **設計の土台（将来ログイン移行用）**: 「検証（誰に見せるか＝`loadMypageByToken`）」と
+  「表示（何を見せるか＝`MypageView`）」を分離。表示は `customer` 軸で組み、`orders` は現状1件だが
+  ログイン化で同顧客の複数受注に差し替え可能な構造。
+- **【教訓】当初テーブル直読み（service role）で `42501 permission denied for table orders` → not_found に
+  黙って化けた**。原因は業務テーブルに service_role SELECT GRANT が無いこと（Googleドライブ連携・Stripeと
+  同じ根）。loader の error 握りつぶしも一因。→ rpc の error を `console.error` でログするよう改善済み。
+- **課金連動**: `subscriptions.options.mypage=true` のテナントのみ発行ボタン（UI＋サーバーアクション
+  `issueMypageToken`/`regenerateMypageToken` の両方でガード。判定は `lib/entitlements.ts` の `canUseMypage`）。
+  管理者（`ADMIN_EMAIL`）は無制限。無効時は控えめなアップセル導線（/dashboard/billing）。
+  失効（`revokeMypageToken`）は非ゲート。**表示ページ側は課金チェックせず**（発行済URLは期限まで有効＝
+  お客様に店舗の課金状態は無関係、突然死を防ぐ）。
+- **dev動作確認完了**: 発行→表示→ステータス連動（見積/作業/請求/入金）→振込先表示まで実機で確認。
+  情報漏洩なし（原価・住所・電話が画面に出ないことを grep＋実機で確認）。
+- **残**: prod反映（`20260618000000` + `20260618010000` + ordersカラム、SQL Editor手動）、
+  Vercel本番確認、マイページのモバイル実機確認、プライバシーポリシー整備。
 
 ### 2026-06-17 ── Stripeブランチをmainに統合＋マイページ設計確定
 
@@ -435,6 +472,10 @@
   （ItemsFormが警告バナーで案内）。
 - **旧 `type`/`tax_free` と新 `tax_category`/`item_category_id` が並走**: 計算ロジックは
   まだ旧フィールド依存の箇所あり（Step 6-2相当が未完）。金額・粗利ロジックを触るときは要確認。
+- **【次テーマ】受注フロー：請求済→入金済の動線が一手間**: `invoice_status=請求済` にすると受注がアーカイブへ
+  移動し、その後「入金済」にする操作が一手間増える。当初は意図した設計だが、マイページ動作確認中の実操作で
+  「請求済→入金済」の動線が面倒と判明。設計見直しを検討（当時アーカイブ送りにした理由を確認してから）。
+  マイページとは独立した受注管理の改善テーマ。
 - **ローカルfeatブランチが大量残存**: feat/* が多数。多くはmainマージ済みのはずだが未整理。いつか棚卸しして削除を。
 - **複数チャット並行によるマージ混乱に注意**: 作業前にこのドキュメントとコードの現状を確認。
 
@@ -464,4 +505,5 @@
 - **2026-06-09** ｜ 業販対応 段2-2（本番反映＝業販対応 完成） ｜ PDF（請求書・見積書）を個人/法人で出し分け。印刷用printable-document.tsxとreact-pdf InvoiceDocument.tsxを同時改修。個人=品名/数量/単価/小計、法人=品名/数量/単価/業販/参考定価。列幅%を両ファイルで統一（法人=46/8/14/16/16）。合計欄に法人時「参考定価合計（税込）」併記（calculateListPriceTotals流用）。「工賃/部品代」→「単価」に統一。react-pdfのヘッダ固定バグ（常に工賃/部品代表示）も修正。本番で個人/法人PDF実物確認OK。**これで業販対応が顧客区分→PDFまで全通し・完成** ｜ コードのみ
 - **2026-06-09** ｜ 次テーマ ｜ PDF複数ページのテーブルヘッダ繰り返し（2ページ目以降に品名/数量/単価等の見出しが出ず読みづらい）。印刷用=thead繰り返し、react-pdf=fixed属性。業販対応とは独立した改善 ｜ 着手予定
 - **2026-06-17** ｜ Stripe統合＋マイページ設計 ｜ `stripe-保存_0604` をmainにマージ（衝突は `.mcp.json` のみ・build通過・push済 `08f8b1e`）。マイページはURLトークン/案件ごと/45日/`invoice_status` 連動/PDF非貼付/案A表示で設計確定、実装は次回 ｜ commit対象：DECISIONS.md
+- **2026-06-18** ｜ マイページ実装 ｜ お客様マイページをStep1〜4でdev実装・動作確認完了。Step1=DB（`orders`に`mypage_token`/`mypage_expires_at`＋部分ユニークIdx・`20260618000000`）、Step2=発行/再発行/失効アクション＋受注詳細・一覧の発行UI、Step3=公開表示ページ `app/mypage/[token]/`（検証層`lib/mypage/load.ts`と表示層`MypageView`を分離・ステータス連動）、Step4=課金ゲーティング（`lib/entitlements.ts`・UI＋アクション両ガード・管理者バイパス）。dev確認中に「service_role直読みで42501→not_found」を発見し、案B（SECURITY DEFINER関数 `mypage_get_by_token`・`20260618010000`）で最小権限読み取りに変更＋loaderのerrorログ化。公開ルートのため `lib/supabase/proxy.ts` に `/mypage` を未認証許可で追加 ｜ DBマイグレ2本（dev適用済・prod未反映）＋コード
 - （以降追記）
