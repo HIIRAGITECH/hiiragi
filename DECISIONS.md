@@ -28,12 +28,12 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-18（お客様マイページ機能 dev実装・動作確認完了）
+最終更新: 2026-06-20（お客様マイページ機能 prod反映完了・本番稼働／prod反映漏れ棚卸し）
 
 | 領域 | 状態 |
 |---|---|
 | 受注・見積・請求・顧客・部品在庫・作業メニュー・入金・売上・PDF・ダッシュボード | ✅ 本番稼働中（SaaSの基本機能は一通り揃っている） |
-| お客様マイページ（作業状況の共有URL） | ✅ dev実装・動作確認完了（prod未反映）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000） |
+| お客様マイページ（作業状況の共有URL） | ✅ dev・prod両方反映完了・本番稼働（2026-06-20 prod適用・障害復旧）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000・prod適用済・関数EXECUTEはservice_roleのみ） |
 | 受注明細：部品在庫から追加 | ✅ 完了・本番反映済み（Step 1 / commit a60e1bf） |
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
 | Stripe Billing | ✅ mainにマージ済み（merge commit `08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認 |
@@ -114,6 +114,26 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-20 ── マイページ機能 prod反映（本番障害復旧）
+
+- **経緯**：マイページのコードは6/18にmainへpush・本番デプロイ済みだったが、
+  prod DBへのマイグレーション2本が未適用のまま放置されていた。
+  別チャット（業販対応）で本番受注一覧を開いた際に
+  「column orders.mypage_token does not exist」で受注一覧が全滅する障害が発生。
+- **原因**：コードは `mypage_token` 列を参照するが、prod DBに列が無い（コードとDBの食い違い）。
+  「dev完成・prod反映は別作業」のラグが顕在化したもの。
+- **対応**：以下2マイグレーションをprodにSQL Editorで手動適用（単一トランザクション・BEGIN/COMMIT）。
+  - `20260618000000_add_mypage_token_to_orders`（`mypage_token`/`mypage_expires_at`列＋部分UNIQUE index）
+  - `20260618010000_create_mypage_get_by_token`（SECURITY DEFINER関数）
+- **検証完了**：列2・index・関数・台帳2件すべてprodに存在を確認。
+  関数のEXECUTE権限も service_role のみ（anon/authenticated/public=false）でdevと完全一致。
+  本番受注一覧の表示も復旧を確認。
+- prod MCPはread_only維持・書き込みは手動SQLの運用ルールに従った。
+- **【教訓】devでDB変更を伴う機能を完成させたら、コードを本番デプロイする前または同時に
+  prod DBへのマイグレーション適用を必ずセットで行う。** コードだけ先行デプロイすると
+  「列が無くて即落ち」の本番障害になる。特に複数チャット・複数PCで本番を並行して
+  触る場合、prod反映の有無が伝わりにくいので要注意。
 
 ### 2026-06-18 ── お客様マイページ機能 dev完成
 
@@ -446,10 +466,29 @@
     書き込みが必要な操作はブラウザのSQL Editorで一度きり実行する運用。
   - 補足: `create_subscriptions` は dev(20260530162846)/prod(20260530162608) で version timestamp が異なり、同名でも別物扱い。
   - ⚠️ 別件: `create_shop_assets_bucket` は台帳にあるが dev/prod とも実体（バケット）が無い。画像保存機能が依存していないか別途要確認。
-- **【要対応】本番に Stripe 2カラムが欠落**: prod の `subscriptions` テーブルに
-  `stripe_customer_id` / `stripe_subscription_id` が**無い**（devにはある＝`add_stripe_to_subscriptions` がprod未適用）。
-  → このままStripe連携を本番で動かすとカラム不在エラー（42703）で落ちる。**Stripeを本番稼働させる前に必ず追加すること**。
-  Stripeコードは 2026-06-17 に main マージ済み（`08f8b1e`）だが、本番Webhook/Vercelデプロイ・prod DB反映は未投入のため今すぐ壊れてはいない。本番稼働を始める前に必ず適用すること。
+- **【棚卸し】prod未反映オブジェクトの全体確認（2026-06-20時点）**:
+  マイページ障害を受けて、コードが参照するDBオブジェクト（全 `.from()`／`.rpc()`／`lib/types.ts`型）を
+  prodで実体ベースに確認した結果。
+  - **【解消済】mypage関連**（`mypage_token`/`mypage_expires_at`列・部分UNIQUE index・`mypage_get_by_token`関数）
+    → 本日prod適用完了。関数EXECUTEはservice_roleのみでdev一致。
+  - **【要対応・黄】`subscriptions.stripe_customer_id` / `stripe_subscription_id` の2列がprod未反映**。
+    - devにはあり（`add_stripe_to_subscriptions`=`20260531120000` 適用済み）、prodには無い。
+    - 参照コード：`app/api/stripe/webhook/route.ts`（書込・`.eq("stripe_customer_id")`）、
+      `app/dashboard/billing/actions.ts`（`.select("stripe_customer_id")`）、`billing/page.tsx`（表示）、`lib/types.ts`。
+    - 現状：本番でStripe決済は未稼働のため、今は障害化していない（黄）。
+    - ⚠️ **prodでStripe課金を有効化する前に必ず `20260531120000_add_stripe_to_subscriptions.sql` 相当を適用すること。**
+      適用前にStripe決済を本番で動かすと、Webhook受信時/課金ポータル表示時に
+      「column does not exist」（42703）で500エラーになる（黄→赤に転じる）。
+    - 関連：service_roleへのGRANTも要確認（`subscriptions`は`20260531140000`で付与済みだが、
+      prod反映時に同じGRANTが入るか確認すること）。
+  - **【問題なし】上記以外でコードが参照するテーブル・カラム・RPC関数はすべてprodに実在を確認**
+    （`orders.drive_folder_id`・`customers.customer_type`・`parts_inventory_variants.markup_rate`・
+    在庫系RPC `deduct/consume/reserve/release/reverse/unconsume_order_stock`・`google_integrations`列一式 等）。
+    今回のような「即落ち」リスクはStripe以外に検出されず。
+  - **【参考】dev/prodスキーマ乖離の認識**: prodには現行コードが参照しないレガシー列・テーブルが多数残存
+    （`orders.order_number`/`qr_url`/`labor_total`/`shaken_jibai` 等の旧列、`products`/`users`テーブル等）。
+    これらは障害源ではない（prodが「多い」方向の差分）が、dev/prodのスキーマが歴史的に乖離している事実は
+    今後のmigration設計時に留意する。
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
@@ -506,4 +545,5 @@
 - **2026-06-09** ｜ 次テーマ ｜ PDF複数ページのテーブルヘッダ繰り返し（2ページ目以降に品名/数量/単価等の見出しが出ず読みづらい）。印刷用=thead繰り返し、react-pdf=fixed属性。業販対応とは独立した改善 ｜ 着手予定
 - **2026-06-17** ｜ Stripe統合＋マイページ設計 ｜ `stripe-保存_0604` をmainにマージ（衝突は `.mcp.json` のみ・build通過・push済 `08f8b1e`）。マイページはURLトークン/案件ごと/45日/`invoice_status` 連動/PDF非貼付/案A表示で設計確定、実装は次回 ｜ commit対象：DECISIONS.md
 - **2026-06-18** ｜ マイページ実装 ｜ お客様マイページをStep1〜4でdev実装・動作確認完了。Step1=DB（`orders`に`mypage_token`/`mypage_expires_at`＋部分ユニークIdx・`20260618000000`）、Step2=発行/再発行/失効アクション＋受注詳細・一覧の発行UI、Step3=公開表示ページ `app/mypage/[token]/`（検証層`lib/mypage/load.ts`と表示層`MypageView`を分離・ステータス連動）、Step4=課金ゲーティング（`lib/entitlements.ts`・UI＋アクション両ガード・管理者バイパス）。dev確認中に「service_role直読みで42501→not_found」を発見し、案B（SECURITY DEFINER関数 `mypage_get_by_token`・`20260618010000`）で最小権限読み取りに変更＋loaderのerrorログ化。公開ルートのため `lib/supabase/proxy.ts` に `/mypage` を未認証許可で追加 ｜ DBマイグレ2本（dev適用済・prod未反映）＋コード
+- **2026-06-20** ｜ マイページ本番障害復旧＋prod反映漏れ棚卸し ｜ 別チャットで本番受注一覧が「column orders.mypage_token does not exist」で全滅する障害が発生。原因はコード（6/18本番デプロイ済）が`mypage_token`を参照するのにprod DBへmigration2本が未適用だったこと。対応＝`20260618000000`+`20260618010000`をSQL Editorで単一トランザクション手動適用→列2・index・関数・台帳2件・関数EXECUTE（service_roleのみ）をprodで検証し復旧確認。あわせてコード参照DBオブジェクトをprod実体ベースで全棚卸し→残る欠落は`subscriptions`のStripe2列のみ（黄・Stripe本番稼働前に要適用）、他は全て実在。prod MCPはread_only維持・書込は手動SQL ｜ prod DB手動適用（mypage2本）＋DECISIONS.md記録（コード変更なし）
 - （以降追記）
