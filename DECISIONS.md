@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-20（Stripe土台prod反映＝subscriptionsにstripe列適用。Stripe本番化に着手）
+最終更新: 2026-06-21（課金アクセス制御＝完全ロック型を実装・本番反映。special_freeを無料協力者区分として正式サポート。既存3ユーザーをspecial_free/activeで恒久無料有効化）
 
 | 領域 | 状態 |
 |---|---|
@@ -36,7 +36,8 @@
 | お客様マイページ（作業状況の共有URL） | ✅ dev・prod両方反映完了・本番稼働（2026-06-20 prod適用・障害復旧）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000・prod適用済・関数EXECUTEはservice_roleのみ）。エンドユーザー向けプライバシー表示をフッターに追加（コーポレートサイト https://hiiragi-tech.app/privacy へリンク・2026-06-20） |
 | 受注明細：部品在庫から追加 | ✅ 完了・本番反映済み（Step 1 / commit a60e1bf） |
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
-| Stripe Billing | 🚧 mainマージ済み（`08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認。**prod DBにStripe列適用済み（2026-06-20＝subscriptionsにstripe_customer_id/stripe_subscription_id＋index2本／台帳20260531120000登録）**。土台のみ完了、Stripe本番化（liveキー・本番Webhook・本番price・アクセス制御）は未対応 |
+| Stripe Billing | 🚧 mainマージ済み（`08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認。**prod DBにStripe列適用済み（2026-06-20）**。**課金アクセス制御（完全ロック型）を実装・本番反映済み（2026-06-21）＝trial切れ・suspendedで/lockedへ、billingは例外、管理者バイパス、残7日警告バナー、special_free対応**。Stripe本番化の残（liveキー・本番Webhook・本番price・billing金額980→580）は未対応 |
+| 課金アクセス制御（完全ロック型） | ✅ 実装・本番反映済み（2026-06-21）。middleware＋getAccessStateで`evaluateAccess`判定。有効でない契約（trial切れ・status=suspended）は/dashboard配下を見せず/lockedへ誘導（billing・lockedは例外で通す）。管理者（ADMIN_EMAIL）は常にバイパス。trialは期限で判定（status=activeのままでも切れる）、paid/special_freeはstatusで判定。残7日で毎日警告バナー。**既存3ユーザーはspecial_free/activeで恒久無料有効化済み＝ロックされない** |
 | 管理画面リニューアル（/admin） | ✅ mainにマージ済み（`08f8b1e` に同梱）。/admin・/admin/users/[id] が main で利用可能 |
 | 車種別定価（利益エンジン） | 🚧 Step 3-1（テーブル）・3-2a（variant登録UI）・3-2b（明細への⭐呼び出し＋定価反映）完了・本番反映済み。利益エンジンが本番で稼働。次はStep 3-2c（スナップショット・任意） |
 
@@ -114,6 +115,41 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-21 ── 課金アクセス制御（完全ロック型）実装・本番反映＋special_free正式サポート
+
+- **背景**：§5の最重要残タスクだった「トライアル切れ・未課金時の機能ロックが無い（suspendedでも全機能が使える）」を解消。
+  Stripe本番化の前提として、有効でない契約を弾く土台を先に入れる。
+- **設計＝完全ロック型（2026-06-20合意）**：
+  - 有効(valid)の定義 = `plan==='trial'` のとき `status==='active' && trial_ends_at が未来` ／
+    それ以外（paid / special_free / free）は `status==='active'`。
+  - **trialだけ期限で判定する理由**：トリガーが新規ユーザーを常に `status='active'` で作るため、status だけ見ると
+    トライアルが永久に切れない。期限切れを効かせるため trial は `trial_ends_at` で判定する。
+  - 有効でない契約は `/dashboard` 配下を見せず `/locked` へリダイレクト。**例外**＝`/dashboard/billing`（課金しないと
+    解除できない）と `/locked` 自身は通す。管理者（`ADMIN_EMAIL`）は常にバイパス（DB無関係・警告も出さない）。
+- **実装**：
+  - `lib/subscription.ts`：純粋関数 `evaluateAccess(sub, nowMs)`（locked/trialDaysLeftを導出・テスト可能）＋
+    `getAccessState()`（admin判定＋自テナント1行読み）。middleware（edge）からも import するため、server依存
+    （next/headers系）は `getAccessState` 内で動的importし、edgeバンドルを汚さない。
+  - `lib/supabase/proxy.ts`（middleware）：ゲート判定が要るのは `/dashboard` 配下か `/locked` のときだけ
+    （それ以外はDB読みを省く）。RLSオーナー限定の subscriptions をユーザーCookie付きSSRクライアントで1行読む。
+  - `app/locked/page.tsx`：ロック画面（ダッシュボードのシェルを継承しない独立画面）。trial切れ/停止中で文面出し分け。
+    直リンクで来ても有効ならダッシュボードへ戻す（ループ防止）。
+  - `app/dashboard/layout.tsx`：残り7日（1〜7日）で毎日「無料トライアルはあと N 日で終了します」警告バナー。
+  - `app/dashboard/billing/page.tsx`：ステータス表示を `evaluateAccess` と整合（trialはstatus=activeでも期限切れなら「試用期間終了」）。
+- **special_free を無料協力者区分として正式サポート**：
+  - 「全員無料」はあくまで**今いる人**の措置。将来この協力者を課金ユーザーと**データ上で見分けられる**よう、
+    `plan='special_free'` を正式採用（判定ロジックは paid と完全同一＝status のみ。区別はデータだけ）。
+  - `evaluateAccess` に `paid || special_free` の**明示分岐**を追加（従来は else に落ちて暗黙的に正しかったが、コードで明示）。
+  - billing画面では special_free ユーザーに申し込みフォームを出さず「特別無料プランでご利用中」の案内を表示（不自然回避）。
+  - 型定義（`SUBSCRIPTION_PLANS`）・管理画面edit-form・PLAN_LABELは既に special_free 対応済みで変更不要。
+  - DB：prod の `plan`/`status` は `text` 型でCHECK制約なし → special_free はそのまま入る（**DBスキーマ変更不要**）。
+- **本番の有効化（手動SQL・順序＝先にデータ→後でコードデプロイ）**：コードデプロイでロックされないよう、
+  先にprod既存3ユーザー（info@含む）を `special_free / active` に手動UPDATE（SQL Editor）。`trial_ends_at`/`options`は現状維持。
+  管理者 info@ もバイパスとは別にデータ上も有効化（二重安全＋「管理者がtrial」の見た目の違和感解消）。
+- **新規ユーザーは現状維持**：トリガー `create_default_subscription` は引き続き `trial / active / now()+30日` を自動付与。
+  全員無料は既存ユーザー限定で、新規は通常のトライアル→課金フローに乗せる。
+- `npm run build` 通過。DB変更なし（判定に使う列は既存・prod反映済み）。Vercel自動デプロイ。
 
 ### 2026-06-20 ── Stripe土台 prod反映（stripe列）
 
@@ -528,10 +564,11 @@
     （`orders.order_number`/`qr_url`/`labor_total`/`shaken_jibai` 等の旧列、`products`/`users`テーブル等）。
     これらは障害源ではない（prodが「多い」方向の差分）が、dev/prodのスキーマが歴史的に乖離している事実は
     今後のmigration設計時に留意する。
-- **【要対応・Stripe本番化の残タスク】土台（prod stripe列）は完了。以下が未対応（2026-06-20時点）**：
-  - **アクセス制御が未実装（最重要・本番課金前に必須）**：トライアル切れ・`status=suspended`・未課金時の
-    機能ロックが無い。`app/dashboard/layout.tsx` は authチェックのみで subscription を見ていない。
-    → **suspended でも全機能が使える状態**。Webhookは解約/未払いで `suspended` に倒すが、誰も読んでいない。
+- **【要対応・Stripe本番化の残タスク】土台（prod stripe列）＋アクセス制御は完了。以下が未対応（2026-06-21時点）**：
+  - **【解消済・2026-06-21】アクセス制御（完全ロック型）を実装・本番反映**：trial切れ・`status=suspended` で
+    `/dashboard` 配下を `/locked` へ誘導（billing・lockedは例外、管理者バイパス、残7日警告バナー、special_free対応）。
+    middleware＋`getAccessState`の `evaluateAccess` 判定。詳細は §4 の 2026-06-21 エントリ。
+    既存3ユーザーは special_free/active で恒久無料有効化済み＝デプロイ後もロックされない。
   - **本番モード設定（Vercel環境変数）**：live キー（`sk_live`/`pk_live`）・本番price ID・
     本番Webhookエンドポイント（`https://app.hiiragi-tech.app/api/stripe/webhook`）登録・
     本番 `STRIPE_WEBHOOK_SECRET`・本番 `NEXT_PUBLIC_SITE_URL` を設定。
@@ -540,8 +577,10 @@
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
-- **【要確認】prod の create_default_subscription トリガ**: prod台帳に `revoke_..._execute` があり EXECUTE権限は剥奪
-  された形跡だが、トリガ本体（新規ユーザ作成時の自動INSERT）は dev/prod とも生きている。意図通りか中途半端か要確認。
+- **【確認済・2026-06-21】prod の create_default_subscription トリガ**: トリガ本体（新規ユーザ作成時の自動INSERT）は
+  prodで稼働中。`plan='trial' / status='active' / trial_ends_at=now()+interval '30 days' / options全false` を付与
+  （`ON CONFLICT (user_id) DO NOTHING`）。**意図通り＝新規ユーザーは引き続き30日トライアル自動付与（現状維持）**。
+  「全員無料」は既存ユーザー限定の措置で、新規は通常のトライアル→課金フローに乗る。
 - **【解消済み】Stripeブランチ（stripe-保存_0604）のマージ衝突**: 2026-06-17 に main へマージ完了（merge commit `08f8b1e`）。
   事前に origin 最新（Googleドライブ連携入り）を rebase で取り込んだ結果、実際の衝突は **`.mcp.json` 1ファイルのみ**で済んだ
   （事前予想していた orders系・`ensure.ts`・6/4の3マイグレの衝突は全て auto-merge で吸収された）。
@@ -595,4 +634,5 @@
 - **2026-06-18** ｜ マイページ実装 ｜ お客様マイページをStep1〜4でdev実装・動作確認完了。Step1=DB（`orders`に`mypage_token`/`mypage_expires_at`＋部分ユニークIdx・`20260618000000`）、Step2=発行/再発行/失効アクション＋受注詳細・一覧の発行UI、Step3=公開表示ページ `app/mypage/[token]/`（検証層`lib/mypage/load.ts`と表示層`MypageView`を分離・ステータス連動）、Step4=課金ゲーティング（`lib/entitlements.ts`・UI＋アクション両ガード・管理者バイパス）。dev確認中に「service_role直読みで42501→not_found」を発見し、案B（SECURITY DEFINER関数 `mypage_get_by_token`・`20260618010000`）で最小権限読み取りに変更＋loaderのerrorログ化。公開ルートのため `lib/supabase/proxy.ts` に `/mypage` を未認証許可で追加 ｜ DBマイグレ2本（dev適用済・prod未反映）＋コード
 - **2026-06-20** ｜ マイページ本番障害復旧＋prod反映漏れ棚卸し ｜ 別チャットで本番受注一覧が「column orders.mypage_token does not exist」で全滅する障害が発生。原因はコード（6/18本番デプロイ済）が`mypage_token`を参照するのにprod DBへmigration2本が未適用だったこと。対応＝`20260618000000`+`20260618010000`をSQL Editorで単一トランザクション手動適用→列2・index・関数・台帳2件・関数EXECUTE（service_roleのみ）をprodで検証し復旧確認。あわせてコード参照DBオブジェクトをprod実体ベースで全棚卸し→残る欠落は`subscriptions`のStripe2列のみ（黄・Stripe本番稼働前に要適用）、他は全て実在。prod MCPはread_only維持・書込は手動SQL ｜ prod DB手動適用（mypage2本）＋DECISIONS.md記録（コード変更なし）
 - **2026-06-20** ｜ Stripe本番化 着手・土台prod反映 ｜ Stripe本番化に向け、まず`subscriptions`のStripe2列をprodへ適用（`20260531120000_add_stripe_to_subscriptions`相当）。SQL Editorで単一トランザクション手動適用＝`stripe_customer_id`/`stripe_subscription_id`列＋部分ユニークindex2本＋台帳`20260531120000`登録。検証（columns_ok/indexes_ok/ledger_ok）すべてtrueで完了。prod確認でservice_roleのDML権限は既に充足（ACL=`arwdDxtm`）＝GRANT migration（`20260531140000`）は機能的に不要と判明、anon権限差（prod=`arwdDxtm`／dev=`Dxtm`・RLSで実害なし）は別タスクとして記録。土台のみ完了でStripeは未本番稼働（liveキー・本番Webhook・本番price・アクセス制御が残・§5にリスト化） ｜ prod DB手動適用（stripe2列）＋DECISIONS.md記録（コード変更なし）
+- **2026-06-21** ｜ 課金アクセス制御＋special_free ｜ 完全ロック型のアクセス制御を実装・本番反映。`lib/subscription.ts`新設（純粋関数`evaluateAccess`＋`getAccessState`・edge/server分離のため動的import）、`lib/supabase/proxy.ts`にmiddlewareゲート（/dashboard配下・/lockedのみDB読み）、`app/locked/page.tsx`ロック画面（trial切れ/停止で文面出し分け・直リンク復帰）、`app/dashboard/layout.tsx`に残7日警告バナー、`app/dashboard/billing/page.tsx`のステータス表示を`evaluateAccess`と整合＋special_free案内。special_freeを無料協力者区分として正式サポート（evaluateAccessで明示分岐・billingで申込フォーム非表示・型/管理画面/ラベルは既存対応済み）。**順序＝先にデータ有効化→後でコードデプロイ**：prod既存3ユーザー（info@含む）をSQL Editorでspecial_free/activeに手動UPDATE（trial_ends_at/options現状維持）してからpush。新規はトリガーで30日トライアル自動付与のまま（現状維持を確認）。DB変更なし・build通過・Vercel自動デプロイ ｜ コード（subscription.ts/proxy.ts/locked/layout/billing）＋prod手動UPDATE（3行）＋DECISIONS.md
 - （以降追記）

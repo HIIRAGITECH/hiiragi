@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { isAdmin } from "@/lib/admin";
 import { createClient } from "@/lib/supabase/server";
+import { getAccessState } from "@/lib/subscription";
 import { ensureSystemCategories } from "@/lib/work-item-categories/ensure";
 import { signOut } from "./actions";
 import Sidebar from "./sidebar";
@@ -27,6 +29,14 @@ export default async function DashboardLayout({
   // 失敗してもサイドバーは出すため、エラーは無視して 0 に倒す。
   const counts = await fetchSidebarCounts();
 
+  // トライアル残り7日以内の警告（管理者以外・1〜7日）。ロックは middleware 側で処理。
+  const access = await getAccessState();
+  const showTrialWarning =
+    !access.isAdmin &&
+    access.trialDaysLeft !== null &&
+    access.trialDaysLeft >= 1 &&
+    access.trialDaysLeft <= 7;
+
   return (
     <div className="flex flex-1 min-h-screen bg-[var(--color-cream)]">
       <Sidebar
@@ -36,6 +46,21 @@ export default async function DashboardLayout({
         signOutAction={signOut}
       />
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        {showTrialWarning ? (
+          <div className="px-8 pt-4">
+            <p className="wos-alert warn flex flex-wrap items-center gap-x-2">
+              <span>
+                無料トライアルはあと {access.trialDaysLeft} 日で終了します。
+              </span>
+              <Link
+                href="/dashboard/billing"
+                className="underline underline-offset-2 font-semibold"
+              >
+                プランに申し込む
+              </Link>
+            </p>
+          </div>
+        ) : null}
         {children}
       </main>
     </div>

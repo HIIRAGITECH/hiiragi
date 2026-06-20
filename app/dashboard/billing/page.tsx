@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { evaluateAccess } from "@/lib/subscription";
 import type { Subscription } from "@/lib/types";
 import BillingForm from "./billing-form";
 import { openCustomerPortal } from "./actions";
@@ -44,7 +45,28 @@ export default async function BillingPage({
   const sub = (subRow as Subscription | null) ?? null;
 
   const isPaidActive = sub?.plan === "paid" && sub.status === "active";
+  // 特別無料（無料協力者）プラン。課金なしで恒久有効のため、申し込みフォームは出さない。
+  const isSpecialFree = sub?.plan === "special_free";
   const mypageOn = sub?.options?.mypage === true;
+
+  // ステータス表示は middleware と同じ evaluateAccess で判定し、実態と一致させる
+  //（trial は status=active のままでも期限切れなら「試用期間終了」と出す）。
+  const access = evaluateAccess(sub, Date.now());
+  const statusOk = !!sub && !access.locked;
+  const statusLabel = !sub
+    ? "—"
+    : access.locked
+      ? sub.plan === "trial"
+        ? "試用期間終了"
+        : "停止中"
+      : sub.plan === "trial"
+        ? "試用期間中"
+        : "稼働中";
+  // 試用期限は trial のときだけ表示。過去日なら「（終了）」を添える。
+  const trialExpired =
+    sub?.plan === "trial" &&
+    sub.trial_ends_at != null &&
+    new Date(sub.trial_ends_at).getTime() <= Date.now();
 
   return (
     <>
@@ -87,25 +109,30 @@ export default async function BillingPage({
                 <span
                   className="inline-block border px-2 py-0.5 text-xs"
                   style={{
-                    borderColor:
-                      sub?.status === "active"
-                        ? "var(--color-go)"
-                        : "var(--color-warn)",
-                    color:
-                      sub?.status === "active"
-                        ? "var(--color-go)"
-                        : "var(--color-warn)",
+                    borderColor: statusOk
+                      ? "var(--color-go)"
+                      : "var(--color-warn)",
+                    color: statusOk
+                      ? "var(--color-go)"
+                      : "var(--color-warn)",
                   }}
                 >
-                  {sub?.status === "active" ? "稼働中" : "停止"}
+                  {statusLabel}
                 </span>
               </dd>
               <dt className="text-[var(--color-ink-mid)]">マイページ</dt>
               <dd>{mypageOn ? "ON" : "OFF"}</dd>
-              {sub?.trial_ends_at && (
+              {sub?.plan === "trial" && sub.trial_ends_at && (
                 <>
                   <dt className="text-[var(--color-ink-mid)]">試用期限</dt>
-                  <dd>{formatDateJp(sub.trial_ends_at)}</dd>
+                  <dd>
+                    {formatDateJp(sub.trial_ends_at)}
+                    {trialExpired && (
+                      <span className="ml-1 text-[var(--color-warn)]">
+                        （終了）
+                      </span>
+                    )}
+                  </dd>
                 </>
               )}
               {sub?.stripe_subscription_id && (
@@ -136,6 +163,23 @@ export default async function BillingPage({
                   マイページオプションの追加もポータルから行えます。
                 </p>
               )}
+            </section>
+          ) : isSpecialFree ? (
+            <section className="wos-card space-y-3">
+              <div className="wos-sec-label">プラン管理</div>
+              <p className="text-sm text-[var(--color-ink-mid)]">
+                現在「特別無料プラン」でご利用いただいています。お支払いの手続きは不要です。
+              </p>
+              <p className="text-xs text-[var(--color-ink-light)] pt-2 border-t border-[var(--color-line)]">
+                プラン内容のご相談は{" "}
+                <a
+                  href="mailto:info@hiiragi-tech.app"
+                  className="underline underline-offset-2 text-[var(--color-ink-mid)]"
+                >
+                  info@hiiragi-tech.app
+                </a>{" "}
+                までお問い合わせください。
+              </p>
             </section>
           ) : (
             <BillingForm defaultMypage={false} />
