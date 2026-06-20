@@ -145,8 +145,12 @@
   - 型定義（`SUBSCRIPTION_PLANS`）・管理画面edit-form・PLAN_LABELは既に special_free 対応済みで変更不要。
   - DB：prod の `plan`/`status` は `text` 型でCHECK制約なし → special_free はそのまま入る（**DBスキーマ変更不要**）。
 - **本番の有効化（手動SQL・順序＝先にデータ→後でコードデプロイ）**：コードデプロイでロックされないよう、
-  先にprod既存3ユーザー（info@含む）を `special_free / active` に手動UPDATE（SQL Editor）。`trial_ends_at`/`options`は現状維持。
-  管理者 info@ もバイパスとは別にデータ上も有効化（二重安全＋「管理者がtrial」の見た目の違和感解消）。
+  先にprod既存ユーザー**全員（3名）**を `special_free / active` に手動UPDATE（SQL Editor）。`trial_ends_at`/`options`は現状維持。
+  - `info@hiiragi-tech.app`（管理者・バイパス＋データも有効化で二重に安全。「管理者がtrial」の見た目の違和感も解消）
+  - `circuit.dqn@gmail.com`（テスター）
+  - `m.onodera.118@gmail.com`（小野寺氏 個人）
+  - **理由**：まだ正式課金前のため現状の利用者からは課金しない。special_free 区分にしておくことで、
+    将来「無料協力者」と「正規課金ユーザー」をデータ上で区別できる（判定ロジックは paid と同一・status のみ）。
 - **新規ユーザーは現状維持**：トリガー `create_default_subscription` は引き続き `trial / active / now()+30日` を自動付与。
   全員無料は既存ユーザー限定で、新規は通常のトライアル→課金フローに乗せる。
 - `npm run build` 通過。DB変更なし（判定に使う列は既存・prod反映済み）。Vercel自動デプロイ。
@@ -574,6 +578,10 @@
     本番 `STRIPE_WEBHOOK_SECRET`・本番 `NEXT_PUBLIC_SITE_URL` を設定。
   - **本番price作成**：Stripe本番モードで商品の価格を作成。**マイページオプションは580円に**（旧テストは980円）。
   - **`billing-form.tsx` のハードコード金額（¥1,980/¥980）を本番priceと一致させる**（980→580の修正含む）。
+- **【TODO・2026-06-21】special_free ユーザーのマイページを使えるようにする**：special_free 化した3名は
+  `options.mypage=false` のままなので、現状マイページ発行ができない（マイページゲートは plan ではなく `options.mypage` で判定＝
+  `lib/entitlements.ts` の `canUseMypage`）。無料協力者にマイページを使ってもらうには `options.mypage=true` への手動UPDATEが必要。
+  次回、誰を有効にするか決めて対応する（管理者 info@ は `canUseMypage` がバイパスするので対象外）。
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
@@ -636,3 +644,16 @@
 - **2026-06-20** ｜ Stripe本番化 着手・土台prod反映 ｜ Stripe本番化に向け、まず`subscriptions`のStripe2列をprodへ適用（`20260531120000_add_stripe_to_subscriptions`相当）。SQL Editorで単一トランザクション手動適用＝`stripe_customer_id`/`stripe_subscription_id`列＋部分ユニークindex2本＋台帳`20260531120000`登録。検証（columns_ok/indexes_ok/ledger_ok）すべてtrueで完了。prod確認でservice_roleのDML権限は既に充足（ACL=`arwdDxtm`）＝GRANT migration（`20260531140000`）は機能的に不要と判明、anon権限差（prod=`arwdDxtm`／dev=`Dxtm`・RLSで実害なし）は別タスクとして記録。土台のみ完了でStripeは未本番稼働（liveキー・本番Webhook・本番price・アクセス制御が残・§5にリスト化） ｜ prod DB手動適用（stripe2列）＋DECISIONS.md記録（コード変更なし）
 - **2026-06-21** ｜ 課金アクセス制御＋special_free ｜ 完全ロック型のアクセス制御を実装・本番反映。`lib/subscription.ts`新設（純粋関数`evaluateAccess`＋`getAccessState`・edge/server分離のため動的import）、`lib/supabase/proxy.ts`にmiddlewareゲート（/dashboard配下・/lockedのみDB読み）、`app/locked/page.tsx`ロック画面（trial切れ/停止で文面出し分け・直リンク復帰）、`app/dashboard/layout.tsx`に残7日警告バナー、`app/dashboard/billing/page.tsx`のステータス表示を`evaluateAccess`と整合＋special_free案内。special_freeを無料協力者区分として正式サポート（evaluateAccessで明示分岐・billingで申込フォーム非表示・型/管理画面/ラベルは既存対応済み）。**順序＝先にデータ有効化→後でコードデプロイ**：prod既存3ユーザー（info@含む）をSQL Editorでspecial_free/activeに手動UPDATE（trial_ends_at/options現状維持）してからpush。新規はトリガーで30日トライアル自動付与のまま（現状維持を確認）。DB変更なし・build通過・Vercel自動デプロイ ｜ コード（subscription.ts/proxy.ts/locked/layout/billing）＋prod手動UPDATE（3行）＋DECISIONS.md
 - （以降追記）
+
+---
+
+## 7. 将来の改善テーマ（アイデア帳・小野寺氏メモ）
+
+> まだ着手しない「いつかやりたい」を流さず残す場所。優先度・実装方針は着手時に改めて決める。
+
+- **【将来】UIの見直し（情報の優先順位）**：ダッシュボード全体をもっとシンプルにしたい。
+  特に明細まわりで「品番の主張が強すぎる」ので、**顧客名・車両名を強調**する方向に情報の優先順位を組み替えたい。
+  品番は社内管理用（発注・廃番管理）であって、画面で一番目立つべきはお客様・車両という整理。
+- **【将来】品番のテナント間重複対策**：各テナントが似たような品番を付けると運用上ぶつかりうる。
+  テナント名にちなんだ要素をランダム付加するなどで、**テナント間で品番が重複しない**仕組みを検討。
+  部品の「2階建て構造」（在庫＝1階／請求カタログ＝2階・§4 2026-06-04参照）の設計とも関連しうるテーマ。
