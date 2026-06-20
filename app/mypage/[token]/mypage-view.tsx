@@ -138,7 +138,7 @@ function WorkSection({ order }: { order: MypageOrder }) {
     return (
       <Card title="作業状況">
         <p className="text-sm text-[var(--color-ink)]">
-          🔧 ただいま作業を進めております。
+          ただいま作業を進めております。
         </p>
         {order.items.length > 0 ? (
           <ul className="mt-3 flex flex-col gap-1.5">
@@ -176,7 +176,7 @@ function InvoiceSection({ order }: { order: MypageOrder }) {
     return (
       <Card title="お支払い">
         <p className="text-sm font-medium text-[var(--color-ink)]">
-          🙇 お支払いを確認いたしました。ありがとうございました。
+          お支払いを確認いたしました。ありがとうございました。
         </p>
         {order.paid_at ? (
           <p className="mt-2 text-xs text-[var(--color-ink-light)]">
@@ -378,7 +378,45 @@ function Footer({ view }: { view: MypageView }) {
         {shop.address ? <div>{shop.address}</div> : null}
         {shop.phone ? <div>TEL: {shop.phone}</div> : null}
       </div>
+      <PrivacyNote />
     </footer>
+  );
+}
+
+// エンドユーザー向けの控えめなプライバシー表示。フッター基調（text-xs / ink-light）に揃える。
+function PrivacyNote() {
+  return (
+    <div className="mx-auto mt-4 w-full max-w-sm text-left leading-relaxed">
+      <div className="mb-2 font-semibold text-[var(--color-ink-mid)]">
+        このページについて
+      </div>
+      <ul className="flex flex-col gap-1.5">
+        {[
+          "表示されている情報は、ご依頼いただいた店舗が登録・管理しています。",
+          "このページは、専用のリンク（URL）をお持ちの方のみご覧いただけます。リンクには有効期限があります。",
+          "本ページは、HIIRAGI TECH株式会社が提供するバイク整備工場向け業務管理システム「HIIRAGI」により表示されています。",
+        ].map((text, i) => (
+          <li key={i} className="before:mr-1.5 before:content-['・']">
+            {text}
+          </li>
+        ))}
+        <li className="before:mr-1.5 before:content-['・']">
+          お客様の個人情報の取扱いについては
+          <a
+            href="https://hiiragi-tech.app/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2 text-[var(--color-ink-mid)]"
+          >
+            プライバシーポリシー
+          </a>
+          をご覧ください。
+        </li>
+        <li className="before:mr-1.5 before:content-['・']">
+          表示内容に関するお問い合わせは、ご依頼いただいた店舗までお願いいたします。
+        </li>
+      </ul>
+    </div>
   );
 }
 
