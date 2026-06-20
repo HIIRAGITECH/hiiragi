@@ -28,7 +28,7 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-20（マイページにエンドユーザー向けプライバシー表示を追加／prod反映完了・本番稼働）
+最終更新: 2026-06-20（Stripe土台prod反映＝subscriptionsにstripe列適用。Stripe本番化に着手）
 
 | 領域 | 状態 |
 |---|---|
@@ -36,7 +36,7 @@
 | お客様マイページ（作業状況の共有URL） | ✅ dev・prod両方反映完了・本番稼働（2026-06-20 prod適用・障害復旧）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000・prod適用済・関数EXECUTEはservice_roleのみ）。エンドユーザー向けプライバシー表示をフッターに追加（コーポレートサイト https://hiiragi-tech.app/privacy へリンク・2026-06-20） |
 | 受注明細：部品在庫から追加 | ✅ 完了・本番反映済み（Step 1 / commit a60e1bf） |
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
-| Stripe Billing | ✅ mainにマージ済み（merge commit `08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認 |
+| Stripe Billing | 🚧 mainマージ済み（`08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認。**prod DBにStripe列適用済み（2026-06-20＝subscriptionsにstripe_customer_id/stripe_subscription_id＋index2本／台帳20260531120000登録）**。土台のみ完了、Stripe本番化（liveキー・本番Webhook・本番price・アクセス制御）は未対応 |
 | 管理画面リニューアル（/admin） | ✅ mainにマージ済み（`08f8b1e` に同梱）。/admin・/admin/users/[id] が main で利用可能 |
 | 車種別定価（利益エンジン） | 🚧 Step 3-1（テーブル）・3-2a（variant登録UI）・3-2b（明細への⭐呼び出し＋定価反映）完了・本番反映済み。利益エンジンが本番で稼働。次はStep 3-2c（スナップショット・任意） |
 
@@ -114,6 +114,27 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-20 ── Stripe土台 prod反映（stripe列）
+
+- **経緯**：マイページ障害対応時の棚卸しで、subscriptions の `stripe_customer_id` /
+  `stripe_subscription_id` がprod未反映と判明していた（黄・Stripe本番稼働前に必須）。
+  Stripe本番化に着手するにあたり、まず土台としてこの列をprodに適用。
+- **適用内容**：`20260531120000_add_stripe_to_subscriptions` 相当を
+  prod SQL Editorで手動適用（単一トランザクション・冪等）。
+  - `stripe_customer_id` / `stripe_subscription_id` 列（text）
+  - 部分ユニークindex 2本（`subscriptions_stripe_customer_id_uidx` /
+    `subscriptions_stripe_subscription_id_uidx`・`WHERE ... IS NOT NULL`）
+  - 台帳に `20260531120000`（name=`add_stripe_to_subscriptions`）登録
+- **検証完了**：`columns_ok` / `indexes_ok` / `ledger_ok` すべて true。
+- **prod確認で判明した補足**：
+  - service_role の subscriptions DML権限はprodで既に充足（ACL=`arwdDxtm`）。
+    `grant_subscriptions_to_service_role`（`20260531140000`）は機能的に不要だった
+    （Supabaseベースライン付与で既に有り。台帳に記録が無いだけ）。
+  - `create_subscriptions` テーブル・トライアル自動付与トリガー
+    （`auth_users_create_subscription`）はprodで稼働中。RLS（本人SELECT）も有効。
+- **重要**：列を足しただけで**Stripeはまだ本番稼働していない**
+  （live キー・本番Webhook・本番price 未設定）。残タスクは §5 にリスト化。
 
 ### 2026-06-20 ── マイページにエンドユーザー向けプライバシー表示を追加（本番反映）
 
@@ -488,16 +509,17 @@
   prodで実体ベースに確認した結果。
   - **【解消済】mypage関連**（`mypage_token`/`mypage_expires_at`列・部分UNIQUE index・`mypage_get_by_token`関数）
     → 本日prod適用完了。関数EXECUTEはservice_roleのみでdev一致。
-  - **【要対応・黄】`subscriptions.stripe_customer_id` / `stripe_subscription_id` の2列がprod未反映**。
-    - devにはあり（`add_stripe_to_subscriptions`=`20260531120000` 適用済み）、prodには無い。
-    - 参照コード：`app/api/stripe/webhook/route.ts`（書込・`.eq("stripe_customer_id")`）、
-      `app/dashboard/billing/actions.ts`（`.select("stripe_customer_id")`）、`billing/page.tsx`（表示）、`lib/types.ts`。
-    - 現状：本番でStripe決済は未稼働のため、今は障害化していない（黄）。
-    - ⚠️ **prodでStripe課金を有効化する前に必ず `20260531120000_add_stripe_to_subscriptions.sql` 相当を適用すること。**
-      適用前にStripe決済を本番で動かすと、Webhook受信時/課金ポータル表示時に
-      「column does not exist」（42703）で500エラーになる（黄→赤に転じる）。
-    - 関連：service_roleへのGRANTも要確認（`subscriptions`は`20260531140000`で付与済みだが、
-      prod反映時に同じGRANTが入るか確認すること）。
+  - **【解消済・2026-06-20】`subscriptions.stripe_customer_id` / `stripe_subscription_id` の2列をprod適用**。
+    - `20260531120000_add_stripe_to_subscriptions` 相当をprod SQL Editorで手動適用（列2＋部分UNIQUE index2＋台帳登録）。
+      検証（columns_ok/indexes_ok/ledger_ok）すべて true。これでWebhook受信/ポータル表示時の42703（column does not exist）リスクは解消。
+    - service_roleのGRANTは追加不要だった：prodは既にACL=`arwdDxtm`（Supabaseベースライン付与）で
+      `20260531140000_grant_subscriptions_to_service_role` は機能的に不要。台帳にも登録していない（実体が既にあるため）。
+  - **【要対応・別タスク】prod の anon 権限が dev と異なる（2026-06-20発見）**：
+    - prod の `subscriptions` で `anon` ロールに full DML（ACL=`arwdDxtm`）が付いたまま。dev は `Dxtm` に絞り済み（read/write剥奪）。
+    - 現状：RLS有効＋anon向けポリシー無し＋`auth.uid()=null` のため実害は無い（読めalso書けない）。
+    - ただし dev で行ったハードニングが prod に未適用。将来の保険として prod の anon を dev同様に絞るべき。
+      今回のStripe土台スコープからは外し、別タスクとして記録。
+    - 他テーブルでも同様の anon 権限差がないか、是正時にあわせて確認すること。
   - **【問題なし】上記以外でコードが参照するテーブル・カラム・RPC関数はすべてprodに実在を確認**
     （`orders.drive_folder_id`・`customers.customer_type`・`parts_inventory_variants.markup_rate`・
     在庫系RPC `deduct/consume/reserve/release/reverse/unconsume_order_stock`・`google_integrations`列一式 等）。
@@ -506,6 +528,15 @@
     （`orders.order_number`/`qr_url`/`labor_total`/`shaken_jibai` 等の旧列、`products`/`users`テーブル等）。
     これらは障害源ではない（prodが「多い」方向の差分）が、dev/prodのスキーマが歴史的に乖離している事実は
     今後のmigration設計時に留意する。
+- **【要対応・Stripe本番化の残タスク】土台（prod stripe列）は完了。以下が未対応（2026-06-20時点）**：
+  - **アクセス制御が未実装（最重要・本番課金前に必須）**：トライアル切れ・`status=suspended`・未課金時の
+    機能ロックが無い。`app/dashboard/layout.tsx` は authチェックのみで subscription を見ていない。
+    → **suspended でも全機能が使える状態**。Webhookは解約/未払いで `suspended` に倒すが、誰も読んでいない。
+  - **本番モード設定（Vercel環境変数）**：live キー（`sk_live`/`pk_live`）・本番price ID・
+    本番Webhookエンドポイント（`https://app.hiiragi-tech.app/api/stripe/webhook`）登録・
+    本番 `STRIPE_WEBHOOK_SECRET`・本番 `NEXT_PUBLIC_SITE_URL` を設定。
+  - **本番price作成**：Stripe本番モードで商品の価格を作成。**マイページオプションは580円に**（旧テストは980円）。
+  - **`billing-form.tsx` のハードコード金額（¥1,980/¥980）を本番priceと一致させる**（980→580の修正含む）。
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
@@ -563,4 +594,5 @@
 - **2026-06-17** ｜ Stripe統合＋マイページ設計 ｜ `stripe-保存_0604` をmainにマージ（衝突は `.mcp.json` のみ・build通過・push済 `08f8b1e`）。マイページはURLトークン/案件ごと/45日/`invoice_status` 連動/PDF非貼付/案A表示で設計確定、実装は次回 ｜ commit対象：DECISIONS.md
 - **2026-06-18** ｜ マイページ実装 ｜ お客様マイページをStep1〜4でdev実装・動作確認完了。Step1=DB（`orders`に`mypage_token`/`mypage_expires_at`＋部分ユニークIdx・`20260618000000`）、Step2=発行/再発行/失効アクション＋受注詳細・一覧の発行UI、Step3=公開表示ページ `app/mypage/[token]/`（検証層`lib/mypage/load.ts`と表示層`MypageView`を分離・ステータス連動）、Step4=課金ゲーティング（`lib/entitlements.ts`・UI＋アクション両ガード・管理者バイパス）。dev確認中に「service_role直読みで42501→not_found」を発見し、案B（SECURITY DEFINER関数 `mypage_get_by_token`・`20260618010000`）で最小権限読み取りに変更＋loaderのerrorログ化。公開ルートのため `lib/supabase/proxy.ts` に `/mypage` を未認証許可で追加 ｜ DBマイグレ2本（dev適用済・prod未反映）＋コード
 - **2026-06-20** ｜ マイページ本番障害復旧＋prod反映漏れ棚卸し ｜ 別チャットで本番受注一覧が「column orders.mypage_token does not exist」で全滅する障害が発生。原因はコード（6/18本番デプロイ済）が`mypage_token`を参照するのにprod DBへmigration2本が未適用だったこと。対応＝`20260618000000`+`20260618010000`をSQL Editorで単一トランザクション手動適用→列2・index・関数・台帳2件・関数EXECUTE（service_roleのみ）をprodで検証し復旧確認。あわせてコード参照DBオブジェクトをprod実体ベースで全棚卸し→残る欠落は`subscriptions`のStripe2列のみ（黄・Stripe本番稼働前に要適用）、他は全て実在。prod MCPはread_only維持・書込は手動SQL ｜ prod DB手動適用（mypage2本）＋DECISIONS.md記録（コード変更なし）
+- **2026-06-20** ｜ Stripe本番化 着手・土台prod反映 ｜ Stripe本番化に向け、まず`subscriptions`のStripe2列をprodへ適用（`20260531120000_add_stripe_to_subscriptions`相当）。SQL Editorで単一トランザクション手動適用＝`stripe_customer_id`/`stripe_subscription_id`列＋部分ユニークindex2本＋台帳`20260531120000`登録。検証（columns_ok/indexes_ok/ledger_ok）すべてtrueで完了。prod確認でservice_roleのDML権限は既に充足（ACL=`arwdDxtm`）＝GRANT migration（`20260531140000`）は機能的に不要と判明、anon権限差（prod=`arwdDxtm`／dev=`Dxtm`・RLSで実害なし）は別タスクとして記録。土台のみ完了でStripeは未本番稼働（liveキー・本番Webhook・本番price・アクセス制御が残・§5にリスト化） ｜ prod DB手動適用（stripe2列）＋DECISIONS.md記録（コード変更なし）
 - （以降追記）
