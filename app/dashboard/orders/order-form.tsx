@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { type Order } from "@/lib/types";
 import type { FormState } from "./actions";
+import CustomerCombobox from "./customer-combobox";
 import VehicleQuickAddModal from "./vehicle-quick-add-modal";
 
 export type CustomerOption = {
@@ -34,7 +35,8 @@ export default function OrderForm({
     undefined,
   );
 
-  const initialCustomerId = initial?.customer_id ?? customers[0]?.id ?? "";
+  // 新規時は未選択（空）から検索で選ばせる。編集時のみ既存顧客を初期選択。
+  const initialCustomerId = initial?.customer_id ?? "";
   const initialVehicleId = initial?.vehicle_id ?? "";
 
   const [customerId, setCustomerId] = useState(initialCustomerId);
@@ -69,20 +71,13 @@ export default function OrderForm({
           <label htmlFor="customer_id" className="wos-label">
             顧客<span className="wos-req">*</span>
           </label>
-          <select
-            id="customer_id"
-            name="customer_id"
-            required
+          <CustomerCombobox
+            customers={customers}
             value={customerId}
-            onChange={(e) => handleCustomerChange(e.target.value)}
-            className="wos-select"
-          >
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+            onChange={handleCustomerChange}
+            inputId="customer_id"
+            required
+          />
         </div>
 
         <div>

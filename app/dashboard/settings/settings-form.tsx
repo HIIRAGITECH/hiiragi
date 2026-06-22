@@ -188,7 +188,7 @@ export default function SettingsForm({
           kind="logo"
           currentPath={initial.logo_path}
           label="店舗ロゴ"
-          helpText="PNG / JPEG / WebP（2MB以内）。見積書・請求書のヘッダ左上に表示されます。長辺 600px 前後を推奨。"
+          helpText="PNG / JPEG / WebP（2MB以内）。見積書・請求書PDFの背景に透かしとして全ページ薄く表示されます。正方形〜横長いずれも可、長辺 1000px 程度を推奨。ブラウザの印刷プレビューには表示されず、PDF出力時のみ反映されます。"
           maxSizeMB={2}
         />
         <ImageUpload
