@@ -643,6 +643,7 @@
 - **2026-06-20** ｜ マイページ本番障害復旧＋prod反映漏れ棚卸し ｜ 別チャットで本番受注一覧が「column orders.mypage_token does not exist」で全滅する障害が発生。原因はコード（6/18本番デプロイ済）が`mypage_token`を参照するのにprod DBへmigration2本が未適用だったこと。対応＝`20260618000000`+`20260618010000`をSQL Editorで単一トランザクション手動適用→列2・index・関数・台帳2件・関数EXECUTE（service_roleのみ）をprodで検証し復旧確認。あわせてコード参照DBオブジェクトをprod実体ベースで全棚卸し→残る欠落は`subscriptions`のStripe2列のみ（黄・Stripe本番稼働前に要適用）、他は全て実在。prod MCPはread_only維持・書込は手動SQL ｜ prod DB手動適用（mypage2本）＋DECISIONS.md記録（コード変更なし）
 - **2026-06-20** ｜ Stripe本番化 着手・土台prod反映 ｜ Stripe本番化に向け、まず`subscriptions`のStripe2列をprodへ適用（`20260531120000_add_stripe_to_subscriptions`相当）。SQL Editorで単一トランザクション手動適用＝`stripe_customer_id`/`stripe_subscription_id`列＋部分ユニークindex2本＋台帳`20260531120000`登録。検証（columns_ok/indexes_ok/ledger_ok）すべてtrueで完了。prod確認でservice_roleのDML権限は既に充足（ACL=`arwdDxtm`）＝GRANT migration（`20260531140000`）は機能的に不要と判明、anon権限差（prod=`arwdDxtm`／dev=`Dxtm`・RLSで実害なし）は別タスクとして記録。土台のみ完了でStripeは未本番稼働（liveキー・本番Webhook・本番price・アクセス制御が残・§5にリスト化） ｜ prod DB手動適用（stripe2列）＋DECISIONS.md記録（コード変更なし）
 - **2026-06-21** ｜ 課金アクセス制御＋special_free ｜ 完全ロック型のアクセス制御を実装・本番反映。`lib/subscription.ts`新設（純粋関数`evaluateAccess`＋`getAccessState`・edge/server分離のため動的import）、`lib/supabase/proxy.ts`にmiddlewareゲート（/dashboard配下・/lockedのみDB読み）、`app/locked/page.tsx`ロック画面（trial切れ/停止で文面出し分け・直リンク復帰）、`app/dashboard/layout.tsx`に残7日警告バナー、`app/dashboard/billing/page.tsx`のステータス表示を`evaluateAccess`と整合＋special_free案内。special_freeを無料協力者区分として正式サポート（evaluateAccessで明示分岐・billingで申込フォーム非表示・型/管理画面/ラベルは既存対応済み）。**順序＝先にデータ有効化→後でコードデプロイ**：prod既存3ユーザー（info@含む）をSQL Editorでspecial_free/activeに手動UPDATE（trial_ends_at/options現状維持）してからpush。新規はトリガーで30日トライアル自動付与のまま（現状維持を確認）。DB変更なし・build通過・Vercel自動デプロイ ｜ コード（subscription.ts/proxy.ts/locked/layout/billing）＋prod手動UPDATE（3行）＋DECISIONS.md
+- **2026-06-22** ｜ special_freeマイページ有効化＋受注カードUI改善 ｜ ①special_free 3ユーザー（info@/circuit.dqn/m.onodera.118）の`options.mypage`をprodで`true`に有効化（`jsonb_set`で`mypage`キーのみ更新・他キー非破壊／非管理者2名が新たにマイページ利用可に・info@は元々管理者バイパスでデータ整合のため同時にtrue化）。方針＝「special_freeは全オプション無料」だが、実機能があるのは`mypage`のみ＝結果的にmypageのみtrue。`line_notify`/`hp_integration`は実装が無いフラグと判明し`false`のまま（trueにしても「trueなのに何も起きない」紛らわしさを避ける・将来実装時に立てる）。②受注一覧カード（`orders-table.tsx` BoardCard）UI改善：お客様名を上段に移し`text-base font-semibold`で主役化／管理番号`No.`を下段へ`text-xs`に縮小・控えめ化（accent/warn延滞色は維持）／カード全体クリックで受注詳細へ遷移（`useRouter().push`・hover時に枠線accent化）。内部の操作要素との競合は、カード側`onClick`1か所で`e.target.closest("a,button")`ヒット時に遷移スキップする集中ガードで防止（操作要素は全て`<a>`/`<button>`・ステータスメニューはcreatePortalでカード外）＋テキスト選択中(`getSelection`)も遷移抑止。③Stripe本番化は今回見送り（専念できる日に実施・残タスクは§5に既存記録のまま）。コードのみ（DB変更なし）・build通過・Vercel自動デプロイ ｜ コード（orders-table.tsx）＋prod手動UPDATE（mypage 3行）＋DECISIONS.md
 - （以降追記）
 
 ---
@@ -657,3 +658,8 @@
 - **【将来】品番のテナント間重複対策**：各テナントが似たような品番を付けると運用上ぶつかりうる。
   テナント名にちなんだ要素をランダム付加するなどで、**テナント間で品番が重複しない**仕組みを検討。
   部品の「2階建て構造」（在庫＝1階／請求カタログ＝2階・§4 2026-06-04参照）の設計とも関連しうるテーマ。
+- **【将来】未実装オプションフラグ（line_notify / hp_integration）の扱い**：`subscriptions.options` の3キーのうち、
+  実機能があるのは `mypage` のみ。`line_notify`（LINE通知）/ `hp_integration`（HP連携）は型定義・管理画面トグル・ラベルだけ存在し、
+  フラグを読んで機能を有効化する処理（entitlement判定）が無い「中身の無いフラグ」と判明（2026-06-22調査）。
+  special_freeでも現状は `false` のまま運用。**将来 ①実機能を実装してフラグを活かす／②不要なら型・管理UIから削除して整理する のどちらかを判断**する。
+  trueにしても今は何も起きない＝有効化の意味が無く、むしろ紛らわしいので「実機能があるものだけ立てる」運用とした。

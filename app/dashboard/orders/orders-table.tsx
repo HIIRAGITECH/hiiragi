@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
 import PaymentDueModal, {
@@ -226,10 +227,23 @@ function BoardCard({
   mypageEnabled: boolean;
   onRequestInvoiceDue: (id: string) => void;
 }) {
+  const router = useRouter();
+
   const overdue =
     o.invoice_status === "請求済" &&
     o.payment_due_date != null &&
     new Date(o.payment_due_date) < new Date(new Date().toISOString().slice(0, 10));
+
+  // カード全体クリックで受注詳細へ。ただし内部の操作要素（リンク/ボタン）を
+  // 押したときは、その要素本来の動作に任せてカード遷移は発火させない。
+  // 操作要素は全て <a>/<button> なので closest で1か所判定すれば足りる
+  // （ステータスメニューは createPortal で body 直下に描画されるためカード外）。
+  function handleCardClick(e: React.MouseEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    // ドラッグでテキスト選択しただけのときは遷移しない
+    if (window.getSelection()?.toString()) return;
+    router.push(`/dashboard/orders/${o.id}`);
+  }
 
   // マイページURL 導線（一覧では発行 or コピーのみ。詳細画面ほど作り込まない）。
   const [mypageBusy, setMypageBusy] = useState(false);
@@ -258,23 +272,25 @@ function BoardCard({
 
   return (
     <div
-      className="border border-[var(--color-line)] p-4 flex flex-col gap-2.5"
+      onClick={handleCardClick}
+      className="border border-[var(--color-line)] p-4 flex flex-col gap-2.5 cursor-pointer transition-colors hover:border-[var(--color-accent)]"
       style={{
         background: active ? "var(--color-cream)" : "var(--color-paper)",
       }}
     >
       <div className="flex justify-between items-baseline">
-        <Link
-          href={`/dashboard/orders/${o.id}`}
-          className="wos-num text-base font-medium hover:underline"
-          style={{
-            color: overdue
-              ? "var(--color-warn)"
-              : "var(--color-accent)",
-          }}
-        >
-          No. {o.id}
-        </Link>
+        <div className="text-base font-semibold text-[var(--color-ink)] leading-snug">
+          {o.customer ? (
+            <Link
+              href={`/dashboard/customers/${o.customer.id}`}
+              className="hover:underline"
+            >
+              {o.customer.name} 様
+            </Link>
+          ) : (
+            "—"
+          )}
+        </div>
         <span className="text-xs text-[var(--color-ink-light)] font-medium">
           {formatDate(o.reception_date)}
         </span>
@@ -290,16 +306,17 @@ function BoardCard({
       </div>
 
       <div className="text-xs font-medium text-[var(--color-ink-soft)]">
-        {o.customer ? (
-          <Link
-            href={`/dashboard/customers/${o.customer.id}`}
-            className="hover:underline"
-          >
-            {o.customer.name} 様
-          </Link>
-        ) : (
-          "—"
-        )}
+        <Link
+          href={`/dashboard/orders/${o.id}`}
+          className="wos-num hover:underline"
+          style={{
+            color: overdue
+              ? "var(--color-warn)"
+              : "var(--color-accent)",
+          }}
+        >
+          No. {o.id}
+        </Link>
         {o.vehicle?.plate_number && (
           <span className="text-[var(--color-ink-light)] font-normal">
             {" "}／ {o.vehicle.plate_number}
