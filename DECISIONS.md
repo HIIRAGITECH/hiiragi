@@ -28,12 +28,12 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-21（課金アクセス制御＝完全ロック型を実装・本番反映。special_freeを無料協力者区分として正式サポート。既存3ユーザーをspecial_free/activeで恒久無料有効化）
+最終更新: 2026-06-22（マイページURL 404バグ修正＝Vercel `NEXT_PUBLIC_SITE_URL` を `https://app.hiiragi-tech.app` に設定し、「キーだけ存在・値が空」でヘッダ推測にフォールバックしapexドメイン=app.抜きを拾う問題を解消。getSiteUrl経由のStripe戻りURL・認証メールリンクも同時に正常化。認証メール日本語化・受注の顧客検索コンボボックス化・special_freeのmypage有効化も実施）
 
 | 領域 | 状態 |
 |---|---|
 | 受注・見積・請求・顧客・部品在庫・作業メニュー・入金・売上・PDF・ダッシュボード | ✅ 本番稼働中（SaaSの基本機能は一通り揃っている） |
-| お客様マイページ（作業状況の共有URL） | ✅ dev・prod両方反映完了・本番稼働（2026-06-20 prod適用・障害復旧）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000・prod適用済・関数EXECUTEはservice_roleのみ）。エンドユーザー向けプライバシー表示をフッターに追加（コーポレートサイト https://hiiragi-tech.app/privacy へリンク・2026-06-20） |
+| お客様マイページ（作業状況の共有URL） | ✅ dev・prod両方反映完了・本番稼働（2026-06-20 prod適用・障害復旧）。受注ごとURLトークン／45日／ログイン不要／閲覧のみ。ステータス連動表示・課金連動（options.mypage）＋管理者バイパス・SECURITY DEFINER関数で最小権限読み取り（DB 2本=20260618000000/20260618010000・prod適用済・関数EXECUTEはservice_roleのみ）。エンドユーザー向けプライバシー表示をフッターに追加（コーポレートサイト https://hiiragi-tech.app/privacy へリンク・2026-06-20）。**発行URLのドメイン不具合（app.抜きで404）を2026-06-22に解消＝Vercel `NEXT_PUBLIC_SITE_URL` 設定** |
 | 受注明細：部品在庫から追加 | ✅ 完了・本番反映済み（Step 1 / commit a60e1bf） |
 | 在庫の確保・消費（ステータス連動） | ✅ 完了・本番反映＋dev実値検証済み（Step 2 / commit 2a7fec8）。UI表層の目視のみ任意で残 |
 | Stripe Billing | 🚧 mainマージ済み（`08f8b1e`、stripe-保存_0604=8e6ad48 を取込）・ビルド通過・dev動作未確認。**prod DBにStripe列適用済み（2026-06-20）**。**課金アクセス制御（完全ロック型）を実装・本番反映済み（2026-06-21）＝trial切れ・suspendedで/lockedへ、billingは例外、管理者バイパス、残7日警告バナー、special_free対応**。Stripe本番化の残（liveキー・本番Webhook・本番price・billing金額980→580）は未対応 |
@@ -115,6 +115,42 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-22 ── マイページURL 404バグ修正（NEXT_PUBLIC_SITE_URL）＋認証メール日本語化＋受注UI/設定改善
+
+**マイページURL 404バグの修正（重要）**
+- **症状**：受注の「URL発行」→コピーしたマイページURLを開くと404。本番のお客様向け機能で発生。
+- **原因**：発行URLのドメインが `app.` 抜き（`https://hiiragi-tech.app/mypage/...`）になっていた。
+  正しくは `https://app.hiiragi-tech.app/mypage/...`。`hiiragi-tech.app` はコーポレートサイト（別物・`/mypage` が無い）なので404。
+  **トークン自体はDBと一致しており正常**＝問題はホスト名だけ。
+- **真因**：Vercel本番の環境変数 `NEXT_PUBLIC_SITE_URL` が「キーだけ存在し値が空」だった（Apr 20にキー作成・値未入力）。
+  `getSiteUrl()`（`lib/site-url.ts`）は `NEXT_PUBLIC_SITE_URL` を最優先で使うが、空のため
+  リクエストヘッダ推測（`x-forwarded-host`）にフォールバックし、apexドメイン（app.抜き）を拾っていた。
+- **対処**：Vercel の `NEXT_PUBLIC_SITE_URL` に `https://app.hiiragi-tech.app` を設定（Production and Preview）→再デプロイ。**コード変更なし**。
+- **検証**：本番で受注のURL発行→コピー→開く→マイページ正常表示を確認。
+- **影響範囲（重要）**：`getSiteUrl()` はマイページだけでなく、Stripe checkout戻りURL（`billing/actions.ts`）、
+  パスワードリセット・サインアップ確認メールのリンク（`reset-password/actions.ts`・`signup/actions.ts`）でも使用。
+  この修正でこれら全てのリンクが正しい `app.` ドメインになった（同根のバグを一括解消）。
+- **教訓**：`NEXT_PUBLIC_` 変数はビルド時に焼き込まれるため、設定後は**再デプロイ必須**。
+  「キーだけ作って値が空」は気づきにくい。`getSiteUrl()` がヘッダ推測にフォールバックして一見動くため発覚が遅れた。
+
+**認証メールの日本語化**
+- Supabaseダッシュボード（prod）の Auth > Email Templates で「Confirm sign up」「Reset password」を日本語化（件名・本文）。
+  HIIRAGI TECH株式会社からの案内トーン、`{{ .ConfirmationURL }}` 変数は保持、`<br>` で改行を効かせた。**コード変更なし（Supabase設定）**。
+- dev側プロジェクトのテンプレートは未設定（必要なら別途）。
+
+**受注UI・設定の改善（commit `8455c81` / `2fb29b0`）**
+- 受注カード：顧客名を主役化・管理番号を控えめに・カード全体クリックで詳細へ（集中ガード方式で内部ボタン/プルダウンと競合回避）。※`2fb29b0`は前セッションで実施・§6に記録済み。
+- 受注新規登録の顧客選択をプルダウン→検索コンボボックス化（`customer-combobox.tsx` 新規。NFKC正規化で表記ゆれ吸収・キーボード/タッチ対応・車両連動維持）。
+- 設定の店舗ロゴ説明文言を実態（PDF背景の透かし）に合わせて修正。
+
+**special_freeユーザーのマイページ有効化**
+- prod 3名（info@ / circuit.dqn / m.onodera.118）の `options.mypage` を `true` に（`jsonb_set` で他キー非破壊）。
+  `line_notify` / `hp_integration` は実装が無いフラグと判明し `false` のまま据え置き（§7参照）。※前セッションで実施・§6に記録済み。
+
+**受注フロー動線（請求済→入金済）**
+- 調査の結果「請求済→自動アーカイブ」は誤解で、実際は請求済化時の確認ダイアログでオプトイン。
+  入金は入金管理画面（`/payments`）でアーカイブ済も含めて処理できる設計。動線は既に存在するため、**コード変更なしで「解決」**とした。
 
 ### 2026-06-21 ── 課金アクセス制御（完全ロック型）実装・本番反映＋special_free正式サポート
 
@@ -575,13 +611,19 @@
     既存3ユーザーは special_free/active で恒久無料有効化済み＝デプロイ後もロックされない。
   - **本番モード設定（Vercel環境変数）**：live キー（`sk_live`/`pk_live`）・本番price ID・
     本番Webhookエンドポイント（`https://app.hiiragi-tech.app/api/stripe/webhook`）登録・
-    本番 `STRIPE_WEBHOOK_SECRET`・本番 `NEXT_PUBLIC_SITE_URL` を設定。
+    本番 `STRIPE_WEBHOOK_SECRET` を設定。
+    **`NEXT_PUBLIC_SITE_URL` は2026-06-22に設定済み（=`https://app.hiiragi-tech.app`・マイページ404修正で対応）＝この分は前進**。
   - **本番price作成**：Stripe本番モードで商品の価格を作成。**マイページオプションは580円に**（旧テストは980円）。
   - **`billing-form.tsx` のハードコード金額（¥1,980/¥980）を本番priceと一致させる**（980→580の修正含む）。
-- **【TODO・2026-06-21】special_free ユーザーのマイページを使えるようにする**：special_free 化した3名は
-  `options.mypage=false` のままなので、現状マイページ発行ができない（マイページゲートは plan ではなく `options.mypage` で判定＝
-  `lib/entitlements.ts` の `canUseMypage`）。無料協力者にマイページを使ってもらうには `options.mypage=true` への手動UPDATEが必要。
-  次回、誰を有効にするか決めて対応する（管理者 info@ は `canUseMypage` がバイパスするので対象外）。
+- **【解消済・2026-06-22】special_free ユーザーのマイページ有効化**：special_free 化した3名（info@ / circuit.dqn /
+  m.onodera.118）の `options.mypage` を prod で `true` に（`jsonb_set` で `mypage` キーのみ更新・他キー非破壊）。
+  非管理者2名が新たにマイページ利用可に（info@ は元々 `canUseMypage` バイパスだがデータ整合のため同時に true 化）。
+  `line_notify` / `hp_integration` は実装が無いフラグと判明し `false` のまま据え置き（§7・実機能があるものだけ立てる運用）。
+- **【要対応・別タスク・2026-06-22】認証メール不達の原因究明**：`m.onodera@sgfacendo.com` に確認メールが届かない（未着手）。
+  Supabase組み込みメール送信はレート制限あり・本番非推奨の警告あり。**custom SMTP導入の検討を含め別途じっくり**。
+  なお認証メール本文の日本語化自体は2026-06-22に完了済み（§4参照）＝今回は文面のみで、配信経路の課題は別。
+- **【将来・可否調査未着手・2026-06-22】写真フォルダURLのQRコード化**：見積書・請求書にQRを貼り、お客様がスマホで
+  写真フォルダ（`photo_folder_url`）にアクセスできるようにする案。実装可否の調査も未着手。
 - **【確認済み・良好】受注明細リニューアル（Step1/2）は prod にも実体が揃っている**: 2026-06-04夜に確認。
   `reserved_at`/`consumed_at`/`reserved_quantity`/`related_order_text_id`、RPC6本、movement_type CHECK、
   レガシートリガ削除、RLS/PK構成、すべて dev/prod 一致。在庫・受注まわりは本番健全。
@@ -606,10 +648,9 @@
   （ItemsFormが警告バナーで案内）。
 - **旧 `type`/`tax_free` と新 `tax_category`/`item_category_id` が並走**: 計算ロジックは
   まだ旧フィールド依存の箇所あり（Step 6-2相当が未完）。金額・粗利ロジックを触るときは要確認。
-- **【次テーマ】受注フロー：請求済→入金済の動線が一手間**: `invoice_status=請求済` にすると受注がアーカイブへ
-  移動し、その後「入金済」にする操作が一手間増える。当初は意図した設計だが、マイページ動作確認中の実操作で
-  「請求済→入金済」の動線が面倒と判明。設計見直しを検討（当時アーカイブ送りにした理由を確認してから）。
-  マイページとは独立した受注管理の改善テーマ。
+- **【解決・2026-06-22】受注フロー：請求済→入金済の動線**: 当初「請求済→自動アーカイブで入金が一手間」と懸念したが、
+  調査の結果「請求済→自動アーカイブ」は誤解で、実際は請求済化時の確認ダイアログでオプトイン。入金は入金管理画面（`/payments`）で
+  アーカイブ済も含めて処理できる設計＝動線は既に存在する。**コード変更なしで「解決」**とした。
 - **ローカルfeatブランチが大量残存**: feat/* が多数。多くはmainマージ済みのはずだが未整理。いつか棚卸しして削除を。
 - **複数チャット並行によるマージ混乱に注意**: 作業前にこのドキュメントとコードの現状を確認。
 
@@ -644,6 +685,7 @@
 - **2026-06-20** ｜ Stripe本番化 着手・土台prod反映 ｜ Stripe本番化に向け、まず`subscriptions`のStripe2列をprodへ適用（`20260531120000_add_stripe_to_subscriptions`相当）。SQL Editorで単一トランザクション手動適用＝`stripe_customer_id`/`stripe_subscription_id`列＋部分ユニークindex2本＋台帳`20260531120000`登録。検証（columns_ok/indexes_ok/ledger_ok）すべてtrueで完了。prod確認でservice_roleのDML権限は既に充足（ACL=`arwdDxtm`）＝GRANT migration（`20260531140000`）は機能的に不要と判明、anon権限差（prod=`arwdDxtm`／dev=`Dxtm`・RLSで実害なし）は別タスクとして記録。土台のみ完了でStripeは未本番稼働（liveキー・本番Webhook・本番price・アクセス制御が残・§5にリスト化） ｜ prod DB手動適用（stripe2列）＋DECISIONS.md記録（コード変更なし）
 - **2026-06-21** ｜ 課金アクセス制御＋special_free ｜ 完全ロック型のアクセス制御を実装・本番反映。`lib/subscription.ts`新設（純粋関数`evaluateAccess`＋`getAccessState`・edge/server分離のため動的import）、`lib/supabase/proxy.ts`にmiddlewareゲート（/dashboard配下・/lockedのみDB読み）、`app/locked/page.tsx`ロック画面（trial切れ/停止で文面出し分け・直リンク復帰）、`app/dashboard/layout.tsx`に残7日警告バナー、`app/dashboard/billing/page.tsx`のステータス表示を`evaluateAccess`と整合＋special_free案内。special_freeを無料協力者区分として正式サポート（evaluateAccessで明示分岐・billingで申込フォーム非表示・型/管理画面/ラベルは既存対応済み）。**順序＝先にデータ有効化→後でコードデプロイ**：prod既存3ユーザー（info@含む）をSQL Editorでspecial_free/activeに手動UPDATE（trial_ends_at/options現状維持）してからpush。新規はトリガーで30日トライアル自動付与のまま（現状維持を確認）。DB変更なし・build通過・Vercel自動デプロイ ｜ コード（subscription.ts/proxy.ts/locked/layout/billing）＋prod手動UPDATE（3行）＋DECISIONS.md
 - **2026-06-22** ｜ special_freeマイページ有効化＋受注カードUI改善 ｜ ①special_free 3ユーザー（info@/circuit.dqn/m.onodera.118）の`options.mypage`をprodで`true`に有効化（`jsonb_set`で`mypage`キーのみ更新・他キー非破壊／非管理者2名が新たにマイページ利用可に・info@は元々管理者バイパスでデータ整合のため同時にtrue化）。方針＝「special_freeは全オプション無料」だが、実機能があるのは`mypage`のみ＝結果的にmypageのみtrue。`line_notify`/`hp_integration`は実装が無いフラグと判明し`false`のまま（trueにしても「trueなのに何も起きない」紛らわしさを避ける・将来実装時に立てる）。②受注一覧カード（`orders-table.tsx` BoardCard）UI改善：お客様名を上段に移し`text-base font-semibold`で主役化／管理番号`No.`を下段へ`text-xs`に縮小・控えめ化（accent/warn延滞色は維持）／カード全体クリックで受注詳細へ遷移（`useRouter().push`・hover時に枠線accent化）。内部の操作要素との競合は、カード側`onClick`1か所で`e.target.closest("a,button")`ヒット時に遷移スキップする集中ガードで防止（操作要素は全て`<a>`/`<button>`・ステータスメニューはcreatePortalでカード外）＋テキスト選択中(`getSelection`)も遷移抑止。③Stripe本番化は今回見送り（専念できる日に実施・残タスクは§5に既存記録のまま）。コードのみ（DB変更なし）・build通過・Vercel自動デプロイ ｜ コード（orders-table.tsx）＋prod手動UPDATE（mypage 3行）＋DECISIONS.md
+- **2026-06-22（夜）** ｜ マイページ404修正＋認証メール日本語化＋受注/設定UI ｜ ①**マイページURL 404バグ修正（重要）**：受注のURL発行→コピーしたマイページURLを開くと404。発行URLが`app.`抜き（`https://hiiragi-tech.app/mypage/...`＝コーポレートサイト・`/mypage`無し）になっていたのが原因（トークン自体はDB一致で正常）。真因はVercel本番の`NEXT_PUBLIC_SITE_URL`が「キーだけ存在・値が空」（Apr 20作成・未入力）で、`getSiteUrl()`（`lib/site-url.ts`）がヘッダ推測（`x-forwarded-host`）にフォールバックしapexを拾っていたこと。Vercelに`https://app.hiiragi-tech.app`を設定（Prod/Preview）→再デプロイで解消（コード変更なし）。本番で発行→コピー→正常表示を検証。`getSiteUrl()`はStripe戻りURL（`billing/actions.ts`）・パスワードリセット/サインアップ確認メールのリンク（`reset-password`/`signup/actions.ts`）でも使うため同根のバグを一括解消。②**認証メール日本語化**：Supabase prodの Auth>Email Templates で Confirm sign up / Reset password を日本語化（件名・本文・`{{ .ConfirmationURL }}`保持・`<br>`改行・コード変更なし）。dev側は未設定。③**受注/設定UI（commit `8455c81`）**：受注新規登録の顧客選択を検索コンボボックス化（`customer-combobox.tsx`新規・NFKC正規化で表記ゆれ吸収・キーボード/タッチ対応・車両連動維持）＋設定の店舗ロゴ説明文言を実態（PDF背景の透かし）に修正。④**受注フロー「請求済→入金済」**：調査の結果`/payments`でアーカイブ済も含め処理可能＝動線は既存と判明、変更なしで解決。⑤Stripe本番化は今回見送り（残は§5）。 ｜ Vercel環境変数（`NEXT_PUBLIC_SITE_URL`）＋Supabase設定（メールテンプレート）＋commit `8455c81`（customer-combobox/settings-form/order-form）＋DECISIONS.md
 - （以降追記）
 
 ---
