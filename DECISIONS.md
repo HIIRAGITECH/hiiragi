@@ -686,6 +686,7 @@
 - **2026-06-21** ｜ 課金アクセス制御＋special_free ｜ 完全ロック型のアクセス制御を実装・本番反映。`lib/subscription.ts`新設（純粋関数`evaluateAccess`＋`getAccessState`・edge/server分離のため動的import）、`lib/supabase/proxy.ts`にmiddlewareゲート（/dashboard配下・/lockedのみDB読み）、`app/locked/page.tsx`ロック画面（trial切れ/停止で文面出し分け・直リンク復帰）、`app/dashboard/layout.tsx`に残7日警告バナー、`app/dashboard/billing/page.tsx`のステータス表示を`evaluateAccess`と整合＋special_free案内。special_freeを無料協力者区分として正式サポート（evaluateAccessで明示分岐・billingで申込フォーム非表示・型/管理画面/ラベルは既存対応済み）。**順序＝先にデータ有効化→後でコードデプロイ**：prod既存3ユーザー（info@含む）をSQL Editorでspecial_free/activeに手動UPDATE（trial_ends_at/options現状維持）してからpush。新規はトリガーで30日トライアル自動付与のまま（現状維持を確認）。DB変更なし・build通過・Vercel自動デプロイ ｜ コード（subscription.ts/proxy.ts/locked/layout/billing）＋prod手動UPDATE（3行）＋DECISIONS.md
 - **2026-06-22** ｜ special_freeマイページ有効化＋受注カードUI改善 ｜ ①special_free 3ユーザー（info@/circuit.dqn/m.onodera.118）の`options.mypage`をprodで`true`に有効化（`jsonb_set`で`mypage`キーのみ更新・他キー非破壊／非管理者2名が新たにマイページ利用可に・info@は元々管理者バイパスでデータ整合のため同時にtrue化）。方針＝「special_freeは全オプション無料」だが、実機能があるのは`mypage`のみ＝結果的にmypageのみtrue。`line_notify`/`hp_integration`は実装が無いフラグと判明し`false`のまま（trueにしても「trueなのに何も起きない」紛らわしさを避ける・将来実装時に立てる）。②受注一覧カード（`orders-table.tsx` BoardCard）UI改善：お客様名を上段に移し`text-base font-semibold`で主役化／管理番号`No.`を下段へ`text-xs`に縮小・控えめ化（accent/warn延滞色は維持）／カード全体クリックで受注詳細へ遷移（`useRouter().push`・hover時に枠線accent化）。内部の操作要素との競合は、カード側`onClick`1か所で`e.target.closest("a,button")`ヒット時に遷移スキップする集中ガードで防止（操作要素は全て`<a>`/`<button>`・ステータスメニューはcreatePortalでカード外）＋テキスト選択中(`getSelection`)も遷移抑止。③Stripe本番化は今回見送り（専念できる日に実施・残タスクは§5に既存記録のまま）。コードのみ（DB変更なし）・build通過・Vercel自動デプロイ ｜ コード（orders-table.tsx）＋prod手動UPDATE（mypage 3行）＋DECISIONS.md
 - **2026-06-22（夜）** ｜ マイページ404修正＋認証メール日本語化＋受注/設定UI ｜ ①**マイページURL 404バグ修正（重要）**：受注のURL発行→コピーしたマイページURLを開くと404。発行URLが`app.`抜き（`https://hiiragi-tech.app/mypage/...`＝コーポレートサイト・`/mypage`無し）になっていたのが原因（トークン自体はDB一致で正常）。真因はVercel本番の`NEXT_PUBLIC_SITE_URL`が「キーだけ存在・値が空」（Apr 20作成・未入力）で、`getSiteUrl()`（`lib/site-url.ts`）がヘッダ推測（`x-forwarded-host`）にフォールバックしapexを拾っていたこと。Vercelに`https://app.hiiragi-tech.app`を設定（Prod/Preview）→再デプロイで解消（コード変更なし）。本番で発行→コピー→正常表示を検証。`getSiteUrl()`はStripe戻りURL（`billing/actions.ts`）・パスワードリセット/サインアップ確認メールのリンク（`reset-password`/`signup/actions.ts`）でも使うため同根のバグを一括解消。②**認証メール日本語化**：Supabase prodの Auth>Email Templates で Confirm sign up / Reset password を日本語化（件名・本文・`{{ .ConfirmationURL }}`保持・`<br>`改行・コード変更なし）。dev側は未設定。③**受注/設定UI（commit `8455c81`）**：受注新規登録の顧客選択を検索コンボボックス化（`customer-combobox.tsx`新規・NFKC正規化で表記ゆれ吸収・キーボード/タッチ対応・車両連動維持）＋設定の店舗ロゴ説明文言を実態（PDF背景の透かし）に修正。④**受注フロー「請求済→入金済」**：調査の結果`/payments`でアーカイブ済も含め処理可能＝動線は既存と判明、変更なしで解決。⑤Stripe本番化は今回見送り（残は§5）。 ｜ Vercel環境変数（`NEXT_PUBLIC_SITE_URL`）＋Supabase設定（メールテンプレート）＋commit `8455c81`（customer-combobox/settings-form/order-form）＋DECISIONS.md
+- **2026-06-22（夜）** ｜ 本番データ補正 ｜ 受注 26MB-0002（info@）に SGF向け一括請求の明細をDB直で追加（本番）。対象特定時に同番受注が複数テナントに存在し `user_id` で厳密に絞った（→§7に管理番号のテナント間重複対策を起票）。明細内容の詳細SQLは記録対象外 ｜ prod DB直編集（コード変更なし）＋DECISIONS.md
 - （以降追記）
 
 ---
@@ -697,9 +698,16 @@
 - **【将来】UIの見直し（情報の優先順位）**：ダッシュボード全体をもっとシンプルにしたい。
   特に明細まわりで「品番の主張が強すぎる」ので、**顧客名・車両名を強調**する方向に情報の優先順位を組み替えたい。
   品番は社内管理用（発注・廃番管理）であって、画面で一番目立つべきはお客様・車両という整理。
-- **【将来】品番のテナント間重複対策**：各テナントが似たような品番を付けると運用上ぶつかりうる。
-  テナント名にちなんだ要素をランダム付加するなどで、**テナント間で品番が重複しない**仕組みを検討。
-  部品の「2階建て構造」（在庫＝1階／請求カタログ＝2階・§4 2026-06-04参照）の設計とも関連しうるテーマ。
+- **【重要・将来】管理番号／品番のテナント間重複対策**：
+  - **管理番号（受注ID・例 `26MB-0002`）**：テナント（`user_id`）ごとの採番のため、別テナント間で同じ管理番号が存在しうる。
+    データは複合PK `(id, user_id)` で一意に保たれ破綻はないが、人間が番号だけ見るとどのテナントか判別できない。
+    2026-06-22夜、同番の受注が info@ と circuit.dqn の両方に存在し、対象特定に手間がかかった（`user_id` で厳密に絞って回避）。
+  - **品番**：各テナントが似たような品番を付けると運用上ぶつかりうる（同根の問題）。
+  - **解決案**：テナント名にちなんだ要素（プレフィックス等）を管理番号・品番に付加し、**テナント間で重複しない**ようにする。
+    次回じっくり設計する。部品の「2階建て構造」（在庫＝1階／請求カタログ＝2階・§4 2026-06-04参照）の設計とも関連しうるテーマ。
+- **【将来】マイページ表示の検討（何を見せる/見せないか）**：マイページの「作業状況」に明細の `work_name` が全件表示される。
+  見積書・請求書PDFに同じ内容が載るため、マイページにも作業内容を出すのは冗長かもしれない。
+  マイページに何を見せる/見せないかを今後検討（例：明細をマイページに出すか受注ごと/設定で選べるようにする）。
 - **【将来】未実装オプションフラグ（line_notify / hp_integration）の扱い**：`subscriptions.options` の3キーのうち、
   実機能があるのは `mypage` のみ。`line_notify`（LINE通知）/ `hp_integration`（HP連携）は型定義・管理画面トグル・ラベルだけ存在し、
   フラグを読んで機能を有効化する処理（entitlement判定）が無い「中身の無いフラグ」と判明（2026-06-22調査）。
