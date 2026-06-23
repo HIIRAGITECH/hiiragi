@@ -1,5 +1,6 @@
 import { formatYen } from "@/lib/format";
 import type { MypageOrder, MypageView } from "@/lib/mypage/load";
+import { MYPAGE_PHASES, resolvePhase } from "@/lib/mypage/phase";
 
 // お客様マイページ 表示コンポーネント（「何を見せるか」レイヤー）。
 // 受け取るのはサニタイズ済みの MypageView のみ。原価・住所・電話・内部メモ等は
@@ -50,12 +51,100 @@ function ShopHeader({ view }: { view: MypageView }) {
 function OrderBlock({ order }: { order: MypageOrder }) {
   return (
     <div className="flex flex-col gap-4">
+      <PhaseBar order={order} />
       <VehicleCard order={order} />
       <EstimateSection order={order} />
       <WorkSection order={order} />
       <InvoiceSection order={order} />
       <PhotoSection order={order} />
     </div>
+  );
+}
+
+// 進捗フェーズバー: 5段階を横並びで表示し、到達した最大フェーズまでをハイライト。
+// 「今ここ」を一目で分かるように、現在地のドットにハロ（リング）を付ける。スマホ前提で
+// ラベルは小さめ・折り返し可。算出は純粋関数 resolvePhase に委譲（飛びケース対応済み）。
+function PhaseBar({ order }: { order: MypageOrder }) {
+  const { index } = resolvePhase({
+    work_status: order.work_status,
+    estimate_status: order.estimate_status,
+  });
+  const last = MYPAGE_PHASES.length - 1;
+  return (
+    <Card title="進捗状況">
+      <ol className="flex items-start">
+        {MYPAGE_PHASES.map((label, i) => {
+          const reached = i <= index;
+          const current = i === index;
+          return (
+            <li
+              key={label}
+              className="relative flex flex-1 flex-col items-center"
+            >
+              {/* 左コネクタ（i-1 → i）。step i に到達していれば accent。 */}
+              {i > 0 ? (
+                <span
+                  aria-hidden
+                  className="absolute left-0 right-1/2 top-[13px] h-[2px]"
+                  style={{
+                    background:
+                      i <= index
+                        ? "var(--color-accent)"
+                        : "var(--color-line)",
+                  }}
+                />
+              ) : null}
+              {/* 右コネクタ（i → i+1）。step i+1 に到達していれば accent。 */}
+              {i < last ? (
+                <span
+                  aria-hidden
+                  className="absolute left-1/2 right-0 top-[13px] h-[2px]"
+                  style={{
+                    background:
+                      i < index ? "var(--color-accent)" : "var(--color-line)",
+                  }}
+                />
+              ) : null}
+              {/* ドット */}
+              <span
+                className="relative z-10 flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold"
+                style={
+                  reached
+                    ? {
+                        background: "var(--color-accent)",
+                        color: "#fff",
+                        boxShadow: current
+                          ? "0 0 0 4px rgba(63,91,122,0.18)"
+                          : undefined,
+                      }
+                    : {
+                        background: "var(--color-paper)",
+                        color: "var(--color-ink-light)",
+                        border: "1px solid var(--color-line)",
+                      }
+                }
+              >
+                {reached && !current ? "✓" : i + 1}
+              </span>
+              {/* ラベル */}
+              <span
+                className="mt-2 px-0.5 text-center text-[10px] leading-tight sm:text-xs"
+                style={{
+                  color: current
+                    ? "var(--color-ink)"
+                    : reached
+                      ? "var(--color-ink-mid)"
+                      : "var(--color-ink-light)",
+                  fontWeight: current ? 600 : 400,
+                }}
+              >
+                {label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </Card>
   );
 }
 
@@ -135,24 +224,13 @@ function EstimateSection({ order }: { order: MypageOrder }) {
 // 作業セクション: 作業中 / 完了 のとき表示。
 function WorkSection({ order }: { order: MypageOrder }) {
   if (order.work_status === "作業中") {
+    // 作業内容の明細はここでは再掲しない（見積/完了セクションに残る）。
+    // 進捗バー＋ひとことメッセージ＋作業写真で十分という整理。
     return (
       <Card title="作業状況">
         <p className="text-sm text-[var(--color-ink)]">
           ただいま作業を進めております。
         </p>
-        {order.items.length > 0 ? (
-          <ul className="mt-3 flex flex-col gap-1.5">
-            {order.items.map((it, i) => (
-              <li
-                key={i}
-                className="text-sm text-[var(--color-ink-mid)] before:mr-2 before:content-['・']"
-              >
-                {it.work_name}
-                {it.part_name ? `（${it.part_name}）` : ""}
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </Card>
     );
   }
@@ -170,7 +248,8 @@ function WorkSection({ order }: { order: MypageOrder }) {
   return null;
 }
 
-// 請求セクション: 請求済 / 入金済 のとき表示。
+// 請求セクション: 入金済 / 請求済 / （了承済での前倒し）のとき表示。
+// 優先順位は 入金済 > 請求済 > 了承済（前倒し）。請求が動いていればそちらを正とする。
 function InvoiceSection({ order }: { order: MypageOrder }) {
   if (order.invoice_status === "入金済") {
     return (
@@ -210,6 +289,28 @@ function InvoiceSection({ order }: { order: MypageOrder }) {
             {order.invoice_notes}
           </p>
         ) : null}
+        <p className="mt-3 text-xs text-[var(--color-ink-light)]">
+          お振込先はページ下部に記載しております。
+        </p>
+      </Card>
+    );
+  }
+  // 了承済（まだ未請求）: 作業完了を待たずにお見積り金額・振込先を前倒し表示。
+  // 表示するのは「お見積り金額」であって確定請求額ではない点を明記する。期限は出さない。
+  if (order.estimate_status === "了承済") {
+    return (
+      <Card title="お支払いについて" accent>
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm text-[var(--color-ink-mid)]">
+            お見積り金額
+          </span>
+          <span className="text-xl font-semibold text-[var(--color-ink)]">
+            {formatYen(order.totals.balance)}
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-[var(--color-ink-mid)]">
+          最終のご請求額は作業完了後に確定します。
+        </p>
         <p className="mt-3 text-xs text-[var(--color-ink-light)]">
           お振込先はページ下部に記載しております。
         </p>
@@ -350,10 +451,16 @@ function Row({
 function Footer({ view }: { view: MypageView }) {
   const { shop } = view;
   const bank = shop.bank_info;
-  // 請求済みの order があれば振込先を出す（入金済のみ・見積のみなら出さない）。
+  // 振込先を出すのは「支払い待ち」の order があるとき。請求済、または了承済で前倒し
+  // 表示している（=まだ未請求）order があれば出す。入金済のみ・見積のみなら出さない。
+  // InvoiceSection が振込案内を出す条件と一致させる。
   const showBank =
     bank != null &&
-    view.orders.some((o) => o.invoice_status === "請求済");
+    view.orders.some(
+      (o) =>
+        o.invoice_status === "請求済" ||
+        (o.estimate_status === "了承済" && o.invoice_status === "未請求"),
+    );
 
   return (
     <footer className="mt-2 flex flex-col gap-3 border-t pt-5 pb-8 text-center text-xs text-[var(--color-ink-light)]" style={{ borderColor: "var(--color-line)" }}>
