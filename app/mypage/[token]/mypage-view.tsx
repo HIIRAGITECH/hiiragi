@@ -321,11 +321,9 @@ function InvoiceSection({ order }: { order: MypageOrder }) {
 }
 
 function PhotoSection({ order }: { order: MypageOrder }) {
+  // 写真フォルダURLが連携/入力されていれば、作業ステータスに関係なく表示する
+  // （フォルダを用意した時点ですぐマイページに出す狙い）。
   if (!order.photo_folder_url) return null;
-  // 作業中・完了のときに作業写真リンクを出す（受付段階では出さない）。
-  if (order.work_status !== "作業中" && order.work_status !== "完了") {
-    return null;
-  }
   return (
     <Card title="作業写真">
       <p className="mb-3 text-sm text-[var(--color-ink-mid)]">
