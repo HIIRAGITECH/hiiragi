@@ -154,7 +154,12 @@ function VariantCard({ variant }: { variant: PartsInventoryVariant }) {
       className="border border-[var(--color-line)] bg-[var(--color-cream)] p-3 space-y-3"
     >
       <div>
-        <label className="wos-label">品番</label>
+        <label className="wos-label">
+          社内品番{" "}
+          <span className="text-xs text-[var(--color-ink-light)]">
+            （お客様に見せる品番）
+          </span>
+        </label>
         <input
           name="part_number"
           defaultValue={variant.part_number ?? ""}
@@ -237,7 +242,12 @@ function NewVariantCard({
       className="border border-[var(--color-line)] bg-[var(--color-paper)] p-3 space-y-3"
     >
       <div>
-        <label className="wos-label">品番</label>
+        <label className="wos-label">
+          社内品番{" "}
+          <span className="text-xs text-[var(--color-ink-light)]">
+            （お客様に見せる品番）
+          </span>
+        </label>
         <input
           name="part_number"
           className="wos-input"
