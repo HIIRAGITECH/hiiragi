@@ -1,15 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { formatYen } from "@/lib/format";
-import type { PartsInventory } from "@/lib/types";
+import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
 import {
   adjustStock,
   duplicatePart,
-  movePart,
   registerStockIn,
+  reorderParts,
   restorePart,
   softDeletePart,
 } from "./actions";
@@ -25,14 +48,11 @@ function stockStatus(r: PartsInventory): StockStatus {
   return "ok";
 }
 
-// 二階建て化（2026-06-24）: 社内品番・定価は標準（汎用）バリアント由来。
-// part_id → {社内品番, 定価}。未収載の旧行は本体 internal_code/sale_price でフォールバック。
-type GeneralInfo = { part_number: string | null; list_price: number | null };
-
 type Props = {
   rows: PartsInventory[];
   includeDeleted?: boolean;
-  generalByPart?: Record<string, GeneralInfo>;
+  // 二階建て化: 各部品にぶら下がる価格バリアント（全車種共通→車種別の順）。表示・検索に使う。
+  variantsByPart?: Record<string, PartsInventoryVariant[]>;
 };
 
 type StockDialog =
@@ -42,13 +62,8 @@ type StockDialog =
 export default function PartsInventoryTable({
   rows,
   includeDeleted,
-  generalByPart = {},
+  variantsByPart = {},
 }: Props) {
-  // 社内品番・定価は標準バリアント優先、無ければ本体の旧2列にフォールバック。
-  const internalCodeOf = (r: PartsInventory) =>
-    generalByPart[r.id]?.part_number ?? r.internal_code ?? null;
-  const listPriceOf = (r: PartsInventory) =>
-    generalByPart[r.id]?.list_price ?? r.sale_price ?? null;
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [onlyReorder, setOnlyReorder] = useState(false);
@@ -56,11 +71,27 @@ export default function PartsInventoryTable({
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<StockDialog | null>(null);
 
+  // 検索対象に、その部品にぶら下がる価格バリアントの社内品番も含める。
+  const variantNumbersOf = (r: PartsInventory) =>
+    (variantsByPart[r.id] ?? []).map((v) => v.part_number ?? "").join(" ");
+
+  // ドラッグ&ドロップ並べ替え用のローカル順序。サーバー再取得（rows 変化）で同期する。
+  const [items, setItems] = useState<PartsInventory[]>(rows);
+  useEffect(() => {
+    setItems(rows);
+  }, [rows]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
   const reorderCount = useMemo(
     () =>
-      rows.filter(
-        (r) => r.deleted_at === null && stockStatus(r) !== "ok",
-      ).length,
+      rows.filter((r) => r.deleted_at === null && stockStatus(r) !== "ok")
+        .length,
     [rows],
   );
 
@@ -72,19 +103,30 @@ export default function PartsInventoryTable({
       const needle = normalize(q);
       list = list.filter((r) =>
         normalize(
-          `${r.name} ${r.supplier ?? ""} ${internalCodeOf(r) ?? ""} ${r.external_code ?? ""}`,
+          `${r.name} ${r.supplier ?? ""} ${variantNumbersOf(r)} ${r.external_code ?? ""}`,
         ).includes(needle),
       );
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, query, onlyReorder, generalByPart]);
+  }, [rows, query, onlyReorder, variantsByPart]);
 
   const isFiltering = onlyReorder || query.trim().length > 0;
+  // 並べ替えはフィルタ解除かつ非表示を含めない通常表示のときのみ（保存中も一時無効）。
+  const dndEnabled = !isFiltering && !includeDeleted;
+  const canDrag = dndEnabled && !pending;
+  const displayRows = dndEnabled ? items : filtered;
 
-  function handleMove(id: string, direction: "up" | "down") {
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldI = items.findIndex((x) => x.id === active.id);
+    const newI = items.findIndex((x) => x.id === over.id);
+    if (oldI < 0 || newI < 0) return;
+    const next = arrayMove(items, oldI, newI);
+    setItems(next);
     startTransition(async () => {
-      await movePart(id, direction);
+      await reorderParts(next.map((r) => r.id));
       router.refresh();
     });
   }
@@ -135,9 +177,7 @@ export default function PartsInventoryTable({
           onClick={() => setOnlyReorder((v) => !v)}
         >
           発注が必要なものだけ
-          {reorderCount > 0 && (
-            <span className="wos-ct">{reorderCount}</span>
-          )}
+          {reorderCount > 0 && <span className="wos-ct">{reorderCount}</span>}
         </span>
         <label className="text-xs text-[var(--color-ink-mid)] flex items-center gap-2 ml-auto cursor-pointer">
           <input
@@ -156,15 +196,13 @@ export default function PartsInventoryTable({
 
       {reorderCount > 0 && !includeDeleted && (
         <div className="px-8 pt-4">
-          <p className="wos-alert warn">
-            ⚠ 発注が必要: {reorderCount} 件
-          </p>
+          <p className="wos-alert warn">⚠ 発注が必要: {reorderCount} 件</p>
         </div>
       )}
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
         <div className="px-8 py-6">
-          {filtered.length === 0 ? (
+          {displayRows.length === 0 ? (
             <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
               {isFiltering
                 ? "該当する部品が見つかりません。"
@@ -174,194 +212,38 @@ export default function PartsInventoryTable({
             <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
               <thead>
                 <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                  <th className="wos-th w-16 text-center">並び</th>
+                  <th className="wos-th w-10 text-center">並び</th>
                   <th className="wos-th">部品名</th>
                   <th className="wos-th right">原価</th>
-                  <th className="wos-th right">定価</th>
                   <th className="wos-th right">在庫</th>
-                  <th className="wos-th right">発注点</th>
-                  <th className="wos-th">明細</th>
                   <th className="wos-th">状態</th>
                   <th className="wos-th right w-60">操作</th>
                 </tr>
               </thead>
-              <tbody>
-                {filtered.map((r, idx) => {
-                  const status = stockStatus(r);
-                  const deleted = r.deleted_at !== null;
-                  return (
-                    <tr
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={displayRows.map((r) => r.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {displayRows.map((r) => (
+                    <SortablePartBody
                       key={r.id}
-                      className={`border-b border-[var(--color-line)] hover:bg-[var(--color-cream)] ${
-                        deleted ? "opacity-50" : ""
-                      }`}
-                    >
-                      <td className="wos-td text-center align-top">
-                        <div className="flex justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleMove(r.id, "up")}
-                            disabled={
-                              pending || idx === 0 || isFiltering || deleted
-                            }
-                            aria-label="上に移動"
-                            title={
-                              deleted
-                                ? "非表示の部品は並び替えできません"
-                                : isFiltering
-                                  ? "並び替えはフィルタ解除時のみ"
-                                  : "上に移動"
-                            }
-                            className="wos-btn-ghost wos-btn-xs"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMove(r.id, "down")}
-                            disabled={
-                              pending ||
-                              idx === filtered.length - 1 ||
-                              isFiltering ||
-                              deleted
-                            }
-                            aria-label="下に移動"
-                            title={
-                              deleted
-                                ? "非表示の部品は並び替えできません"
-                                : isFiltering
-                                  ? "並び替えはフィルタ解除時のみ"
-                                  : "下に移動"
-                            }
-                            className="wos-btn-ghost wos-btn-xs"
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      </td>
-                      <td className="wos-td">
-                        {deleted ? (
-                          <span className="font-semibold">{r.name}</span>
-                        ) : (
-                          <Link
-                            href={`/dashboard/parts-inventory/${r.id}/edit`}
-                            className="font-semibold text-[var(--color-ink)] hover:underline"
-                          >
-                            {r.name}
-                          </Link>
-                        )}
-                        {deleted && (
-                          <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
-                            非表示
-                          </span>
-                        )}
-                        {(internalCodeOf(r) || r.external_code) && (
-                          <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
-                            {internalCodeOf(r) && <>社内: {internalCodeOf(r)}</>}
-                            {internalCodeOf(r) && r.external_code && " / "}
-                            {r.external_code && <>社外: {r.external_code}</>}
-                          </div>
-                        )}
-                        {r.supplier && (
-                          <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
-                            仕入先: {r.supplier}
-                          </div>
-                        )}
-                      </td>
-                      <td className="wos-td num right">
-                        {formatYen(r.cost_price)}
-                      </td>
-                      <td className="wos-td num right">
-                        {listPriceOf(r) != null ? formatYen(listPriceOf(r)!) : "—"}
-                      </td>
-                      <td className="wos-td num right font-semibold">
-                        {r.stock_quantity}
-                        {r.unit ? (
-                          <span className="ml-0.5 text-xs font-normal text-[var(--color-ink-light)]">
-                            {r.unit}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="wos-td num right">{r.reorder_point}</td>
-                      <td className="wos-td">
-                        {r.show_in_detail ? (
-                          <span className="text-[10px] text-[var(--color-ink-mid)]">
-                            出す
-                          </span>
-                        ) : (
-                          <span
-                            className="text-[10px] text-[var(--color-warn)]"
-                            title="間接材料: 明細には出さず工賃に含む扱い"
-                          >
-                            間接材料
-                          </span>
-                        )}
-                      </td>
-                      <td className="wos-td">
-                        <StatusBadge status={status} />
-                      </td>
-                      <td className="wos-td">
-                        {deleted ? (
-                          <div className="flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => handleRestore(r.id)}
-                              disabled={busy}
-                              className="wos-btn-ghost wos-btn-xs"
-                            >
-                              復元
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setDialog({ kind: "in", row: r })}
-                              disabled={busy}
-                              className="wos-btn wos-btn-xs"
-                            >
-                              入庫
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setDialog({ kind: "adjust", row: r })
-                              }
-                              disabled={busy}
-                              className="wos-btn-ghost wos-btn-xs"
-                            >
-                              棚卸
-                            </button>
-                            <Link
-                              href={`/dashboard/parts-inventory/${r.id}/edit`}
-                              className="wos-btn-ghost wos-btn-xs"
-                            >
-                              編集
-                            </Link>
-                            <form action={duplicatePart}>
-                              <input type="hidden" name="id" value={r.id} />
-                              <button
-                                type="submit"
-                                className="wos-btn-ghost wos-btn-xs"
-                              >
-                                複製
-                              </button>
-                            </form>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(r)}
-                              disabled={busy}
-                              className="wos-btn-danger wos-btn-xs"
-                            >
-                              削除
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+                      r={r}
+                      variants={variantsByPart[r.id] ?? []}
+                      disabled={!canDrag}
+                      busy={busy}
+                      onStockIn={(row) => setDialog({ kind: "in", row })}
+                      onAdjust={(row) => setDialog({ kind: "adjust", row })}
+                      onDelete={handleDelete}
+                      onRestore={handleRestore}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </table>
           )}
         </div>
@@ -388,6 +270,223 @@ export default function PartsInventoryTable({
         />
       )}
     </>
+  );
+}
+
+// 1部品 = 1 <tbody>（本体行＋ぶら下がり価格行）。<tbody> 単位でソート可能にする。
+function SortablePartBody({
+  r,
+  variants,
+  disabled,
+  busy,
+  onStockIn,
+  onAdjust,
+  onDelete,
+  onRestore,
+}: {
+  r: PartsInventory;
+  variants: PartsInventoryVariant[];
+  disabled: boolean;
+  busy: boolean;
+  onStockIn: (row: PartsInventory) => void;
+  onAdjust: (row: PartsInventory) => void;
+  onDelete: (row: PartsInventory) => void;
+  onRestore: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: r.id, disabled });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    position: isDragging ? "relative" : undefined,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  const deleted = r.deleted_at !== null;
+  const status = stockStatus(r);
+
+  return (
+    <tbody
+      ref={setNodeRef}
+      style={style}
+      className={`border-b border-[var(--color-line)] ${
+        deleted ? "opacity-50" : ""
+      } ${isDragging ? "bg-[var(--color-cream)]" : "hover:bg-[var(--color-cream)]"}`}
+    >
+      <tr>
+        <td className="wos-td text-center align-top">
+          {disabled ? (
+            <span
+              className="select-none text-[var(--color-ink-light)] opacity-30"
+              title="並べ替えはフィルタ解除・通常表示のときのみ"
+            >
+              ⠿
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="cursor-grab select-none text-[var(--color-ink-light)] hover:text-[var(--color-ink)] active:cursor-grabbing"
+              aria-label="ドラッグして並べ替え"
+              {...attributes}
+              {...listeners}
+            >
+              ⠿
+            </button>
+          )}
+        </td>
+        <td className="wos-td align-top">
+          {deleted ? (
+            <span className="font-semibold">{r.name}</span>
+          ) : (
+            <Link
+              href={`/dashboard/parts-inventory/${r.id}/edit`}
+              className="font-semibold text-[var(--color-ink)] hover:underline"
+            >
+              {r.name}
+            </Link>
+          )}
+          {deleted && (
+            <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
+              非表示
+            </span>
+          )}
+          {r.external_code && (
+            <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
+              仕入れ品番: {r.external_code}
+            </div>
+          )}
+          {r.supplier && (
+            <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
+              仕入先: {r.supplier}
+            </div>
+          )}
+        </td>
+        <td className="wos-td num right align-top">{formatYen(r.cost_price)}</td>
+        <td className="wos-td num right font-semibold align-top">
+          {r.stock_quantity}
+          {r.unit ? (
+            <span className="ml-0.5 text-xs font-normal text-[var(--color-ink-light)]">
+              {r.unit}
+            </span>
+          ) : null}
+        </td>
+        <td className="wos-td align-top">
+          <StatusBadge status={status} />
+        </td>
+        <td className="wos-td align-top">
+          {deleted ? (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => onRestore(r.id)}
+                disabled={busy}
+                className="wos-btn-ghost wos-btn-xs"
+              >
+                復元
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap justify-end gap-1">
+              <button
+                type="button"
+                onClick={() => onStockIn(r)}
+                disabled={busy}
+                className="wos-btn wos-btn-xs"
+              >
+                入庫
+              </button>
+              <button
+                type="button"
+                onClick={() => onAdjust(r)}
+                disabled={busy}
+                className="wos-btn-ghost wos-btn-xs"
+              >
+                棚卸
+              </button>
+              <Link
+                href={`/dashboard/parts-inventory/${r.id}/edit`}
+                className="wos-btn-ghost wos-btn-xs"
+              >
+                編集
+              </Link>
+              <form action={duplicatePart}>
+                <input type="hidden" name="id" value={r.id} />
+                <button type="submit" className="wos-btn-ghost wos-btn-xs">
+                  複製
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={() => onDelete(r)}
+                disabled={busy}
+                className="wos-btn-danger wos-btn-xs"
+              >
+                削除
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
+      {/* ぶら下がり価格（表示のみ・編集は編集画面で）。 */}
+      <tr>
+        <td className="border-b border-[var(--color-line)]" />
+        <td
+          colSpan={5}
+          className="border-b border-[var(--color-line)] px-3 pb-2 pt-0"
+        >
+          <PriceHangers variants={variants} />
+        </td>
+      </tr>
+    </tbody>
+  );
+}
+
+// 部品にぶら下がる価格の小さなリスト。全車種共通（車種空）→ 車種別。表示のみ。
+function PriceHangers({ variants }: { variants: PartsInventoryVariant[] }) {
+  if (variants.length === 0) {
+    return (
+      <span className="text-xs text-[var(--color-ink-light)]">価格未設定</span>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-0.5">
+      {variants.map((v) => {
+        const isGeneral = v.vehicle_tags.length === 0;
+        const bulk =
+          v.list_price != null && v.markup_rate != null
+            ? Math.round(v.list_price * v.markup_rate)
+            : null;
+        return (
+          <div
+            key={v.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--color-ink-mid)]"
+          >
+            <span
+              className={`inline-block min-w-[7rem] ${
+                isGeneral
+                  ? "font-medium text-[var(--color-ink)]"
+                  : "text-[var(--color-ink)]"
+              }`}
+            >
+              {isGeneral ? "全車種共通" : v.vehicle_tags.join("・")}
+            </span>
+            <span className="text-[var(--color-ink-light)]">
+              社内 {v.part_number ?? "—"}
+            </span>
+            <span>
+              定価 {v.list_price != null ? formatYen(v.list_price) : "—"}
+            </span>
+            <span>
+              掛率{" "}
+              {v.markup_rate != null
+                ? `${Math.round(v.markup_rate * 1000) / 10}%`
+                : "—"}
+            </span>
+            <span>業販 {bulk != null ? formatYen(bulk) : "—"}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
 import PartForm from "../../part-form";
-import VariantsSection from "../../variants-section";
-import { updatePart } from "../../actions";
+import { VariantEditorFields } from "../../variants-section";
+import { updatePartAndVariants } from "../../actions";
 
 export const metadata: Metadata = {
   title: "部品在庫 編集 | HIIRAGI",
@@ -41,7 +41,7 @@ export default async function EditPartPage(props: {
   const initial = data as PartsInventory;
   const variants = (variantsData ?? []) as PartsInventoryVariant[];
 
-  const action = updatePart.bind(null, initial.id);
+  const action = updatePartAndVariants.bind(null, initial.id);
 
   return (
     <>
@@ -63,8 +63,9 @@ export default async function EditPartPage(props: {
             initial={initial}
             submitLabel="更新する"
             cancelHref="/dashboard/parts-inventory"
-          />
-          <VariantsSection partId={initial.id} initial={variants} />
+          >
+            <VariantEditorFields initial={variants} />
+          </PartForm>
         </div>
       </div>
     </>

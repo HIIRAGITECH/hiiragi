@@ -1,158 +1,108 @@
 "use client";
 
-import {
-  useActionState,
-  useEffect,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import type { PartsInventoryVariant } from "@/lib/types";
-import {
-  createVariant,
-  softDeleteVariant,
-  updateVariant,
-  type VariantFormState,
-} from "./variants-actions";
 
-type Props = {
-  partId: string;
-  initial: PartsInventoryVariant[];
+type Slot = {
+  // フィールド名を一意化するためのキー。既存は variant.id、新規は new_<n>。
+  key: string;
+  // 既存なら variant.id、新規なら null。
+  id: string | null;
+  // 既存カードの初期値。新規は null。
+  variant: PartsInventoryVariant | null;
 };
 
-// 部品編集ページに同居するセクション。二階建て構造の「二階＝売り方」を編集する。
-//   標準（車種指定なし＝vehicle_tags が空）を上に、車種別（タグあり）を下に並べる。
-// 各 variant は独立した小フォームで個別に保存・削除する（部品本体フォームとは別系統）。
-// 追加・更新・削除はいずれも server action 完了後に revalidatePath → router.refresh で
-// 親 SSR から再取得し、initial が新しい配列で再描画される。
-export default function VariantsSection({ partId, initial }: Props) {
-  const [addingSpecific, setAddingSpecific] = useState(false);
-  const [addingGeneral, setAddingGeneral] = useState(false);
-
-  // 標準（車種空）と車種別（タグあり）に振り分ける。標準は通常1件。
-  const general = initial.filter((v) => v.vehicle_tags.length === 0);
-  const specific = initial.filter((v) => v.vehicle_tags.length > 0);
-
-  return (
-    <section className="wos-card">
-      <div className="wos-sec-label mb-1">売価（標準・車種別）</div>
-      <p className="mb-4 text-xs text-[var(--color-ink-light)]">
-        この部品の「社内品番＋定価＋掛率」を売り方ごとに登録します。原価・仕入れ品番・在庫は上の本体側で共通です。受注では車種が一致する車種別を優先し、無ければ標準の定価が明細に流れます。
-      </p>
-
-      {/* 標準（車種指定なし）。普通に登録した部品はここ1件を持つ。 */}
-      <div className="mb-5">
-        <div className="mb-2 text-xs font-semibold text-[var(--color-ink-mid)]">
-          標準価格（車種指定なし）
-        </div>
-        <div className="space-y-3">
-          {general.map((v) => (
-            <VariantCard key={v.id} variant={v} />
-          ))}
-          {general.length === 0 &&
-            (addingGeneral ? (
-              <NewVariantCard
-                partId={partId}
-                hideTags
-                onDone={() => setAddingGeneral(false)}
-              />
-            ) : (
-              <div>
-                <p className="mb-2 text-sm text-[var(--color-ink-light)]">
-                  標準価格がありません。受注で車種一致が無いとき、この価格が使われます。
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setAddingGeneral(true)}
-                  className="wos-btn-ghost wos-btn-sm"
-                >
-                  ＋ 標準価格を追加
-                </button>
-              </div>
-            ))}
-        </div>
-      </div>
-
-      {/* 車種別（特定車種のときだけ追加する）。 */}
-      <div>
-        <div className="mb-2 text-xs font-semibold text-[var(--color-ink-mid)]">
-          車種別価格
-        </div>
-        <div className="space-y-3">
-          {specific.length === 0 && !addingSpecific && (
-            <p className="text-sm text-[var(--color-ink-light)]">
-              まだありません。特定車種で品番・定価を変えたいときに「＋ 車種別を追加」してください。
-            </p>
-          )}
-
-          {specific.map((v) => (
-            <VariantCard key={v.id} variant={v} />
-          ))}
-
-          {addingSpecific ? (
-            <NewVariantCard
-              partId={partId}
-              onDone={() => setAddingSpecific(false)}
-            />
-          ) : (
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={() => setAddingSpecific(true)}
-                className="wos-btn-ghost wos-btn-sm"
-              >
-                ＋ 車種別を追加
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </section>
-  );
+function initialToSlots(initial: PartsInventoryVariant[]): Slot[] {
+  // 車種空（全車種共通）を先頭に寄せ、あとは display_order 順で並べる。
+  const sorted = [...initial].sort((a, b) => {
+    const ea = a.vehicle_tags.length === 0 ? 0 : 1;
+    const eb = b.vehicle_tags.length === 0 ? 0 : 1;
+    if (ea !== eb) return ea - eb;
+    return a.display_order - b.display_order;
+  });
+  return sorted.map((v) => ({ key: v.id, id: v.id, variant: v }));
 }
 
-// 既存 variant 1 行ぶんの編集カード。defaultValue で初期値、保存で updateVariant。
-function VariantCard({ variant }: { variant: PartsInventoryVariant }) {
-  const router = useRouter();
-  const updateAction = updateVariant.bind(null, variant.id);
-  const [state, formAction, pending] = useActionState<
-    VariantFormState,
-    FormData
-  >(updateAction, undefined);
-  const [deleting, startDelete] = useTransition();
-  const [savedFlash, setSavedFlash] = useState(false);
+// 価格カードを編集する本体。**自身は <form> を持たない**。部品本体フォームと同じ <form> の
+// 子要素として置かれ、画面下の単一の「更新する」で本体とまとめて保存される
+// （card_keys と各カードの隠しフィールドを同じフォームで送る）。
+// カードの追加・削除はクライアント state。確定（DB 反映）は親フォームの submit に委ねる。
+// 案A（車種空カードは1枚）と保存はサーバー側 updatePartAndVariants が担う。
+export function VariantEditorFields({
+  initial,
+}: {
+  initial: PartsInventoryVariant[];
+}) {
+  const [slots, setSlots] = useState<Slot[]>(() => initialToSlots(initial));
+  const newCounter = useRef(0);
 
-  // 保存成功時は親 SSR を再取得して initial を更新する。
-  useEffect(() => {
-    if (state && "success" in state) {
-      setSavedFlash(true);
-      router.refresh();
-      const t = setTimeout(() => setSavedFlash(false), 1500);
-      return () => clearTimeout(t);
-    }
-  }, [state, router]);
+  function addCard() {
+    newCounter.current += 1;
+    setSlots((prev) => [
+      ...prev,
+      { key: `new_${newCounter.current}`, id: null, variant: null },
+    ]);
+  }
 
-  function handleDelete() {
-    const label = variant.part_number ?? "（品番なし）";
-    if (!confirm(`「${label}」の組を削除しますか？（後から復元はできません）`)) {
-      return;
-    }
-    startDelete(async () => {
-      const r = await softDeleteVariant(variant.id);
-      if ("error" in r) {
-        alert(r.error);
-        return;
-      }
-      router.refresh();
-    });
+  function removeCard(key: string) {
+    setSlots((prev) => prev.filter((s) => s.key !== key));
   }
 
   return (
-    <form
-      action={formAction}
-      className="border border-[var(--color-line)] bg-[var(--color-cream)] p-3 space-y-3"
-    >
+    <div>
+      <div className="wos-sec-label mb-1">価格</div>
+      <p className="mb-4 text-xs text-[var(--color-ink-light)]">
+        社内品番・定価・業販掛け率を価格カードで登録します。原価・仕入れ品番・在庫は上の本体側で共通です。車種を指定しないカードが全車種共通の価格になり、受注で車種が一致しないときに使われます（全車種共通は1つだけ）。
+      </p>
+
+      <div className="space-y-3">
+        {slots.length === 0 && (
+          <p className="text-sm text-[var(--color-ink-light)]">
+            価格カードがありません。「＋ 価格を追加」で作成してください。
+          </p>
+        )}
+
+        {slots.map((slot) => (
+          <PriceCard
+            key={slot.key}
+            slot={slot}
+            onRemove={() => removeCard(slot.key)}
+          />
+        ))}
+      </div>
+
+      {/* 画面に並んでいるカードのキー一覧。サーバーはこれを辿って各カードを読む。 */}
+      <input
+        type="hidden"
+        name="card_keys"
+        value={JSON.stringify(slots.map((s) => s.key))}
+      />
+
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={addCard}
+          className="wos-btn-ghost wos-btn-sm"
+        >
+          ＋ 価格を追加
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 価格カード 1 枚。フィールド名は card_<key>_* で一意化し、1フォーム一括送信に乗せる。
+// 値の保持は各入力コンポーネント内部（uncontrolled 相当）。削除は state から外すだけで、
+// 確定（DB ソフト削除）は下の「更新する」で行う。
+function PriceCard({ slot, onRemove }: { slot: Slot; onRemove: () => void }) {
+  const v = slot.variant;
+  const prefix = `card_${slot.key}_`;
+
+  return (
+    <div className="border border-[var(--color-line)] bg-[var(--color-cream)] p-3 space-y-3">
+      {/* 既存カードは id を hidden で送る（新規は空）。 */}
+      <input type="hidden" name={`${prefix}id`} value={slot.id ?? ""} />
+
       <div>
         <label className="wos-label">
           社内品番{" "}
@@ -161,147 +111,53 @@ function VariantCard({ variant }: { variant: PartsInventoryVariant }) {
           </span>
         </label>
         <input
-          name="part_number"
-          defaultValue={variant.part_number ?? ""}
+          name={`${prefix}part_number`}
+          defaultValue={v?.part_number ?? ""}
           className="wos-input"
           placeholder="例: 3XV-23135-20"
         />
       </div>
 
       <PriceMarkupGroup
-        initialListPrice={variant.list_price}
-        initialMarkupRate={variant.markup_rate}
+        namePrefix={prefix}
+        initialListPrice={v?.list_price ?? null}
+        initialMarkupRate={v?.markup_rate ?? null}
       />
 
       <div>
-        <label className="wos-label">適合車種</label>
-        <VehicleTagsInput name="vehicle_tags" initial={variant.vehicle_tags} />
+        <label className="wos-label">
+          適合車種{" "}
+          <span className="text-xs text-[var(--color-ink-light)]">
+            （空欄＝全車種共通）
+          </span>
+        </label>
+        <VehicleTagsInput
+          name={`${prefix}vehicle_tags`}
+          initial={v?.vehicle_tags ?? []}
+        />
         <p className="mt-1 text-xs text-[var(--color-ink-light)]">
           Enter または カンマで確定 / × で削除 / Backspace で末尾削除
         </p>
       </div>
 
-      {state && "error" in state && (
-        <p role="alert" className="wos-alert warn">
-          {state.error}
-        </p>
-      )}
-
-      <div className="flex items-center gap-2">
-        <button
-          type="submit"
-          disabled={pending || deleting}
-          className="wos-btn wos-btn-sm"
-        >
-          {pending ? "保存中…" : "更新"}
-        </button>
+      <div>
         <button
           type="button"
-          onClick={handleDelete}
-          disabled={pending || deleting}
+          onClick={onRemove}
           className="wos-btn-danger wos-btn-sm"
         >
-          {deleting ? "削除中…" : "削除"}
-        </button>
-        {savedFlash && (
-          <span className="text-xs text-[var(--color-ink-light)]">保存しました</span>
-        )}
-      </div>
-    </form>
-  );
-}
-
-// 新規追加カード。成功したらフォームを閉じる（onDone）。
-// hideTags=true（標準価格の追加）のときは適合車種入力を出さず、空タグ（汎用）で送る。
-function NewVariantCard({
-  partId,
-  onDone,
-  hideTags = false,
-}: {
-  partId: string;
-  onDone: () => void;
-  hideTags?: boolean;
-}) {
-  const router = useRouter();
-  const createAction = createVariant.bind(null, partId);
-  const [state, formAction, pending] = useActionState<
-    VariantFormState,
-    FormData
-  >(createAction, undefined);
-
-  useEffect(() => {
-    if (state && "success" in state) {
-      router.refresh();
-      onDone();
-    }
-  }, [state, router, onDone]);
-
-  return (
-    <form
-      action={formAction}
-      className="border border-[var(--color-line)] bg-[var(--color-paper)] p-3 space-y-3"
-    >
-      <div>
-        <label className="wos-label">
-          社内品番{" "}
-          <span className="text-xs text-[var(--color-ink-light)]">
-            （お客様に見せる品番）
-          </span>
-        </label>
-        <input
-          name="part_number"
-          className="wos-input"
-          placeholder="例: 3XV-23135-20"
-          autoFocus
-        />
-      </div>
-
-      <PriceMarkupGroup initialListPrice={null} initialMarkupRate={null} />
-
-      {hideTags ? (
-        // 標準価格は車種空（汎用）。サーバー契約に合わせ空配列を hidden で送る。
-        <input type="hidden" name="vehicle_tags" value="[]" />
-      ) : (
-        <div>
-          <label className="wos-label">適合車種</label>
-          <VehicleTagsInput name="vehicle_tags" initial={[]} />
-          <p className="mt-1 text-xs text-[var(--color-ink-light)]">
-            Enter または カンマで確定 / × で削除 / Backspace で末尾削除
-          </p>
-        </div>
-      )}
-
-      {state && "error" in state && (
-        <p role="alert" className="wos-alert warn">
-          {state.error}
-        </p>
-      )}
-
-      <div className="flex items-center gap-2">
-        <button
-          type="submit"
-          disabled={pending}
-          className="wos-btn wos-btn-sm"
-        >
-          {pending ? "追加中…" : "この組を追加"}
-        </button>
-        <button
-          type="button"
-          onClick={onDone}
-          disabled={pending}
-          className="wos-btn-ghost wos-btn-sm"
-        >
-          キャンセル
+          このカードを削除
         </button>
       </div>
-    </form>
+    </div>
   );
 }
 
 // 定価・掛け率(%)・業販価格の3列を双方向に連動させる入力グループ。
-//   定価 (list_price)    : name="list_price" で通常送信
-//   掛け率 (markup_rate) : name="markup_rate" で hidden 送信（%入力を /100 した小数）
+//   定価 (list_price)    : name=`${namePrefix}list_price` で通常送信
+//   掛け率 (markup_rate) : name=`${namePrefix}markup_rate` で hidden 送信（%入力を /100 した小数）
 //   業販価格            : 送信しない（計算/表示のみ。markup_rate と list_price から都度算出）
+// namePrefix 既定は ""（部品 新規登録フォームでの単独利用＝従来名 list_price/markup_rate のまま）。
 // 連動ルール:
 //   - 掛け率変更 → 業販 = 定価 × 掛け率/100 を再表示
 //   - 業販変更   → 掛け率 = 業販 / 定価 × 100 を再表示
@@ -310,9 +166,11 @@ function NewVariantCard({
 export function PriceMarkupGroup({
   initialListPrice,
   initialMarkupRate,
+  namePrefix = "",
 }: {
   initialListPrice: number | null;
   initialMarkupRate: number | null;
+  namePrefix?: string;
 }) {
   // 初期 % 表示: 0.95 → "95"、95.5 のような小数 % も許容するため 1 桁まで保持。
   const initialPct =
@@ -380,15 +238,14 @@ export function PriceMarkupGroup({
     return String(n / 100);
   })();
 
-  const listPriceEmpty =
-    listPrice.trim() === "" || !(Number(listPrice) > 0);
+  const listPriceEmpty = listPrice.trim() === "" || !(Number(listPrice) > 0);
 
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       <div>
         <label className="wos-label">定価</label>
         <input
-          name="list_price"
+          name={`${namePrefix}list_price`}
           type="number"
           inputMode="numeric"
           min={0}
@@ -428,7 +285,7 @@ export function PriceMarkupGroup({
           placeholder={listPriceEmpty ? "定価未設定" : "例: 5310"}
         />
       </div>
-      <input type="hidden" name="markup_rate" value={markupRateValue} />
+      <input type="hidden" name={`${namePrefix}markup_rate`} value={markupRateValue} />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useActionState, useState } from "react";
 import type { PartsInventory } from "@/lib/types";
 import type { FormState } from "./actions";
@@ -11,6 +12,9 @@ type Props = {
   initial?: PartsInventory;
   submitLabel: string;
   cancelHref: string;
+  // 編集画面では価格エディタ（VariantEditorFields）をここに渡し、本体と同じ <form> 内に同居させて
+  // 単一の submit でまとめて保存する。新規登録では渡さない（本体＋汎用バリアントは createPart が処理）。
+  children?: ReactNode;
 };
 
 export default function PartForm({
@@ -18,6 +22,7 @@ export default function PartForm({
   initial,
   submitLabel,
   cancelHref,
+  children,
 }: Props) {
   const [state, formAction, pending] = useActionState<FormState, FormData>(
     action,
@@ -235,6 +240,11 @@ export default function PartForm({
           className="wos-textarea"
         />
       </div>
+
+      {/* 編集画面: 価格エディタ（同じ <form> 内）。新規登録では children なし。 */}
+      {children && (
+        <div className="border-t border-[var(--color-line)] pt-5">{children}</div>
+      )}
 
       {state?.error && (
         <p role="alert" className="wos-alert warn">

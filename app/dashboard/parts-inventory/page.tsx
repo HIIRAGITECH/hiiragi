@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { PartsInventory } from "@/lib/types";
+import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
 import PartsInventoryTable from "./parts-inventory-table";
 
 export const metadata: Metadata = {
@@ -31,30 +31,27 @@ export default async function PartsInventoryPage(props: {
 
   const rows = (data ?? []) as PartsInventory[];
 
-  // 二階建て化（2026-06-24）: 社内品番・定価は「標準（汎用＝車種空）」バリアントが持つ。
-  // 一覧表示・検索用に part_id → 標準バリアントの {社内品番, 定価} を引けるようにする。
-  // 先頭（display_order 最小）を代表に採る。未移行の旧行は本体 internal_code/sale_price で
-  // フォールバックするので、ここに無くても表示は壊れない。
-  const { data: generalVariants } = await supabase
+  // 一覧の「ぶら下がり価格」表示・検索用: 各部品のアクティブな価格バリアントを part_id ごとにまとめる。
+  // 並びは「全車種共通（車種空）→ 車種別」、その中は display_order 順。
+  const { data: variantsData } = await supabase
     .from("parts_inventory_variants")
-    .select("part_id, part_number, list_price, vehicle_tags, display_order")
+    .select("*")
     .eq("user_id", user!.id)
     .is("deleted_at", null)
     .order("display_order", { ascending: true })
     .order("created_at", { ascending: true });
 
-  const generalByPart: Record<
-    string,
-    { part_number: string | null; list_price: number | null }
-  > = {};
-  for (const v of generalVariants ?? []) {
-    const tags = (v.vehicle_tags ?? []) as string[];
-    if (tags.length !== 0) continue; // 標準（車種空）のみ
-    if (generalByPart[v.part_id]) continue; // 先頭を代表に
-    generalByPart[v.part_id] = {
-      part_number: v.part_number,
-      list_price: v.list_price,
-    };
+  const variantsByPart: Record<string, PartsInventoryVariant[]> = {};
+  for (const v of (variantsData ?? []) as PartsInventoryVariant[]) {
+    (variantsByPart[v.part_id] ??= []).push(v);
+  }
+  for (const pid of Object.keys(variantsByPart)) {
+    variantsByPart[pid].sort((a, b) => {
+      const ea = a.vehicle_tags.length === 0 ? 0 : 1;
+      const eb = b.vehicle_tags.length === 0 ? 0 : 1;
+      if (ea !== eb) return ea - eb;
+      return a.display_order - b.display_order;
+    });
   }
 
   return (
@@ -88,7 +85,7 @@ export default async function PartsInventoryPage(props: {
       <PartsInventoryTable
         rows={rows}
         includeDeleted={includeDeleted}
-        generalByPart={generalByPart}
+        variantsByPart={variantsByPart}
       />
     </>
   );

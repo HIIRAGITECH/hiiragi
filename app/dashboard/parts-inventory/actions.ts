@@ -34,6 +34,29 @@ function pickBool(formData: FormData, key: string): boolean {
   return v === "on" || v === "true" || v === "1";
 }
 
+// vehicle_tags はクライアントから JSON.stringify(string[]) で送る。防御的に再正規化する。
+function pickStringArray(formData: FormData, key: string): string[] {
+  const v = formData.get(key);
+  if (typeof v !== "string" || v.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(v);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const x of parsed) {
+    if (typeof x !== "string") continue;
+    const t = x.trim();
+    if (t === "" || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
 // フォーム共通のペイロード（編集時は initial_stock_quantity を読まない）。
 // 二階建て化（2026-06-24）: 社内品番(internal_code)と売価(sale_price)は本体から外し、
 // 「売り方」＝バリアント側（part_number / list_price）で持つ。本体の旧2列は触らない
@@ -180,6 +203,145 @@ export async function updatePart(
     .eq("id", id)
     .eq("user_id", user.id);
   if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/parts-inventory");
+  redirect("/dashboard/parts-inventory");
+}
+
+// 1カード（売り方＝バリアント）の希望状態。id があれば既存、無ければ新規。
+type DesiredCard = {
+  id: string | null;
+  part_number: string | null;
+  list_price: number | null;
+  markup_rate: number | null;
+  vehicle_tags: string[];
+};
+
+// 編集画面の価格カード（VariantEditorFields）を FormData から読み出す。
+//   card_keys: 並んでいるカードのキー配列（JSON）。各カードは card_<key>_* で送られる。
+function parseDesiredCards(formData: FormData): DesiredCard[] | { error: string } {
+  const keysRaw = formData.get("card_keys");
+  let keys: string[] = [];
+  if (typeof keysRaw === "string" && keysRaw.trim() !== "") {
+    try {
+      const parsed = JSON.parse(keysRaw);
+      if (Array.isArray(parsed)) {
+        keys = parsed.filter((k): k is string => typeof k === "string");
+      }
+    } catch {
+      return { error: "送信データが不正です。画面を再読み込みしてください。" };
+    }
+  }
+  return keys.map((k) => ({
+    id: pickString(formData, `card_${k}_id`),
+    part_number: pickString(formData, `card_${k}_part_number`),
+    list_price: pickNullableNumber(formData, `card_${k}_list_price`),
+    markup_rate: pickNullableNumber(formData, `card_${k}_markup_rate`),
+    vehicle_tags: pickStringArray(formData, `card_${k}_vehicle_tags`),
+  }));
+}
+
+// 編集画面の単一「更新する」: 本体（parts_inventory）と価格カード（parts_inventory_variants）を
+// まとめて保存する。本体フォームと価格エディタを同じ <form> に同居させ、その submit で呼ばれる。
+//
+// 手順: ①本体・価格を両方バリデーション（どちらか不正なら何も保存せずエラー返却）
+//       ②本体 update → ③価格カードを DB と突き合わせて 更新/挿入/ソフト削除（display_order=並び順）
+// 在庫数 (stock_quantity) は触らない（入庫/棚卸で変える運用）。
+//
+// 案A: 「車種空（全車種共通）」カードは 1 部品につき 1 枚まで。2枚以上は弾く（本体も保存しない）。
+export async function updatePartAndVariants(
+  id: string,
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  // ① 本体のバリデーション
+  const body = readPartPayload(formData);
+  if ("error" in body) return body;
+
+  // ① 価格カードのバリデーション
+  const desired = parseDesiredCards(formData);
+  if ("error" in desired) return desired;
+  const emptyCount = desired.filter((d) => d.vehicle_tags.length === 0).length;
+  if (emptyCount > 1) {
+    return {
+      error:
+        "全車種共通の価格（車種を指定しないカード）は1つだけです。車種を指定するか、既存の共通価格を編集してください。",
+    };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  // 所有確認（本体）。
+  const { data: parent } = await supabase
+    .from("parts_inventory")
+    .select("id")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!parent) return { error: "対象の部品が見つかりません。" };
+
+  // ② 本体 update
+  const { error: bodyErr } = await supabase
+    .from("parts_inventory")
+    .update(body)
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (bodyErr) return { error: `更新に失敗しました: ${bodyErr.message}` };
+
+  // ③ 価格カードの突き合わせ。現在のアクティブなバリアント id 群を取得。
+  const { data: existingRows } = await supabase
+    .from("parts_inventory_variants")
+    .select("id")
+    .eq("part_id", id)
+    .eq("user_id", user.id)
+    .is("deleted_at", null);
+  const existingIds = new Set((existingRows ?? []).map((r) => r.id as string));
+  const submittedIds = new Set(
+    desired
+      .map((d) => d.id)
+      .filter((vid): vid is string => !!vid && existingIds.has(vid)),
+  );
+
+  // 画面から消えた既存カード = ソフト削除。
+  const toDelete = [...existingIds].filter((vid) => !submittedIds.has(vid));
+  if (toDelete.length > 0) {
+    const { error } = await supabase
+      .from("parts_inventory_variants")
+      .update({ deleted_at: new Date().toISOString() })
+      .in("id", toDelete)
+      .eq("user_id", user.id);
+    if (error) return { error: `価格カードの削除に失敗しました: ${error.message}` };
+  }
+
+  // カード並び順で更新/挿入。display_order = 並び位置。
+  for (let i = 0; i < desired.length; i++) {
+    const d = desired[i];
+    const fields = {
+      part_number: d.part_number,
+      list_price: d.list_price,
+      markup_rate: d.markup_rate,
+      vehicle_tags: d.vehicle_tags,
+      display_order: i,
+    };
+    if (d.id && existingIds.has(d.id)) {
+      const { error } = await supabase
+        .from("parts_inventory_variants")
+        .update(fields)
+        .eq("id", d.id)
+        .eq("user_id", user.id)
+        .eq("part_id", id);
+      if (error) return { error: `価格カードの更新に失敗しました: ${error.message}` };
+    } else {
+      const { error } = await supabase
+        .from("parts_inventory_variants")
+        .insert({ ...fields, user_id: user.id, part_id: id });
+      if (error) return { error: `価格カードの追加に失敗しました: ${error.message}` };
+    }
+  }
 
   revalidatePath("/dashboard/parts-inventory");
   redirect("/dashboard/parts-inventory");
@@ -349,6 +511,34 @@ export async function movePart(
 
   revalidatePath("/dashboard/parts-inventory");
   return undefined;
+}
+
+// ドラッグ&ドロップ並べ替え: 渡された id 配列の順に display_order を 0..n-1 で振り直す。
+// ↑↓ の movePart と同じ display_order に保存する（リロード後も並びが保持される）。
+// フィルタ解除・非表示を含めない通常表示でのみ呼ばれる前提（クライアント側で制御）。
+export async function reorderParts(
+  orderedIds: string[],
+): Promise<{ error: string } | { success: true }> {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return { success: true };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("parts_inventory")
+      .update({ display_order: i })
+      .eq("id", orderedIds[i])
+      .eq("user_id", user.id);
+    if (error) return { error: `並べ替えに失敗しました: ${error.message}` };
+  }
+
+  revalidatePath("/dashboard/parts-inventory");
+  return { success: true };
 }
 
 // 入庫登録: stock_quantity を加算し、stock_movements に 'in' として記録。
