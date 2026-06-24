@@ -31,6 +31,32 @@ export default async function PartsInventoryPage(props: {
 
   const rows = (data ?? []) as PartsInventory[];
 
+  // 二階建て化（2026-06-24）: 社内品番・定価は「標準（汎用＝車種空）」バリアントが持つ。
+  // 一覧表示・検索用に part_id → 標準バリアントの {社内品番, 定価} を引けるようにする。
+  // 先頭（display_order 最小）を代表に採る。未移行の旧行は本体 internal_code/sale_price で
+  // フォールバックするので、ここに無くても表示は壊れない。
+  const { data: generalVariants } = await supabase
+    .from("parts_inventory_variants")
+    .select("part_id, part_number, list_price, vehicle_tags, display_order")
+    .eq("user_id", user!.id)
+    .is("deleted_at", null)
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  const generalByPart: Record<
+    string,
+    { part_number: string | null; list_price: number | null }
+  > = {};
+  for (const v of generalVariants ?? []) {
+    const tags = (v.vehicle_tags ?? []) as string[];
+    if (tags.length !== 0) continue; // 標準（車種空）のみ
+    if (generalByPart[v.part_id]) continue; // 先頭を代表に
+    generalByPart[v.part_id] = {
+      part_number: v.part_number,
+      list_price: v.list_price,
+    };
+  }
+
   return (
     <>
       <div className="wos-pagehead">
@@ -38,7 +64,7 @@ export default async function PartsInventoryPage(props: {
           <div className="wos-crumbs">工房 ／ 部品在庫</div>
           <h1>部品在庫</h1>
           <div className="wos-gloss">
-            部品の原価・売価・在庫数を一元管理します。発注点を切ると要発注バッジで通知します。
+            部品の原価・定価・在庫数を一元管理します。発注点を切ると要発注バッジで通知します。
           </div>
         </div>
         <div className="wos-actions">
@@ -59,7 +85,11 @@ export default async function PartsInventoryPage(props: {
         </div>
       )}
 
-      <PartsInventoryTable rows={rows} includeDeleted={includeDeleted} />
+      <PartsInventoryTable
+        rows={rows}
+        includeDeleted={includeDeleted}
+        generalByPart={generalByPart}
+      />
     </>
   );
 }

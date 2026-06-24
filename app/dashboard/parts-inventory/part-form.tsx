@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import type { PartsInventory } from "@/lib/types";
 import type { FormState } from "./actions";
+import { PriceMarkupGroup } from "./variants-section";
 
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
@@ -60,22 +61,11 @@ export default function PartForm({
         />
       </div>
 
+      {/* 一階＝物理部品。仕入れ品番（社外品番）と原価・在庫はここで共通。 */}
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
-          <label htmlFor="internal_code" className="wos-label">
-            社内品番 <span className="text-xs text-[var(--color-ink-light)]">（任意）</span>
-          </label>
-          <input
-            id="internal_code"
-            name="internal_code"
-            defaultValue={initial?.internal_code ?? ""}
-            className="wos-input"
-            placeholder="例: A-001"
-          />
-        </div>
-        <div>
           <label htmlFor="external_code" className="wos-label">
-            社外品番 <span className="text-xs text-[var(--color-ink-light)]">（任意）</span>
+            仕入れ品番（社外品番） <span className="text-xs text-[var(--color-ink-light)]">（任意）</span>
           </label>
           <input
             id="external_code"
@@ -85,9 +75,6 @@ export default function PartForm({
             placeholder="例: 90915-YZZD4"
           />
         </div>
-      </div>
-
-      <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label htmlFor="cost_price" className="wos-label">
             原価（仕入値）
@@ -106,24 +93,40 @@ export default function PartForm({
             空欄でも保存できますが、粗利計算では 0 として扱われます。
           </p>
         </div>
-        <div>
-          <label htmlFor="sale_price" className="wos-label">
-            売価 <span className="text-xs text-[var(--color-ink-light)]">（任意）</span>
-          </label>
-          <input
-            id="sale_price"
-            name="sale_price"
-            type="number"
-            min={0}
-            step={1}
-            defaultValue={initial?.sale_price ?? ""}
-            className="wos-input text-right"
-            placeholder="明細に出さない部品は空でOK"
-          />
-        </div>
       </div>
 
-      <div className="border border-[var(--color-line)] p-3">
+      {/* 二階＝標準の売り方。新規登録時のみ同じ画面で入力し、汎用バリアント（車種空）として保存する。
+          社内品番・定価・掛率は売り方ごとの値。車種別は登録後の編集画面で追加する。売価(sale_price)は廃止。 */}
+      {!isEdit && (
+        <div className="border border-[var(--color-line)] p-3 space-y-3">
+          <div className="text-xs font-semibold text-[var(--color-ink-mid)]">
+            標準の売価
+          </div>
+          <div>
+            <label htmlFor="general_part_number" className="wos-label">
+              社内品番{" "}
+              <span className="text-xs text-[var(--color-ink-light)]">
+                （任意・お客様に見せる品番）
+              </span>
+            </label>
+            <input
+              id="general_part_number"
+              name="general_part_number"
+              defaultValue=""
+              className="wos-input"
+              placeholder="例: A-001"
+            />
+          </div>
+          <PriceMarkupGroup initialListPrice={null} initialMarkupRate={null} />
+          <p className="text-xs text-[var(--color-ink-light)]">
+            定価・掛率は任意です。車種ごとに品番や定価を分けたいときは、登録後の編集画面で「車種別価格」を追加できます。
+          </p>
+        </div>
+      )}
+
+      {/* 「明細に出す」フラグは視覚的に隠す（要素は残し checked のまま送信する）。
+          DOM から消すと pickBool が false を返し間接材料扱いになるため、隠すだけにする。 */}
+      <div className="hidden" aria-hidden="true">
         <label className="flex cursor-pointer items-start gap-2 text-sm">
           <input
             type="checkbox"
@@ -136,16 +139,8 @@ export default function PartForm({
             <span className="font-semibold text-[var(--color-ink)]">
               明細に出す
             </span>
-            <span className="mt-0.5 block text-xs text-[var(--color-ink-mid)]">
-              ON: 通常の部品として受注明細に表示する。
-            </span>
           </span>
         </label>
-        {!showInDetail && (
-          <p className="wos-alert info mt-2 text-xs">
-            間接材料（Oリング・グリス等）として扱います。明細には出さず、工賃に含まれる扱いになります。在庫管理と粗利計算には使用されます。
-          </p>
-        )}
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">

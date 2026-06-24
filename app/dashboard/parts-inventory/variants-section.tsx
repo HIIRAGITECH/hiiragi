@@ -21,44 +21,92 @@ type Props = {
   initial: PartsInventoryVariant[];
 };
 
-// 部品編集ページに同居するセクション。
+// 部品編集ページに同居するセクション。二階建て構造の「二階＝売り方」を編集する。
+//   標準（車種指定なし＝vehicle_tags が空）を上に、車種別（タグあり）を下に並べる。
 // 各 variant は独立した小フォームで個別に保存・削除する（部品本体フォームとは別系統）。
 // 追加・更新・削除はいずれも server action 完了後に revalidatePath → router.refresh で
 // 親 SSR から再取得し、initial が新しい配列で再描画される。
 export default function VariantsSection({ partId, initial }: Props) {
-  const [adding, setAdding] = useState(false);
+  const [addingSpecific, setAddingSpecific] = useState(false);
+  const [addingGeneral, setAddingGeneral] = useState(false);
+
+  // 標準（車種空）と車種別（タグあり）に振り分ける。標準は通常1件。
+  const general = initial.filter((v) => v.vehicle_tags.length === 0);
+  const specific = initial.filter((v) => v.vehicle_tags.length > 0);
 
   return (
     <section className="wos-card">
-      <div className="wos-sec-label mb-1">車種別定価</div>
+      <div className="wos-sec-label mb-1">売価（標準・車種別）</div>
       <p className="mb-4 text-xs text-[var(--color-ink-light)]">
-        この部品にぶら下げる「品番＋定価＋適合車種タグ」の組を登録します。受注の車種でヒットしたら、ここの品番・定価が明細に流れます（呼び出しUIは次ステップで実装）。
+        この部品の「社内品番＋定価＋掛率」を売り方ごとに登録します。原価・仕入れ品番・在庫は上の本体側で共通です。受注では車種が一致する車種別を優先し、無ければ標準の定価が明細に流れます。
       </p>
 
-      <div className="space-y-3">
-        {initial.length === 0 && !adding && (
-          <p className="text-sm text-[var(--color-ink-light)]">
-            まだ登録されていません。「＋ 追加」から最初の組を作成してください。
-          </p>
-        )}
+      {/* 標準（車種指定なし）。普通に登録した部品はここ1件を持つ。 */}
+      <div className="mb-5">
+        <div className="mb-2 text-xs font-semibold text-[var(--color-ink-mid)]">
+          標準価格（車種指定なし）
+        </div>
+        <div className="space-y-3">
+          {general.map((v) => (
+            <VariantCard key={v.id} variant={v} />
+          ))}
+          {general.length === 0 &&
+            (addingGeneral ? (
+              <NewVariantCard
+                partId={partId}
+                hideTags
+                onDone={() => setAddingGeneral(false)}
+              />
+            ) : (
+              <div>
+                <p className="mb-2 text-sm text-[var(--color-ink-light)]">
+                  標準価格がありません。受注で車種一致が無いとき、この価格が使われます。
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAddingGeneral(true)}
+                  className="wos-btn-ghost wos-btn-sm"
+                >
+                  ＋ 標準価格を追加
+                </button>
+              </div>
+            ))}
+        </div>
+      </div>
 
-        {initial.map((v) => (
-          <VariantCard key={v.id} variant={v} />
-        ))}
+      {/* 車種別（特定車種のときだけ追加する）。 */}
+      <div>
+        <div className="mb-2 text-xs font-semibold text-[var(--color-ink-mid)]">
+          車種別価格
+        </div>
+        <div className="space-y-3">
+          {specific.length === 0 && !addingSpecific && (
+            <p className="text-sm text-[var(--color-ink-light)]">
+              まだありません。特定車種で品番・定価を変えたいときに「＋ 車種別を追加」してください。
+            </p>
+          )}
 
-        {adding ? (
-          <NewVariantCard partId={partId} onDone={() => setAdding(false)} />
-        ) : (
-          <div className="pt-1">
-            <button
-              type="button"
-              onClick={() => setAdding(true)}
-              className="wos-btn-ghost wos-btn-sm"
-            >
-              ＋ 追加
-            </button>
-          </div>
-        )}
+          {specific.map((v) => (
+            <VariantCard key={v.id} variant={v} />
+          ))}
+
+          {addingSpecific ? (
+            <NewVariantCard
+              partId={partId}
+              onDone={() => setAddingSpecific(false)}
+            />
+          ) : (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => setAddingSpecific(true)}
+                className="wos-btn-ghost wos-btn-sm"
+              >
+                ＋ 車種別を追加
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -159,12 +207,15 @@ function VariantCard({ variant }: { variant: PartsInventoryVariant }) {
 }
 
 // 新規追加カード。成功したらフォームを閉じる（onDone）。
+// hideTags=true（標準価格の追加）のときは適合車種入力を出さず、空タグ（汎用）で送る。
 function NewVariantCard({
   partId,
   onDone,
+  hideTags = false,
 }: {
   partId: string;
   onDone: () => void;
+  hideTags?: boolean;
 }) {
   const router = useRouter();
   const createAction = createVariant.bind(null, partId);
@@ -197,13 +248,18 @@ function NewVariantCard({
 
       <PriceMarkupGroup initialListPrice={null} initialMarkupRate={null} />
 
-      <div>
-        <label className="wos-label">適合車種</label>
-        <VehicleTagsInput name="vehicle_tags" initial={[]} />
-        <p className="mt-1 text-xs text-[var(--color-ink-light)]">
-          Enter または カンマで確定 / × で削除 / Backspace で末尾削除
-        </p>
-      </div>
+      {hideTags ? (
+        // 標準価格は車種空（汎用）。サーバー契約に合わせ空配列を hidden で送る。
+        <input type="hidden" name="vehicle_tags" value="[]" />
+      ) : (
+        <div>
+          <label className="wos-label">適合車種</label>
+          <VehicleTagsInput name="vehicle_tags" initial={[]} />
+          <p className="mt-1 text-xs text-[var(--color-ink-light)]">
+            Enter または カンマで確定 / × で削除 / Backspace で末尾削除
+          </p>
+        </div>
+      )}
 
       {state && "error" in state && (
         <p role="alert" className="wos-alert warn">
@@ -241,7 +297,7 @@ function NewVariantCard({
 //   - 業販変更   → 掛け率 = 業販 / 定価 × 100 を再表示
 //   - 定価変更   → 掛け率が入っていれば業販を追従、なければ業販があれば掛け率を再計算
 //   - 定価が空/0 のとき、業販欄は disabled + 「定価未設定」表示。掛け率だけ入力可。
-function PriceMarkupGroup({
+export function PriceMarkupGroup({
   initialListPrice,
   initialMarkupRate,
 }: {

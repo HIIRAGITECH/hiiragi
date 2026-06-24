@@ -25,16 +25,30 @@ function stockStatus(r: PartsInventory): StockStatus {
   return "ok";
 }
 
+// 二階建て化（2026-06-24）: 社内品番・定価は標準（汎用）バリアント由来。
+// part_id → {社内品番, 定価}。未収載の旧行は本体 internal_code/sale_price でフォールバック。
+type GeneralInfo = { part_number: string | null; list_price: number | null };
+
 type Props = {
   rows: PartsInventory[];
   includeDeleted?: boolean;
+  generalByPart?: Record<string, GeneralInfo>;
 };
 
 type StockDialog =
   | { kind: "in"; row: PartsInventory }
   | { kind: "adjust"; row: PartsInventory };
 
-export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
+export default function PartsInventoryTable({
+  rows,
+  includeDeleted,
+  generalByPart = {},
+}: Props) {
+  // 社内品番・定価は標準バリアント優先、無ければ本体の旧2列にフォールバック。
+  const internalCodeOf = (r: PartsInventory) =>
+    generalByPart[r.id]?.part_number ?? r.internal_code ?? null;
+  const listPriceOf = (r: PartsInventory) =>
+    generalByPart[r.id]?.list_price ?? r.sale_price ?? null;
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [onlyReorder, setOnlyReorder] = useState(false);
@@ -58,12 +72,13 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
       const needle = normalize(q);
       list = list.filter((r) =>
         normalize(
-          `${r.name} ${r.supplier ?? ""} ${r.internal_code ?? ""} ${r.external_code ?? ""}`,
+          `${r.name} ${r.supplier ?? ""} ${internalCodeOf(r) ?? ""} ${r.external_code ?? ""}`,
         ).includes(needle),
       );
     }
     return list;
-  }, [rows, query, onlyReorder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, query, onlyReorder, generalByPart]);
 
   const isFiltering = onlyReorder || query.trim().length > 0;
 
@@ -162,7 +177,7 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
                   <th className="wos-th w-16 text-center">並び</th>
                   <th className="wos-th">部品名</th>
                   <th className="wos-th right">原価</th>
-                  <th className="wos-th right">売価</th>
+                  <th className="wos-th right">定価</th>
                   <th className="wos-th right">在庫</th>
                   <th className="wos-th right">発注点</th>
                   <th className="wos-th">明細</th>
@@ -240,10 +255,10 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
                             非表示
                           </span>
                         )}
-                        {(r.internal_code || r.external_code) && (
+                        {(internalCodeOf(r) || r.external_code) && (
                           <div className="mt-0.5 text-xs text-[var(--color-ink-light)]">
-                            {r.internal_code && <>社内: {r.internal_code}</>}
-                            {r.internal_code && r.external_code && " / "}
+                            {internalCodeOf(r) && <>社内: {internalCodeOf(r)}</>}
+                            {internalCodeOf(r) && r.external_code && " / "}
                             {r.external_code && <>社外: {r.external_code}</>}
                           </div>
                         )}
@@ -257,7 +272,7 @@ export default function PartsInventoryTable({ rows, includeDeleted }: Props) {
                         {formatYen(r.cost_price)}
                       </td>
                       <td className="wos-td num right">
-                        {r.sale_price != null ? formatYen(r.sale_price) : "—"}
+                        {listPriceOf(r) != null ? formatYen(listPriceOf(r)!) : "—"}
                       </td>
                       <td className="wos-td num right font-semibold">
                         {r.stock_quantity}

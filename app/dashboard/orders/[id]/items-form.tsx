@@ -1674,16 +1674,19 @@ function PartPickerModal({
     );
   }, [allParts, query]);
 
-  // Step 3-2b: 受注の車種 (vehicle.model) と一致する variant を part_id ごとに 1 件だけ
-  // 採用する。allVariants は display_order 順で渡される前提なので、最初にヒットしたものが
-  // その部品の代表 variant になる。vehicle が無い or model 空のときは空 Map を返し、
-  // ⭐機能は自動的に無効化される。
-  const matchedVariantByPart = useMemo(() => {
+  // 二階建て化（2026-06-24）: 車種一致（タグあり）を全走査で先に確定し、
+  // 一致が無い部品だけ「標準（汎用＝車種空）」をフォールバックに使う二段構え。
+  //   - vehicleMatchByPart: 車種一致のみ（⭐バッジ・「車種別」表示の根拠）
+  //   - generalByPart:      標準（車種空）の代表1件（display_order 最小＝先頭）
+  //   - effectiveByPart:    実際に明細へ流す variant＝車種一致 ?? 標準
+  // 標準は display_order が先頭になりやすいので、車種一致とは別々に集めて
+  // 「車種一致を全部見てから、無いときだけ標準」を保証する（標準を先に拾う事故を防ぐ）。
+  const vehicleMatchByPart = useMemo(() => {
     const map = new Map<string, PartsInventoryVariant>();
-    const targetRaw = vehicle?.model ?? "";
-    const target = normalizeForVehicleMatch(targetRaw);
+    const target = normalizeForVehicleMatch(vehicle?.model ?? "");
     if (!target) return map;
     for (const v of allVariants) {
+      if (v.vehicle_tags.length === 0) continue; // 標準は車種一致の対象外
       if (map.has(v.part_id)) continue;
       const hit = v.vehicle_tags.some(
         (t) => normalizeForVehicleMatch(t) === target,
@@ -1692,6 +1695,22 @@ function PartPickerModal({
     }
     return map;
   }, [allVariants, vehicle?.model]);
+
+  const generalByPart = useMemo(() => {
+    const map = new Map<string, PartsInventoryVariant>();
+    for (const v of allVariants) {
+      if (v.vehicle_tags.length !== 0) continue; // 標準（車種空）のみ
+      if (map.has(v.part_id)) continue; // 先頭（display_order 最小）を採用
+      map.set(v.part_id, v);
+    }
+    return map;
+  }, [allVariants]);
+
+  const effectiveByPart = useMemo(() => {
+    const map = new Map<string, PartsInventoryVariant>(generalByPart);
+    for (const [pid, v] of vehicleMatchByPart) map.set(pid, v);
+    return map;
+  }, [generalByPart, vehicleMatchByPart]);
 
   function togglePick(id: string) {
     setPicked((prev) => {
@@ -1705,7 +1724,7 @@ function PartPickerModal({
   function confirm() {
     onConfirm(
       filtered.filter((p) => picked.has(p.id)),
-      matchedVariantByPart,
+      effectiveByPart,
     );
   }
 
@@ -1751,22 +1770,20 @@ function PartPickerModal({
                 const codes = [p.internal_code, p.external_code]
                   .filter((c) => c && c.trim() !== "")
                   .join(" / ");
-                // Step 3-2b: この部品に車種一致 variant があれば、その list_price で
-                // 表示価格を上書きし、⭐バッジで一目で分かるようにする。
-                // 一致あり・list_price=null（定価未設定）も⭐は出すが価格は通常表示。
-                const matched = matchedVariantByPart.get(p.id) ?? null;
-                const hasVariantPrice =
-                  matched != null && matched.list_price != null;
-                // 業販対応 第二歩-2a: 法人時かつ variant に markup_rate があれば、
-                // 「業販 ¥{round(list_price×markup_rate)}」を主表示、その下に「定価 ¥」を小さく表示。
-                const matchedRate = matched?.markup_rate;
+                // 二階建て化（2026-06-24）: ⭐は車種一致のときだけ。価格は「車種一致 ?? 標準」の
+                // effective variant の定価で表示する。法人かつ掛率があれば業販を主表示にする。
+                const matched = vehicleMatchByPart.get(p.id) ?? null; // 車種一致のみ（⭐用）
+                const effective = matched ?? generalByPart.get(p.id) ?? null;
+                const effectivePrice = effective?.list_price ?? null;
+                const hasEffectivePrice = effectivePrice != null;
+                const effectiveRate = effective?.markup_rate;
                 const showBulkPrice =
                   isBusiness &&
-                  hasVariantPrice &&
-                  matchedRate != null &&
-                  Number.isFinite(matchedRate);
+                  hasEffectivePrice &&
+                  effectiveRate != null &&
+                  Number.isFinite(effectiveRate);
                 const bulkPrice = showBulkPrice
-                  ? Math.round(matched!.list_price! * matchedRate!)
+                  ? Math.round(effectivePrice! * effectiveRate!)
                   : null;
                 return (
                   <li key={p.id} className="px-4 py-2">
@@ -1807,12 +1824,13 @@ function PartPickerModal({
                               業販 {formatYen(bulkPrice!)}
                             </div>
                             <div className="text-xs text-zinc-400 dark:text-zinc-500">
-                              定価 {formatYen(matched!.list_price!)}
+                              定価 {formatYen(effectivePrice!)}
                             </div>
                           </>
-                        ) : hasVariantPrice ? (
+                        ) : hasEffectivePrice ? (
                           <div className="font-medium text-zinc-900 dark:text-zinc-50">
-                            車種別 {formatYen(matched!.list_price!)}
+                            {matched ? "車種別 " : ""}
+                            {formatYen(effectivePrice!)}
                           </div>
                         ) : p.sale_price != null ? (
                           formatYen(p.sale_price)

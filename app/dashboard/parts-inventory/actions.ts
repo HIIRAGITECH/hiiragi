@@ -35,12 +35,13 @@ function pickBool(formData: FormData, key: string): boolean {
 }
 
 // フォーム共通のペイロード（編集時は initial_stock_quantity を読まない）。
+// 二階建て化（2026-06-24）: 社内品番(internal_code)と売価(sale_price)は本体から外し、
+// 「売り方」＝バリアント側（part_number / list_price）で持つ。本体の旧2列は触らない
+// （既存データのフォールバック・ロールバック保険のため残置）。
 type PartPayload = {
   name: string;
-  internal_code: string | null;
   external_code: string | null;
   cost_price: number;
-  sale_price: number | null;
   show_in_detail: boolean;
   reorder_point: number;
   supplier: string | null;
@@ -53,15 +54,31 @@ function readPartPayload(formData: FormData): PartPayload | { error: string } {
   if (!name) return { error: "部品名は必須です。" };
   return {
     name,
-    internal_code: pickString(formData, "internal_code"),
     external_code: pickString(formData, "external_code"),
     cost_price: pickNumber(formData, "cost_price", 0),
-    sale_price: pickNullableNumber(formData, "sale_price"),
     show_in_detail: pickBool(formData, "show_in_detail"),
     reorder_point: pickNumber(formData, "reorder_point", 0),
     supplier: pickString(formData, "supplier"),
     unit: pickString(formData, "unit"),
     memo: pickString(formData, "memo"),
+  };
+}
+
+// 新規登録フォームに同居する「標準の売価」＝汎用バリアント（車種空）の入力。
+//   general_part_number → variant.part_number（社内品番）
+//   list_price          → variant.list_price（定価）
+//   markup_rate         → variant.markup_rate（掛率・小数。PriceMarkupGroup が %→小数で送る）
+type GeneralVariantPayload = {
+  part_number: string | null;
+  list_price: number | null;
+  markup_rate: number | null;
+};
+
+function readGeneralVariantPayload(formData: FormData): GeneralVariantPayload {
+  return {
+    part_number: pickString(formData, "general_part_number"),
+    list_price: pickNullableNumber(formData, "list_price"),
+    markup_rate: pickNullableNumber(formData, "markup_rate"),
   };
 }
 
@@ -103,6 +120,27 @@ export async function createPart(
     .single();
   if (error || !inserted) {
     return { error: `登録に失敗しました: ${error?.message ?? "unknown"}` };
+  }
+
+  // 二階建て化（2026-06-24）: 本体INSERTに続けて「標準の売価」＝汎用バリアント（車種空）を
+  // 必ず1件作る。社内品番・定価・掛率はここに入る。display_order=0 で先頭。
+  // 失敗時は本体だけ残るが、編集画面で標準価格を追加できるため致命傷にはしない（エラーは返す）。
+  const general = readGeneralVariantPayload(formData);
+  const { error: variantErr } = await supabase
+    .from("parts_inventory_variants")
+    .insert({
+      user_id: user.id,
+      part_id: inserted.id,
+      part_number: general.part_number,
+      list_price: general.list_price,
+      markup_rate: general.markup_rate,
+      vehicle_tags: [],
+      display_order: 0,
+    });
+  if (variantErr) {
+    return {
+      error: `部品は登録しましたが、標準価格の保存に失敗しました（編集画面から追加してください）: ${variantErr.message}`,
+    };
   }
 
   // 初期在庫があれば履歴を残す（cost_price を unit_cost として記録）。
@@ -234,6 +272,26 @@ export async function duplicatePart(formData: FormData) {
     })
     .select("id")
     .single();
+
+  // 二階建て化（2026-06-24）: 売り方（標準＋車種別バリアント）も複製する。
+  // これをしないと、複製した部品が売価を持たない（新規部品は本体 sale_price が空のため）。
+  if (inserted?.id) {
+    const { data: srcVariants } = await supabase
+      .from("parts_inventory_variants")
+      .select("part_number, list_price, vehicle_tags, markup_rate, maker, note, display_order")
+      .eq("part_id", id)
+      .eq("user_id", user.id)
+      .is("deleted_at", null);
+    if (srcVariants && srcVariants.length > 0) {
+      await supabase.from("parts_inventory_variants").insert(
+        srcVariants.map((v) => ({
+          ...v,
+          user_id: user.id,
+          part_id: inserted.id,
+        })),
+      );
+    }
+  }
 
   revalidatePath("/dashboard/parts-inventory");
   if (inserted?.id) {
