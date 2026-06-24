@@ -117,6 +117,49 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-06-24 ── 部品在庫を「二階建て構造」化（本番反映）
+
+**決めた構造**
+- 部品在庫を **一階＝物理部品／二階＝売り方** の二階建てにする。
+  - **一階（`parts_inventory`）＝物理部品**：部品名・**仕入れ品番（`external_code`）**・原価（`cost_price`）・在庫・`show_in_detail`。
+    仕入れ品番と原価と在庫はここで共通。仕入れ先で原価が違うなら別部品として登録する運用。
+  - **二階（`parts_inventory_variants`）＝売り方**：**社内品番（`part_number`・お客様に見せる品番）**・
+    定価（`list_price`）・掛率（`markup_rate`）・業販価格（計算値）・車種（`vehicle_tags`）。1物理部品にN個ぶら下がる。
+- **「汎用」＝`vehicle_tags` が空のバリアント**。専用フラグは作らず「車種空」で判定（パターン②）。
+  普通に新規登録すると汎用1件が付く。車種別は必要なときだけ追加。社内品番は売り方ごとに変えられる。
+
+**【決定】なぜこの形にしたか**
+- **新カラムは不要だった**：既存スキーマ（variants の `part_number`/`list_price`/`markup_rate`/`vehicle_tags`、
+  本体の `external_code`/`cost_price`/`show_in_detail`）で二階建てを表現できた。よって新テーブル・新カラム・
+  GRANT 追加は無し。変更は「データ移行」と「UI・保存経路の組み替え」だけ＝影響範囲を最小化できる。
+- **社内品番を本体→バリアントへ移送**、**売価（`sale_price`）→定価（`list_price`）へ移送**し、
+  **売価欄は新規登録フォームから廃止**。受注の最終フォールバックは「汎用」が担うため売価は不要になった。
+- **旧 `internal_code` / `sale_price` 列は物理 DROP せず残置**：ロールバック保険＋未移行行の表示フォールバック。
+  新しい登録/更新経路ではこの2列に書き込まない（更新時に既存値を消さないため update 対象からも外す）。
+
+**実装の要点**
+- **新規登録**：本体 INSERT に続けて**汎用バリアント（車種空）1件を必ず同時生成**する経路を新設
+  （従来 `createVariant` は親ID bind 前提で新規時に作れなかった）。
+- **編集**：標準（車種空）を上・車種別を下に二段表示。`PriceMarkupGroup` を export して新規フォームでも流用。
+- **受注ピッカー（`items-form.tsx`）**：**「車種一致を全走査で先に確定 → 無い部品だけ汎用フォールバック」の二段構え**。
+  汎用は `display_order` が先頭になりやすいので、車種一致と汎用を別 Map に集めて「汎用を先に拾う事故」を防ぐ。
+  明細に入る値＝**法人=業販価格（定価×掛率）／個人=定価**。⭐は車種一致のときだけ。
+- **`show_in_detail` チェックを新規登録 UI から視覚的に非表示**（要素は DOM に残し `checked=true` のまま送信）。
+  DOM ごと消すと `pickBool` が false を返し間接材料扱いになる不具合になるため、隠すだけ。データ・ロジックは不変。
+- 複製（`duplicatePart`）も売り方バリアントを複製するよう拡張（新規部品の複製で売価が消える退行を防止）。
+
+**移行（DB 先・コード後）**
+- マイグレ `20260624000000_parts_two_floor_backfill_general_variant.sql`：各アクティブ部品に汎用バリアントを
+  1件生成（`internal_code→part_number`、`sale_price→list_price`、`markup_rate=null`、`display_order=min-1`）。
+  既にバリアントがある部品は車種別を残し汎用を補う。**冪等（`NOT EXISTS`）**で再実行しても二重生成しない。
+- prod は SQL Editor で手動適用（`BEGIN…COMMIT`＋台帳登録）。**汎用5件生成・価格保全・消失ゼロ**を事後 SELECT で確認。
+  prod は `internal_code` が全件 null（社内品番 未運用）だったため汎用 `part_number` は全 null（正常・欠落ではない）。
+- 鉄則どおり **prod DB 適用 → コード push** の順。コード commit `e542de3`。
+
+**残課題（別タスク）**
+- **社内品番が明細・PDF に流れない**：`OrderItem` に品番フィールドが無く、PDF も品番を描画しない。
+  明細・帳票に社内品番を出したい場合は `OrderItem.part_number` 追加＋PDF 列追加が必要。今回は未実装。
+
 ### 2026-06-24 ── マイページ作業写真：表示条件から work_status 縛りを撤去
 
 **変更**
@@ -760,6 +803,7 @@
 - **2026-06-23** ｜ マイページ改修フェーズA（本番反映） ｜ 「作業状況」が明細(work_name)を全件再掲し冗長だった件を、進捗フェーズバー（受注受付→お見積り→ご了承・作業開始→作業中→作業完了）に置換。算出は純粋関数 `lib/mypage/phase.ts` `resolvePhase`（最大到達点方式・飛びケース対応／`phase.test.ts` で網羅・ランナー未導入のため当面スペック）。作業中の明細箇条書きを廃止（明細は見積/完了に残る）。お支払い情報を `estimate_status=了承済` から前倒し表示（`totals.balance` を「お見積り金額」・期限なし・「最終のご請求額は作業完了後に確定します」注記／振込先も了承済から表示）。コードのみ・DB変更なし（load.ts/RPCは既存返却列で不変）。dev検証＝5フェーズ巡回＋RPC実測＋実レンダリングで確認。 ｜ commit `9d1f38f`（phase.ts/phase.test.ts/mypage-view.tsx）・Vercel自動デプロイ＋DECISIONS.md
 - **2026-06-23** ｜ マイページ改修フェーズB（発送情報）＝実装したが見送り・巻き戻し ｜ 計画ではフェーズBとして発送情報（運送会社・伝票番号）を実装→dev検証まで完了（orders に shipping_carrier/tracking_number 2列追加＋RPC更新＋受注編集UI＋マイページ ShippingSection／dev で RPC返却・実レンダリング・空時非表示を確認）。その後「本番には出さない」判断となり**完全に巻き戻し**：コード6ファイルの発送変更を除去（フェーズAは保持）、マイグレーションファイル2本削除、dev DBの2列DROP＋RPCを元シグネチャに復元＋台帳から2版を削除、デモ発送データも列削除で消滅。build通過・git diff はフェーズAのみと確認。実装方法は§7に確立済みとして退避。 ｜ コード巻き戻し＋dev DB巻き戻し＋DECISIONS.md（本番反映なし）
 - **2026-06-24** ｜ マイページ作業写真の表示条件変更（本番反映） ｜ 作業写真セクションの表示条件から `work_status` 縛りを撤去。従来「`photo_folder_url` 有り **かつ** `work_status∈{作業中,完了}`」→「`photo_folder_url` 有りなら表示」に。狙い＝写真フォルダを連携/作成した時点ですぐマイページに作業写真が出るようにする（受付段階でも表示）。空フォルダ懸念は運用でカバー（写真を入れるときにフォルダを作る運用＝空フォルダが顧客に見えない・見積段階で写真が無いのは顧客も当然と認識）。`PhotoSection`（mypage-view.tsx）1ヶ所のみ修正・他セクション不干渉。コードのみ・DB変更なし（`photo_folder_url` は既存RPCが返却済み）。dev検証＝26MB-0002を一時的に「受付」にし受付状態でも写真セクション＋リンクが出ることを確認後、元（完了）に戻した。build通過・Vercel自動デプロイ ｜ コード（mypage-view.tsx）＋DECISIONS.md
+- **2026-06-24** ｜ 部品在庫 二階建て化（本番反映） ｜ 部品在庫を「一階＝物理部品／二階＝売り方」の二階建てに。一階(`parts_inventory`)=部品名・仕入れ品番(`external_code`)・原価・在庫・`show_in_detail`。二階(`parts_inventory_variants`)=社内品番(`part_number`)・定価(`list_price`)・掛率(`markup_rate`)・業販(計算値)・車種(`vehicle_tags`)。汎用=車種空(専用フラグなし・パターン②)。**新カラム不要**(既存スキーマで吸収＝新テーブル/カラム/GRANTなし)。社内品番を本体→バリアントへ、売価`sale_price`→定価`list_price`へ移送し売価欄を新規登録から廃止。旧`internal_code`/`sale_price`列は物理DROPせず残置(ロールバック保険・新経路では未使用)。実装=①新規登録で本体INSERT＋汎用バリアント1件を同時生成する経路を新設 ②編集を標準(上)・車種別(下)の二段表示＋`PriceMarkupGroup`をexport流用 ③受注ピッカー(`items-form.tsx`)を「車種一致を全走査優先→無ければ汎用フォールバック」の二段(汎用を先に拾う事故を別Mapで防止／法人=業販・個人=定価) ④`show_in_detail`チェックを新規UIから視覚的に非表示(要素は残し`checked=true`維持・ロジック不変) ⑤複製も売り方バリアントを複製。移行=マイグレ`20260624000000`(冪等`NOT EXISTS`)。**DB先・コード後**でprod反映＝prodをSQL Editor手動適用(`BEGIN…COMMIT`＋台帳登録)→**汎用5件生成・価格保全・消失ゼロ**を事後SELECT確認(prodは`internal_code`全null=社内品番未運用のため汎用`part_number`は全null・正常)→その後コードpush。本番で部品一覧/新規登録/編集/受注ピッカーを動作確認OK。残課題=社内品番が明細・PDFに流れない(`OrderItem`に品番フィールド無し・PDF未描画／出すなら別タスク)。 ｜ commit `e542de3`(part-form/actions/variants-section/page/parts-inventory-table/items-form/migration)・Vercel自動デプロイ＋prod DB手動移行(汎用5件)＋DECISIONS.md
 - （以降追記）
 
 ---
