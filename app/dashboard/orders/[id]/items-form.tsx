@@ -1,7 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState, useTransition } from "react";
+import {
+  useActionState,
+  useMemo,
+  useState,
+  useTransition,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type {
   Customer,
   IndirectMaterialEntry,
@@ -145,6 +169,7 @@ function rowFromMenu(
     // 業販対応 段2-1: 参考定価は掛け率をかける前の素の売値 (baseAmount)。
     // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
     list_price: baseAmount > 0 ? String(baseAmount) : "",
+    _uid: nextRowUid(),
   };
 }
 
@@ -196,6 +221,7 @@ function rowFromPart(
     // 業販対応 段2-1: 参考定価は掛け率をかける前の素の定価 (listPrice)。
     // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
     list_price: listPrice > 0 ? String(listPrice) : "",
+    _uid: nextRowUid(),
   };
 }
 
@@ -267,7 +293,18 @@ type ItemRow = {
   // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
   // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
   _noteExpanded?: boolean;
+  // UI 専用: ドラッグ並べ替え（@dnd-kit）の安定キー。行オブジェクトは更新で作り直されるため、
+  // 配列 index ではなくこの uid を sortable id / React key に使う。保存対象外（toItem で詰めない）。
+  _uid?: string;
 };
+
+// ドラッグ並べ替え用の UI 専用 uid を採番する。Date.now/Math.random は使わず（純粋性ルール対策）、
+// モジュール内カウンタで単調増加させる。行生成（factory）はレンダーではなくイベント/初期化で呼ばれる。
+let _rowUidCounter = 0;
+function nextRowUid(): string {
+  _rowUidCounter += 1;
+  return `row_${_rowUidCounter}`;
+}
 
 // 工賃 / 部品代の少なくとも片方に値が入っているか（= 単価が自動計算モード）
 function hasBreakdown(r: ItemRow): boolean {
@@ -316,6 +353,7 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
       i.list_price !== undefined && i.list_price > 0
         ? String(i.list_price)
         : "",
+    _uid: nextRowUid(),
   };
 }
 
@@ -397,6 +435,7 @@ const emptyRow = (
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
   list_price: "",
+  _uid: nextRowUid(),
 });
 
 // 既存 items を category id ベースの Record に振り分ける。
@@ -1228,6 +1267,28 @@ function ItemTableEditor({
     );
   }
 
+  // カテゴリ内ドラッグ並べ替え（@dnd-kit、部品一覧と同じパターン）。各カテゴリの ItemTableEditor が
+  // 独立した DndContext を持つため、ドラッグはこのカテゴリ内に限定される（カテゴリまたぎ不可）。
+  // 並び替え結果は rows 配列の順序として onChange で親に返し、既存の保存フロー（items_json →
+  // 「内容を保存」）にそのまま乗る。リロード後は order.items の配列順で復元される。
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  function rowId(r: ItemRow, i: number): string {
+    return r._uid ?? `idx_${i}`;
+  }
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldI = rows.findIndex((r, i) => rowId(r, i) === active.id);
+    const newI = rows.findIndex((r, i) => rowId(r, i) === over.id);
+    if (oldI < 0 || newI < 0) return;
+    onChange(arrayMove(rows, oldI, newI));
+  }
+
   return (
     <div className="space-y-2">
       {rows.length === 0 ? (
@@ -1235,18 +1296,25 @@ function ItemTableEditor({
           明細はありません
         </p>
       ) : (
-        rows.map((r, i) => {
-          // 部品在庫から追加した行（部品リンクあり・作業内容空）。種別バッジ表示に使う。
-          const isPartRow = r.linked_part_id !== "" && r.name.trim() === "";
-          // 偶数行（i=1,3,5...）にゼブラ背景。
-          const zebra =
-            i % 2 === 1 ? "bg-zinc-100 dark:bg-zinc-800/60" : "";
-          const noteOpen = r.note !== "" || r._noteExpanded === true;
-          return (
-            <div
-              key={i}
-              className={`rounded-md border border-zinc-200 p-2.5 dark:border-zinc-800 ${zebra}`}
-            >
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={rows.map((r, i) => rowId(r, i))}
+            strategy={verticalListSortingStrategy}
+          >
+            {rows.map((r, i) => {
+              // 部品在庫から追加した行（部品リンクあり・作業内容空）。種別バッジ表示に使う。
+              const isPartRow = r.linked_part_id !== "" && r.name.trim() === "";
+              // 偶数行（i=1,3,5...）にゼブラ背景。
+              const zebra = i % 2 === 1;
+              const noteOpen = r.note !== "" || r._noteExpanded === true;
+              return (
+                <SortableItemRow key={rowId(r, i)} id={rowId(r, i)} zebra={zebra}>
+                  {(handle) => (
+                    <>
               {/* 2 段グリッド: [#] [作業/工賃] [部品名/部品代] [数量/—] [単価/小計] [☆/×]
                   items-end で各セルを下端揃え（ラベル付きセルと入力単独セルの底辺を一致）。
                   # バッジは row-span-2 + self-center で縦方向中央。 */}
@@ -1254,9 +1322,18 @@ function ItemTableEditor({
                   sm 以上では auto にして「☆ メニュー登録」ラベル分だけ広げる。 */}
               <div className="grid items-end gap-x-2 gap-y-1.5 grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_36px] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_auto]">
                 <div className="row-span-2 flex flex-col items-center justify-center gap-1 self-center">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300">
+                  {/* # バッジ＝ドラッグハンドル。番号入力欄等を誤ってつかまないよう、ハンドルだけに
+                      listeners を付ける（行内の各 input はドラッグ対象外のまま編集できる）。 */}
+                  <button
+                    type="button"
+                    aria-label="ドラッグして並べ替え"
+                    title="ドラッグで並べ替え（同カテゴリ内）"
+                    className="inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300"
+                    {...handle.attributes}
+                    {...handle.listeners}
+                  >
                     {i + 1}
-                  </span>
+                  </button>
                   {isPartRow && (
                     <span
                       className="rounded bg-sky-100 px-1 py-0.5 text-[9px] font-medium leading-tight text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
@@ -1467,9 +1544,13 @@ function ItemTableEditor({
                   </div>
                 )}
               </div>
-            </div>
-          );
-        })
+                    </>
+                  )}
+                </SortableItemRow>
+              );
+            })}
+          </SortableContext>
+        </DndContext>
       )}
       <button
         type="button"
@@ -1478,6 +1559,53 @@ function ItemTableEditor({
       >
         ＋ 明細行を追加
       </button>
+    </div>
+  );
+}
+
+// 明細1行のドラッグ可能ラッパー。外枠 div に setNodeRef/transform を当て、ドラッグハンドル用の
+// attributes/listeners は render-prop で # バッジに渡す（行内の input は掴まずに編集できる）。
+// zebra と本体の見た目は元の行 div のクラスを踏襲する。
+function SortableItemRow({
+  id,
+  zebra,
+  children,
+}: {
+  id: string;
+  zebra: boolean;
+  children: (handle: {
+    attributes: ReturnType<typeof useSortable>["attributes"];
+    listeners: ReturnType<typeof useSortable>["listeners"];
+  }) => ReactNode;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    position: isDragging ? "relative" : undefined,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`rounded-md border border-zinc-200 p-2.5 dark:border-zinc-800 ${
+        isDragging
+          ? "bg-white shadow-md dark:bg-zinc-900"
+          : zebra
+            ? "bg-zinc-100 dark:bg-zinc-800/60"
+            : ""
+      }`}
+    >
+      {children({ attributes, listeners })}
     </div>
   );
 }

@@ -77,7 +77,7 @@ export default async function EditOrderPage(
               href={`/dashboard/orders/${order.id}`}
               className="hover:underline"
             >
-              No. {order.id.slice(0, 8)}
+              No. {order.id}
             </Link>{" "}
             ／ 編集
           </div>
