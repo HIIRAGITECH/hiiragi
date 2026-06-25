@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import { calculateDefaultDueDate } from "@/lib/components/payment-due-modal";
 import { buildPdfFileName, type PdfDocType } from "@/lib/pdf/file-name";
-import { markEstimateIssued } from "../actions";
+import { markEstimateIssued, updateInvoiceMeta } from "../actions";
 
 // 領収書の但し書きデフォルト。PDF 側（lib/pdf-react/InvoiceDocument）の
 // DEFAULT_RECEIPT_NOTE と一致させる（client から react-pdf を import しないため複製）。
@@ -26,6 +27,8 @@ type Props = {
   invoicedAt: string | null;
   // 受注に保存済みの振込期限（YYYY-MM-DD）。振込期限入力欄の初期値に使う。
   paymentDueDate: string | null;
+  // 受注に保存済みの請求書件名。件名入力欄の初期値に使う。
+  invoiceSubject: string | null;
 };
 
 // 出力対象の帳票（表示順 = 出力順）。
@@ -41,6 +44,7 @@ export default function DocumentOutput({
   customerName,
   invoicedAt,
   paymentDueDate,
+  invoiceSubject,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -54,8 +58,13 @@ export default function DocumentOutput({
     receipt: false,
   });
   const [receiptNote, setReceiptNote] = useState(DEFAULT_RECEIPT_NOTE);
-  // 振込期限（請求書用）。初期値は受注の保存値。PDF出力のみに反映（受注は更新しない）。
-  const [dueDate, setDueDate] = useState(paymentDueDate ?? "");
+  // 振込期限（請求書用）。初期値は受注の保存値、無ければ翌月末（従来モーダルの既定を踏襲）。
+  // 「PDFを出力」時に受注の payment_due_date として保存する。
+  const [dueDate, setDueDate] = useState(
+    paymentDueDate ?? calculateDefaultDueDate(new Date()),
+  );
+  // 請求書件名。初期値は受注の保存値。「PDFを出力」時に invoice_subject として保存する。
+  const [subject, setSubject] = useState(invoiceSubject ?? "");
   // 領収日（領収書用）。既定は操作日（今日）。
   const [receiptDate, setReceiptDate] = useState(todayLocal());
 
@@ -84,10 +93,21 @@ export default function DocumentOutput({
     setGenerating(true);
     setError(null);
     try {
+      // 請求書を含む場合は、振込期限・件名を受注に保存してから PDF を生成する
+      // （ステータスは変えない）。保存後に PDF ルートが最新の受注値を読むため、
+      // 一覧・入金管理・ダッシュボード・請求書PDF すべてに反映される。
+      if (selected.invoice) {
+        const saved = await updateInvoiceMeta(orderId, dueDate, subject);
+        if (saved?.error) {
+          setError(saved.error);
+          return;
+        }
+      }
+
       const params = new URLSearchParams();
       params.set("types", chosen.join(","));
       if (selected.invoice) {
-        // 振込期限を請求書PDFに反映（空なら期限なし）。受注データは更新しない。
+        // 入力した振込期限を確実に PDF へ反映（保存値と同じだが冪等な保険）。
         params.set("dueDate", dueDate);
       }
       if (selected.receipt) {
@@ -125,10 +145,13 @@ export default function DocumentOutput({
       if (selected.estimate) {
         try {
           await markEstimateIssued(orderId);
-          router.refresh();
         } catch {
           // ステータス更新の失敗は PDF 出力をブロックしない。
         }
+      }
+      // 受注を更新した場合は表示（ステータスバー・振込期限等）を最新化。
+      if (selected.invoice || selected.estimate) {
+        router.refresh();
       }
       setOpen(false);
     } catch (err: unknown) {
@@ -189,26 +212,48 @@ export default function DocumentOutput({
                 ))}
               </div>
 
-              {/* 請求書を選んだときのみ振込期限を表示（PDF出力のみに反映）。 */}
+              {/* 請求書を選んだときのみ振込期限・件名を表示。出力時に受注へ保存する。 */}
               {selected.invoice && (
-                <div className="mt-4">
-                  <label
-                    htmlFor="due_date"
-                    className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
-                  >
-                    振込期限
-                  </label>
-                  <input
-                    id="due_date"
-                    type="date"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                    disabled={generating}
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
-                  />
-                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    この請求書PDFにのみ反映します（受注の振込期限は変更しません）。空欄なら期限を表示しません。
-                  </p>
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <label
+                      htmlFor="due_date"
+                      className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    >
+                      振込期限
+                    </label>
+                    <input
+                      id="due_date"
+                      type="date"
+                      value={dueDate}
+                      onChange={(e) => setDueDate(e.target.value)}
+                      disabled={generating}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
+                    />
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      出力時に受注へ保存し、請求書・一覧・入金管理に反映します。空欄なら期限なし。
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="invoice_subject"
+                      className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    >
+                      件名（任意）
+                    </label>
+                    <input
+                      id="invoice_subject"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      placeholder="例: 2026年4月分整備代金として"
+                      disabled={generating}
+                      maxLength={120}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
+                    />
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      請求書の合計金額の上に「件名: ◯◯」として表示します。未入力なら表示しません。
+                    </p>
+                  </div>
                 </div>
               )}
 

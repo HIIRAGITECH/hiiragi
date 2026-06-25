@@ -643,6 +643,46 @@ export async function updateInvoiceStatus(
   return undefined;
 }
 
+// 帳票出力ポップアップから請求情報（振込期限・件名）を保存する。
+// invoice_status は変更しない（ステータス遷移とは独立に payment_due_date / invoice_subject のみ更新）。
+//   - 旧 PaymentDueModal が請求済化と同時にやっていた payment_due_date / invoice_subject 保存を、
+//     この関数に切り出して帳票ポップアップが担う（役割の引っ越し）。
+//   - 空文字 / null は該当カラムを null にクリアする。
+// 振込期限を参照する一覧・入金管理・ダッシュボード・請求書PDFに反映されるよう revalidate する。
+export async function updateInvoiceMeta(
+  id: string,
+  paymentDueDate: string | null,
+  invoiceSubject: string | null,
+): Promise<{ error: string } | undefined> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const due =
+    paymentDueDate && paymentDueDate.trim() !== ""
+      ? paymentDueDate.trim()
+      : null;
+  const subject =
+    invoiceSubject && invoiceSubject.trim() !== ""
+      ? invoiceSubject.trim()
+      : null;
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ payment_due_date: due, invoice_subject: subject })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${id}`);
+  revalidatePath("/dashboard/payments");
+  revalidatePath("/dashboard");
+  return undefined;
+}
+
 // form action 用の薄いラッパー（DeleteButton から hidden id を受けて呼ぶ）
 export async function archiveOrderFormAction(formData: FormData) {
   const id = String(formData.get("id") ?? "");

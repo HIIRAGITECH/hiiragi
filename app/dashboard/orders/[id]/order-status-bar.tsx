@@ -1,9 +1,5 @@
 "use client";
 
-import { useState } from "react";
-import PaymentDueModal, {
-  calculateDefaultDueDate,
-} from "@/lib/components/payment-due-modal";
 import StatusDropdown from "@/lib/components/status-dropdown";
 import StatusRow from "@/lib/components/status-row";
 import {
@@ -15,7 +11,6 @@ import {
   type WorkStatus,
 } from "@/lib/types";
 import {
-  updateArchived,
   updateEstimateStatus,
   updateInvoiceStatus,
   updateWorkStatus,
@@ -31,7 +26,6 @@ type Props = {
   workStatus: WorkStatus;
   estimateStatus: EstimateStatus;
   invoiceStatus: InvoiceStatus;
-  invoiceSubject: string | null;
 };
 
 export default function OrderStatusBar({
@@ -39,28 +33,9 @@ export default function OrderStatusBar({
   workStatus,
   estimateStatus,
   invoiceStatus,
-  invoiceSubject,
 }: Props) {
-  const [showPaymentDue, setShowPaymentDue] = useState(false);
-
-  async function applyInvoiced(dueDate: string, subject: string | null) {
-    const result = await updateInvoiceStatus(
-      orderId,
-      "請求済",
-      dueDate,
-      subject,
-    );
-    if (
-      !result &&
-      typeof window !== "undefined" &&
-      window.confirm(
-        `受注「${orderId}」をアーカイブして一覧から非表示にしますか？`,
-      )
-    ) {
-      await updateArchived(orderId, true);
-    }
-  }
-
+  // 請求済化はモーダルなしで即時実行。振込期限・件名は帳票出力ポップアップで設定する。
+  // アーカイブは受注詳細の「アーカイブ」ボタンから行う。
   return (
     <div className="flex flex-col gap-1">
       <StatusRow label="作業">
@@ -102,30 +77,11 @@ export default function OrderStatusBar({
           value={invoiceStatus}
           options={INVOICE_STATUSES}
           classMap={invoiceClass}
-          onSelect={async (next) => {
-            if (next === "請求済") {
-              setShowPaymentDue(true);
-            } else {
-              await updateInvoiceStatus(orderId, next);
-            }
-          }}
+          onSelect={(next) => updateInvoiceStatus(orderId, next)}
           ariaLabel="請求ステータスを変更"
           baseClassName="wos-status"
         />
       </StatusRow>
-
-      {showPaymentDue && (
-        <PaymentDueModal
-          orderId={orderId}
-          defaultDate={calculateDefaultDueDate(new Date())}
-          defaultSubject={invoiceSubject}
-          onClose={() => setShowPaymentDue(false)}
-          onConfirm={async (date, subject) => {
-            setShowPaymentDue(false);
-            await applyInvoiced(date, subject);
-          }}
-        />
-      )}
     </div>
   );
 }

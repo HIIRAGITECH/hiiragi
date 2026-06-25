@@ -230,7 +230,6 @@ export default async function OrderDetailPage(
               workStatus={order.work_status}
               estimateStatus={order.estimate_status}
               invoiceStatus={order.invoice_status}
-              invoiceSubject={order.invoice_subject}
             />
           </div>
         </div>
@@ -385,6 +384,7 @@ export default async function OrderDetailPage(
               customerName={customer?.name ?? null}
               invoicedAt={order.invoiced_at}
               paymentDueDate={order.payment_due_date}
+              invoiceSubject={order.invoice_subject}
             />
             {/* HTML プレビュー（印刷）への既存導線は温存。見積書プレビューは従来どおり発行済に更新。 */}
             <div className="mt-4 flex flex-wrap items-center gap-2">

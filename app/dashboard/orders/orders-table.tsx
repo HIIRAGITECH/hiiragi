@@ -4,9 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import DeleteButton from "@/lib/components/delete-button";
-import PaymentDueModal, {
-  calculateDefaultDueDate,
-} from "@/lib/components/payment-due-modal";
 import StatusDropdown from "@/lib/components/status-dropdown";
 import { formatYen } from "@/lib/format";
 import {
@@ -18,7 +15,6 @@ import {
 } from "@/lib/types";
 import {
   deleteOrder,
-  updateArchived,
   updateEstimateStatus,
   updateInvoiceStatus,
   updateWorkStatus,
@@ -70,29 +66,6 @@ type Props = {
 
 export default function OrdersTable({ rows, baseUrl, mypageEnabled }: Props) {
   const [query, setQuery] = useState("");
-  const [paymentDueFor, setPaymentDueFor] = useState<string | null>(null);
-
-  async function applyInvoiced(
-    orderId: string,
-    dueDate: string,
-    subject: string | null,
-  ) {
-    const result = await updateInvoiceStatus(
-      orderId,
-      "請求済",
-      dueDate,
-      subject,
-    );
-    if (
-      !result &&
-      typeof window !== "undefined" &&
-      window.confirm(
-        `受注「${orderId}」をアーカイブして一覧から非表示にしますか？`,
-      )
-    ) {
-      await updateArchived(orderId, true);
-    }
-  }
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -184,7 +157,6 @@ export default function OrdersTable({ rows, baseUrl, mypageEnabled }: Props) {
                         active={ci === 1}
                         baseUrl={baseUrl}
                         mypageEnabled={mypageEnabled}
-                        onRequestInvoiceDue={(id) => setPaymentDueFor(id)}
                       />
                     ))
                   )}
@@ -194,22 +166,6 @@ export default function OrdersTable({ rows, baseUrl, mypageEnabled }: Props) {
           })}
         </div>
       </div>
-
-      {paymentDueFor && (
-        <PaymentDueModal
-          orderId={paymentDueFor}
-          defaultDate={calculateDefaultDueDate(new Date())}
-          defaultSubject={
-            rows.find((r) => r.id === paymentDueFor)?.invoice_subject ?? null
-          }
-          onClose={() => setPaymentDueFor(null)}
-          onConfirm={async (date, subject) => {
-            const orderId = paymentDueFor;
-            setPaymentDueFor(null);
-            await applyInvoiced(orderId, date, subject);
-          }}
-        />
-      )}
     </>
   );
 }
@@ -219,13 +175,11 @@ function BoardCard({
   active,
   baseUrl,
   mypageEnabled,
-  onRequestInvoiceDue,
 }: {
   o: OrderKanbanRow;
   active: boolean;
   baseUrl: string;
   mypageEnabled: boolean;
-  onRequestInvoiceDue: (id: string) => void;
 }) {
   const router = useRouter();
 
@@ -381,13 +335,7 @@ function BoardCard({
             value={o.invoice_status ?? "未請求"}
             options={INVOICE_STATUSES}
             classMap={invoiceClass}
-            onSelect={async (next) => {
-              if (next === "請求済") {
-                onRequestInvoiceDue(o.id);
-              } else {
-                await updateInvoiceStatus(o.id, next);
-              }
-            }}
+            onSelect={(next) => updateInvoiceStatus(o.id, next)}
             ariaLabel="請求ステータスを変更"
             baseClassName="wos-status"
           />
