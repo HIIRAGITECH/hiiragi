@@ -28,7 +28,8 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-06-23（マイページ改修フェーズA本番反映＝「作業状況」の明細再掲を廃止し進捗フェーズバー（受注受付→お見積り→ご了承・作業開始→作業中→作業完了）に置換、支払い情報を了承段階から前倒し表示。コードのみ・DB変更なし・commit `9d1f38f`。発送情報（フェーズB）は実装→dev検証まで完了したが見送り・巻き戻し＝§7参照）
+最終更新: 2026-06-26（帳票出力を刷新・本番反映＝納品書/領収書を追加し4種化＋複数選択を1つにまとめるPDF結合(pdf-lib)、受注詳細の帳票出力をチェックボックスのポップアップ化。振込期限・件名(invoice_subject)の入力をステータス変更時のPaymentDueModalから帳票ポップアップへ移行し新アクションupdateInvoiceMetaで保存、PaymentDueModalは廃止・請求済化はモーダルなし即時に・アーカイブは受注詳細の既存ボタンで継続。領収日入力(既定=今日)追加・デフォルトチェック解除。DBスキーマ変更なし・commit `d582a6d`/`2310707`/`38f796f`。詳細は§4 2026-06-26）
+※前回 2026-06-23: マイページ改修フェーズA本番反映＝「作業状況」の明細再掲を廃止し進捗フェーズバー（受注受付→お見積り→ご了承・作業開始→作業中→作業完了）に置換、支払い情報を了承段階から前倒し表示。コードのみ・DB変更なし・commit `9d1f38f`。発送情報（フェーズB）は実装→dev検証まで完了したが見送り・巻き戻し＝§7参照）
 ※前回 2026-06-22: マイページURL 404バグ修正（Vercel `NEXT_PUBLIC_SITE_URL` 設定）＋認証メール日本語化＋受注の顧客検索コンボボックス化＋special_freeのmypage有効化。
 
 | 領域 | 状態 |
@@ -116,6 +117,52 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-06-26 ── 帳票出力の刷新（納品書・領収書追加＋まとめPDF）と請求情報入力のポップアップ移行
+
+帳票まわりを3コミットで段階的に刷新し本番反映（`d582a6d`→`2310707`→`38f796f`）。本番確認OK。
+
+**① 帳票4種化＋まとめPDF（commit `d582a6d`）**
+- `lib/pdf-react/InvoiceDocument.tsx` の `PdfDocumentType` を estimate/invoice の2種から
+  estimate/invoice/**delivery（納品書）/receipt（領収書）** の4値に拡張。title/lead/amountLabel の
+  三項演算子を `DOC_LABELS` Record 化（estimate/invoice の文言は不変＝既存帳票に無影響）。
+- 納品書＝請求書ベースで「納品書」「納品金額」。振込先・振込期限・件名・預かり金/差引請求額・備考は出さない
+  （`!== "delivery"` ゲートを追加し estimate/invoice は従来挙動を維持）。
+- 領収書＝明細を持たない専用レイアウト `ReceiptDocument`（宛名／領収金額(税込・内消費税併記)／「上記正に
+  領収いたしました」／但し書き／収入印紙枠／発行者）。
+- **まとめPDF**＝選んだ複数帳票を1ファイルに結合。単一Document内に複数Pageを並べると react-pdf の
+  `pageNumber`（継続ヘッダ）が全体通し番号になり誤表示するため、**各typeを個別 `renderToBuffer`→pdf-lib で
+  バイナリ結合**（`pdf-lib` 依存追加）。出力順は見積→納品→請求→領収。API `/api/invoice-pdf/[id]` を
+  `?types=` 複数指定＋`?receiptNote=` に拡張、旧 `?type=` 単一は後方互換維持。
+- 受注詳細の「帳票出力」をチェックボックスのポップアップ（`document-output.tsx`）化。HTMLプレビュー(印刷)は
+  estimate/invoice 据え置き＝**納品書・領収書はPDF出力のみ**（二重実装の発散回避）。
+
+**② 振込期限・領収日入力＋既定チェック解除（commit `2310707`）**
+- ポップアップで請求書チェック時に「振込期限」、領収書チェック時に「領収日」入力欄を表示。領収日は
+  `receiptDate` クエリ・**既定=操作日（今日）**。振込期限は `dueDate` クエリ。既定チェックを全解除（開いた
+  時点で無選択）。この時点の dueDate は「PDF一時上書きのみ・受注は未更新」。
+
+**③ 振込期限・件名をポップアップへ移行＋PaymentDueModal廃止（commit `38f796f`）＝役割の引っ越し**
+- 振込期限・件名(`invoice_subject`)の入力を、ステータス変更時の `PaymentDueModal` から帳票ポップアップへ移管。
+  新アクション **`updateInvoiceMeta(id, dueDate, subject)`** を追加し、「PDFを出力」時に受注の
+  `payment_due_date`・`invoice_subject` を保存（**ステータスは変えない**）。保存後にPDFを生成するため
+  一覧・入金管理・マイページ・請求書PDFすべてに反映（該当パスを revalidate）。振込期限の初期値は受注値、
+  無ければ翌月末（従来既定 `calculateDefaultDueDate` を流用）。
+- **PaymentDueModal 廃止**：請求済への変更を `order-status-bar.tsx`/`orders-table.tsx` でモーダルなし即時実行に。
+  `updateInvoiceStatus` は期限/件名引数なしで呼ぶ＝**後方互換**（undefined で既存値維持／請求済化で `invoiced_at`
+  設定は不変）。請求済化に `payment_due_date` 必須の依存は無し（null許容・PDF/入金管理とも null を処理）。
+- **件名の救済**：`invoice_subject` は従来 PaymentDueModal でしか設定できず、モーダル廃止で設定不能になる回帰を
+  避けるため振込期限と同じくポップアップへ移設（`updateInvoiceMeta` で同時保存）。
+- **アーカイブ**：請求済化時のアーカイブ確認（`window.confirm`→`updateArchived`）を廃止。アーカイブは受注詳細の
+  既存ボタン（`archiveOrderFormAction`/`restoreOrderFormAction`）で継続＝機能は維持（一覧からの即アーカイブ
+  ショートカットのみ消失）。
+- `lib/components/payment-due-modal.tsx` は `calculateDefaultDueDate` を流用するため**ファイル残置**
+  （`PaymentDueModal` コンポーネント本体は未参照のデッドコード・削除は別タスク）。
+
+**共通**：データ構造・計算（`calculateTotals` 等）・受注ピッカーに影響なし。DBスキーマ変更なし（既存
+`payment_due_date`/`invoice_subject` 列を使用）。各段階で typecheck/build 通過、dev実機でPDF実物・ページ結合
+（4種で4ページ）・日付反映・ルート配信を確認。新ブランチ運用（`feat/multi-document-pdf`→
+`feat/document-popup-dates`→`feat/due-date-to-popup`）で main へ ff マージ。
 
 ### 2026-06-25 ── 部品在庫UIの作り直し（編集の価格1リスト化・更新ボタン1つ・一覧のぶら下がり価格＋D&D）
 
@@ -846,6 +893,7 @@
 - **2026-06-25** ｜ 部品編集 バリアントカードの品番ラベル統一（本番反映） ｜ 部品編集画面のバリアントカード（VariantCard／NewVariantCard）の品番ラベルを「品番」→「社内品番（お客様に見せる品番）」に変更（2箇所）。新規登録フォームの「社内品番」と表記を統一し、本体側の「仕入れ品番（社外品番）」と並べて社内/社外を一目で区別できるようにする狙い。中身は元々 `parts_inventory_variants.part_number`（社内品番・二階）で正しく、`name`・保存先・defaultValue・ロジックは未変更＝**表示文言のみ**。DB変更なし。dev で標準/車種別カードのラベル表示を目視確認。build通過・Vercel自動デプロイ ｜ コード（variants-section.tsx）＋DECISIONS.md
 - **2026-06-25** ｜ 部品在庫UIの作り直し（本番反映） ｜ 二階建て構造の見せ方を作り直し（データ構造は不変・UIのみ）。①編集の価格UIを「標準/車種別の2セクション→価格カード1リスト」に統合（車種空=全車種共通・案Aで1枚制限・「標準/汎用」の語は非表示）②編集の更新ボタンを画面で1つに統合＝本体フォームと価格エディタ（フォームを持たない `VariantEditorFields`）を同じ `<form>` に同居させ、新アクション `updatePartAndVariants` が本体＋価格をまとめてバリデーション→保存（案A違反や本体不正なら何も保存しない・成功時は一覧へredirect）。旧 `saveVariants`/個別更新ボタンは廃止（`variants-actions.ts` 削除）③一覧改善＝明細(show_in_detail)・定価・発注点の各列を本体行から削除（データ/ロジックは残し状態バッジに集約）、各部品にぶら下がり価格（全車種共通＋車種別の 社内品番・定価・掛率・業販）を表示、並べ替えを↑↓→ドラッグ&ドロップ（**@dnd-kit** 導入／`reorderParts` で `display_order` 保存）。受注ピッカー・PDF・計算は不変。新規登録（本体＋汎用同時生成）も不変。dev実機で編集1リスト・1ボタン保存・案A停止・一覧列/ぶら下がり/D&D・受注出し分けを確認。build通過・Vercel自動デプロイ。残課題=社内品番の明細/PDF流入（別タスク）。カテゴリ分けは保留 ｜ commit（part-form/variants-section/actions/page/parts-inventory-table/edit-page/variants-actions削除/package）＋DECISIONS.md
 - **2026-06-25** ｜ 受注詳細 明細カテゴリ内D&D並べ替え＋受注番号の表示切れ修正（本番反映） ｜ **A: 受注明細のカテゴリ内ドラッグ&ドロップ並べ替え**。部品一覧で導入済の **@dnd-kit** を流用。各カテゴリの `ItemTableEditor` が独立した `DndContext`+`SortableContext` を持つため**カテゴリまたぎは不可**（同カテゴリ内のみ）。ドラッグハンドルは行頭の「#バッジ」のみ（`cursor-grab`）＝行内の各 input には listeners を付けず編集と非干渉。行の安定IDに UI専用 `_uid`（モジュールカウンタ採番・`Date.now`/`Math.random` 不使用・`toItem` で詰めない＝**保存非対象**）を導入し、配列 index ではなく `_uid` を sortable id / React key に使用（factory `emptyRow`/`toRow`/`rowFromMenu`/`rowFromPart` で採番）。並び替えは `arrayMove` で `rows` 配列順を更新→ `onChange`→親 `rowsByCat`→既存 `items_json` の組み立て順に乗り、**既存の「内容を保存」ボタン**でそのまま保存（保存フロー新設なし）。リロードは `order.items` 配列順→`splitByCategory` で復元。**B: 受注番号の表示切れ修正**。原因は **UUID前提の名残 `order.id.slice(0, 8)`** で、管理番号が「YY+`MB-`+4桁＝9文字」（例 `26MB-0006`）のため末尾1桁が欠け `26MB-000` になっていた（CSS/overflow は無関係）。slice を撤去し `No. {order.id}` 全桁表示に（**受注詳細ヘッダ**＋**編集ページのパンくず**の2箇所）。念のため `whitespace-nowrap` 付与。顧客/車両ID（`CU0001` 等6文字）は8文字に収まるため `slice(0,8)` のまま放置（影響なし）。**データ構造変更なし**（jsonb に `_uid` は入らない）・計算（`calculateTotals`/`calculateProfit`）と受注ピッカーに影響なし・**PDF は並べ替えた順を反映**（items 配列順で描画＝意図どおり）。build/typecheck/lint 通過。 ｜ commit `c32a775`（orders/[id]/page.tsx・orders/[id]/edit/page.tsx・items-form.tsx）・Vercel自動デプロイ＋DECISIONS.md
+- **2026-06-26** ｜ 帳票刷新（本番反映） ｜ 帳票出力を3段で刷新。①4種化＋まとめPDF（納品書/領収書追加・`PdfDocumentType`を4値化・`DOC_LABELS`化・領収書専用`ReceiptDocument`・各type個別`renderToBuffer`→**pdf-lib**でバイナリ結合・API`?types=`複数化＋`?receiptNote=`・受注詳細をチェックボックスのポップアップ`document-output.tsx`化・HTMLプレビューはestimate/invoice据置＝納品/領収はPDFのみ）`d582a6d`②ポップアップに振込期限(`dueDate`)・領収日(`receiptDate`・既定今日)入力追加＋既定チェック全解除`2310707`③振込期限・件名を`PaymentDueModal`からポップアップへ移行（新アクション`updateInvoiceMeta`でPDF出力時に`payment_due_date`/`invoice_subject`を保存・ステータス不変・一覧/入金管理/マイページ/PDFに反映・期限初期値は受注値→無ければ翌月末）＋`PaymentDueModal`廃止（請求済化はモーダルなし即時・`updateInvoiceStatus`は期限/件名引数なしで後方互換）＋請求済化時のアーカイブ確認廃止（アーカイブは受注詳細の既存ボタンで継続）＋件名はモーダル廃止での機能喪失回避でポップアップへ移設＋`payment-due-modal.tsx`は`calculateDefaultDueDate`流用で残置（本体デッドコード）`38f796f`。DBスキーマ変更なし・計算/受注ピッカー不変。各段でtypecheck/build通過・dev実機（PDF実物・結合4ページ・日付反映・ルート配信）確認・Vercel自動デプロイ ｜ commit `d582a6d`/`2310707`/`38f796f`＋DECISIONS.md
 - （以降追記）
 
 ---
