@@ -30,11 +30,22 @@ function initialToSlots(initial: PartsInventoryVariant[]): Slot[] {
 // 案A（車種空カードは1枚）と保存はサーバー側 updatePartAndVariants が担う。
 export function VariantEditorFields({
   initial,
+  seedEmpty = false,
 }: {
   initial: PartsInventoryVariant[];
+  // 新規登録で使うとき true。価格カードが 0 枚なら空の車種空カードを1枚だけ初期表示する
+  // （「部品は必ず価格を持つ」運用を維持し、開いた瞬間に1枚並んでいる状態にする）。
+  seedEmpty?: boolean;
 }) {
-  const [slots, setSlots] = useState<Slot[]>(() => initialToSlots(initial));
-  const newCounter = useRef(0);
+  const [slots, setSlots] = useState<Slot[]>(() => {
+    const s = initialToSlots(initial);
+    if (s.length === 0 && seedEmpty) {
+      return [{ key: "new_1", id: null, variant: null }];
+    }
+    return s;
+  });
+  // seedEmpty で new_1 を既に使った場合は 1 から続ける（次の追加が new_2 になる）。
+  const newCounter = useRef(seedEmpty && initial.length === 0 ? 1 : 0);
 
   function addCard() {
     newCounter.current += 1;

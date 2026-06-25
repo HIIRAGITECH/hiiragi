@@ -266,35 +266,33 @@ async function resolveCategoryName(
   return { name: data.name as string };
 }
 
-export async function createWorkMenu(
-  _prev: FormState,
+// メニュー作成の中核。フォームのパース→カテゴリ検証→本体INSERT→間接材料の紐付けまでを行い、
+// 新しい id を返す（redirect しない）。ページ用 createWorkMenu とモーダル用 createWorkMenuReturning が
+// これを共有する。D: display_order は一覧の一番上（既存最小 - 1）に採番する。
+async function insertWorkMenuCore(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
   formData: FormData,
-): Promise<FormState> {
+): Promise<{ id: string } | { error: string }> {
   const result = readPayload(formData);
   if ("error" in result) return result;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
-
-  const cat = await resolveCategoryName(supabase, user.id, result.item_category_id);
+  const cat = await resolveCategoryName(supabase, userId, result.item_category_id);
   if ("error" in cat) return cat;
   const legacy = deriveLegacyCategory(result.tax_category, cat.name);
 
   // 段1: 部品リンク (linked_part_id) は退役。フォームから送られない。
 
-  // display_order は既存最大値 + 1（同 user_id 内）
-  const { data: maxRow } = await supabase
+  // D: 新規は一覧の一番上に出す。既存最小 - 1 を採番（↑↓ の moveWorkMenu と整合。負値許容）。
+  const { data: minRow } = await supabase
     .from("work_menu_items")
     .select("display_order")
-    .eq("user_id", user.id)
-    .order("display_order", { ascending: false })
+    .eq("user_id", userId)
+    .order("display_order", { ascending: true })
     .limit(1)
     .maybeSingle();
   const nextOrder =
-    typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
+    typeof minRow?.display_order === "number" ? minRow.display_order - 1 : 0;
 
   // 1) work_menu_items を挿入し id を取得 (旧カラムも後方互換値で埋める)
   const { data: inserted, error } = await supabase
@@ -305,7 +303,7 @@ export async function createWorkMenu(
       category: legacy.category,
       tax_free: legacy.tax_free,
       display_order: nextOrder,
-      user_id: user.id,
+      user_id: userId,
     })
     .select("id")
     .single();
@@ -318,20 +316,61 @@ export async function createWorkMenu(
   if (indirect.length > 0) {
     const r = await replaceIndirectMaterials(
       supabase,
-      user.id,
+      userId,
       inserted.id as string,
       indirect,
     );
     if (r && "error" in r) return r;
   }
 
+  return { id: inserted.id as string };
+}
+
+export async function createWorkMenu(
+  _prev: CreateMenuReturningState,
+  formData: FormData,
+): Promise<FormState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const res = await insertWorkMenuCore(supabase, user.id, formData);
+  if ("error" in res) return res;
+
   revalidatePath("/dashboard/work-menus");
   redirect("/dashboard/work-menus");
 }
 
+// 受注明細の「☆ メニュー登録」モーダル用。createWorkMenu と同じ中核を使うが、
+// redirect せず id を返す（受注画面に留まる。呼び出し側が二重登録抑止に id を使う）。
+export type CreateMenuReturningState =
+  | { error: string }
+  | { ok: true; id: string }
+  | undefined;
+
+export async function createWorkMenuReturning(
+  _prev: CreateMenuReturningState,
+  formData: FormData,
+): Promise<CreateMenuReturningState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  const res = await insertWorkMenuCore(supabase, user.id, formData);
+  if ("error" in res) return res;
+
+  // 一覧（メニュー）には反映したいので revalidate するが、受注画面は redirect しない。
+  revalidatePath("/dashboard/work-menus");
+  return { ok: true, id: res.id };
+}
+
 export async function updateWorkMenu(
   id: string,
-  _prev: FormState,
+  _prev: CreateMenuReturningState,
   formData: FormData,
 ): Promise<FormState> {
   const result = readPayload(formData);

@@ -87,31 +87,22 @@ function readPartPayload(formData: FormData): PartPayload | { error: string } {
   };
 }
 
-// 新規登録フォームに同居する「標準の売価」＝汎用バリアント（車種空）の入力。
-//   general_part_number → variant.part_number（社内品番）
-//   list_price          → variant.list_price（定価）
-//   markup_rate         → variant.markup_rate（掛率・小数。PriceMarkupGroup が %→小数で送る）
-type GeneralVariantPayload = {
-  part_number: string | null;
-  list_price: number | null;
-  markup_rate: number | null;
-};
-
-function readGeneralVariantPayload(formData: FormData): GeneralVariantPayload {
-  return {
-    part_number: pickString(formData, "general_part_number"),
-    list_price: pickNullableNumber(formData, "list_price"),
-    markup_rate: pickNullableNumber(formData, "markup_rate"),
-  };
-}
-
-// 新規作成: display_order = 既存最大 + 1。初期在庫があれば stock_movements に 'in' で記録。
+// 新規作成: 価格カード（VariantEditorFields）も編集画面と同じ card_keys / card_<key>_* で受け取り、
+// 本体＋複数バリアントを一括作成する。display_order は一覧の最上部（既存最小 - 1）に採番する。
+// 初期在庫があれば stock_movements に 'in' で記録。redirect で一覧へ戻る（従来挙動を維持）。
 export async function createPart(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
+  // ① 本体のバリデーション
   const result = readPartPayload(formData);
   if ("error" in result) return result;
+
+  // ① 価格カードのバリデーション（本体INSERT前に弾く＝検証失敗で親が孤立しないように）
+  const desired = parseDesiredCards(formData);
+  if ("error" in desired) return desired;
+  const singleGeneralErr = checkSingleGeneral(desired);
+  if (singleGeneralErr) return singleGeneralErr;
 
   const initial_stock = pickNumber(formData, "initial_stock_quantity", 0);
 
@@ -121,15 +112,17 @@ export async function createPart(
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
-  const { data: maxRow } = await supabase
+  // D: 新規は一覧の一番上に出す。既存最小 - 1 を採番（D&D の reorderParts が後で 0..n-1 に
+  //    振り直すまで先頭になる。負値は movePart の一時値と同様に許容）。
+  const { data: minRow } = await supabase
     .from("parts_inventory")
     .select("display_order")
     .eq("user_id", user.id)
-    .order("display_order", { ascending: false })
+    .order("display_order", { ascending: true })
     .limit(1)
     .maybeSingle();
   const nextOrder =
-    typeof maxRow?.display_order === "number" ? maxRow.display_order + 1 : 0;
+    typeof minRow?.display_order === "number" ? minRow.display_order - 1 : 0;
 
   const { data: inserted, error } = await supabase
     .from("parts_inventory")
@@ -145,24 +138,38 @@ export async function createPart(
     return { error: `登録に失敗しました: ${error?.message ?? "unknown"}` };
   }
 
-  // 二階建て化（2026-06-24）: 本体INSERTに続けて「標準の売価」＝汎用バリアント（車種空）を
-  // 必ず1件作る。社内品番・定価・掛率はここに入る。display_order=0 で先頭。
-  // 失敗時は本体だけ残るが、編集画面で標準価格を追加できるため致命傷にはしない（エラーは返す）。
-  const general = readGeneralVariantPayload(formData);
+  // 二階建て化: 本体INSERTに続けて価格カード（売り方＝バリアント）を作る。
+  // カードがあればカード配列順に複数INSERT。カードが1枚も無いときは「部品は必ず価格を持つ」運用を
+  // 守るため、空の汎用バリアント（車種空）を1件だけ作る（UI は seedEmpty で常に1枚出すが防御的に）。
+  // 失敗時は本体だけ残るが、編集画面で価格を追加できるため致命傷にはしない（エラーは返す）。
+  const cardsToInsert =
+    desired.length > 0
+      ? desired.map((d, i) => ({
+          user_id: user.id,
+          part_id: inserted.id,
+          part_number: d.part_number,
+          list_price: d.list_price,
+          markup_rate: d.markup_rate,
+          vehicle_tags: d.vehicle_tags,
+          display_order: i,
+        }))
+      : [
+          {
+            user_id: user.id,
+            part_id: inserted.id,
+            part_number: null,
+            list_price: null,
+            markup_rate: null,
+            vehicle_tags: [],
+            display_order: 0,
+          },
+        ];
   const { error: variantErr } = await supabase
     .from("parts_inventory_variants")
-    .insert({
-      user_id: user.id,
-      part_id: inserted.id,
-      part_number: general.part_number,
-      list_price: general.list_price,
-      markup_rate: general.markup_rate,
-      vehicle_tags: [],
-      display_order: 0,
-    });
+    .insert(cardsToInsert);
   if (variantErr) {
     return {
-      error: `部品は登録しましたが、標準価格の保存に失敗しました（編集画面から追加してください）: ${variantErr.message}`,
+      error: `部品は登録しましたが、価格の保存に失敗しました（編集画面から追加してください）: ${variantErr.message}`,
     };
   }
 
@@ -241,6 +248,19 @@ function parseDesiredCards(formData: FormData): DesiredCard[] | { error: string 
   }));
 }
 
+// 案A: 「車種空（全車種共通）」カードは 1 部品につき 1 枚まで。新規(createPart)・編集
+// (updatePartAndVariants) の両方でこの検証を共有する。違反時はエラーを返し、何も保存しない。
+function checkSingleGeneral(desired: DesiredCard[]): { error: string } | null {
+  const emptyCount = desired.filter((d) => d.vehicle_tags.length === 0).length;
+  if (emptyCount > 1) {
+    return {
+      error:
+        "全車種共通の価格（車種を指定しないカード）は1つだけです。車種を指定するか、既存の共通価格を編集してください。",
+    };
+  }
+  return null;
+}
+
 // 編集画面の単一「更新する」: 本体（parts_inventory）と価格カード（parts_inventory_variants）を
 // まとめて保存する。本体フォームと価格エディタを同じ <form> に同居させ、その submit で呼ばれる。
 //
@@ -261,13 +281,8 @@ export async function updatePartAndVariants(
   // ① 価格カードのバリデーション
   const desired = parseDesiredCards(formData);
   if ("error" in desired) return desired;
-  const emptyCount = desired.filter((d) => d.vehicle_tags.length === 0).length;
-  if (emptyCount > 1) {
-    return {
-      error:
-        "全車種共通の価格（車種を指定しないカード）は1つだけです。車種を指定するか、既存の共通価格を編集してください。",
-    };
-  }
+  const singleGeneralErr = checkSingleGeneral(desired);
+  if (singleGeneralErr) return singleGeneralErr;
 
   const supabase = await createClient();
   const {

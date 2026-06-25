@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { moneyDefault } from "@/lib/forms/money-default";
 import type {
   PartsInventory,
@@ -9,10 +9,17 @@ import type {
   WorkItemCategory,
   WorkMenuItem,
 } from "@/lib/types";
-import type { FormState } from "./actions";
+
+// ページ用アクション（createWorkMenu/updateWorkMenu）は { error } | undefined を返し、成功時は
+// redirect する。モーダル用アクション（createWorkMenuReturning）は redirect せず { ok, id } を返す。
+// このフォームはどちらの形でも受けられるよう、状態をユニオンで持つ。
+type FormResult =
+  | { error: string }
+  | { ok: true; id: string }
+  | undefined;
 
 type Props = {
-  action: (state: FormState, formData: FormData) => Promise<FormState>;
+  action: (state: FormResult, formData: FormData) => Promise<FormResult>;
   initial?: WorkMenuItem;
   // 選択肢として表示するアクティブな業務カテゴリ。display_order 順で渡されている前提。
   // initial.item_category_id が deleted_at 等で含まれない場合に備えて、
@@ -24,6 +31,10 @@ type Props = {
   initialIndirectMaterials?: { part_id: string; quantity: number }[];
   submitLabel: string;
   cancelHref: string;
+  // モーダル用: 登録成功（action が { ok, id } を返した）時に呼ばれる。新しいメニュー id を渡す。
+  onSuccess?: (id: string) => void;
+  // モーダル用: 指定するとキャンセルが cancelHref への遷移ではなくこのコールバックになる。
+  onCancel?: () => void;
 };
 
 // 間接材料のフォーム内表現。
@@ -59,11 +70,20 @@ export default function WorkMenuForm({
   initialIndirectMaterials = [],
   submitLabel,
   cancelHref,
+  onSuccess,
+  onCancel,
 }: Props) {
-  const [state, formAction, pending] = useActionState<FormState, FormData>(
+  const [state, formAction, pending] = useActionState<FormResult, FormData>(
     action,
     undefined,
   );
+
+  // モーダル用: action が { ok, id } を返したら親に通知する（ページ用は redirect するのでここは通らない）。
+  useEffect(() => {
+    if (state && "ok" in state && state.ok) {
+      onSuccess?.(state.id);
+    }
+  }, [state, onSuccess]);
 
   // 初期カテゴリ: initial の item_category_id があればそれ、無ければ先頭の active。
   const initialCategoryId =
@@ -512,7 +532,7 @@ export default function WorkMenuForm({
         />
       </div>
 
-      {state?.error && (
+      {state && "error" in state && state.error && (
         <p role="alert" className="wos-alert warn">
           {state.error}
         </p>
@@ -526,9 +546,19 @@ export default function WorkMenuForm({
         >
           {pending ? "保存中…" : submitLabel}
         </button>
-        <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
-          キャンセル
-        </Link>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="wos-btn-ghost wos-btn-sm"
+          >
+            キャンセル
+          </button>
+        ) : (
+          <Link href={cancelHref} className="wos-btn-ghost wos-btn-sm">
+            キャンセル
+          </Link>
+        )}
       </div>
     </form>
   );

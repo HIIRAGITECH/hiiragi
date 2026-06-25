@@ -5,15 +5,15 @@ import type { ReactNode } from "react";
 import { useActionState, useState } from "react";
 import type { PartsInventory } from "@/lib/types";
 import type { FormState } from "./actions";
-import { PriceMarkupGroup } from "./variants-section";
 
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   initial?: PartsInventory;
   submitLabel: string;
   cancelHref: string;
-  // 編集画面では価格エディタ（VariantEditorFields）をここに渡し、本体と同じ <form> 内に同居させて
-  // 単一の submit でまとめて保存する。新規登録では渡さない（本体＋汎用バリアントは createPart が処理）。
+  // 新規・編集とも、価格エディタ（VariantEditorFields）をここに渡し、本体と同じ <form> 内に
+  // 同居させて単一の submit でまとめて保存する。新規は createPart、編集は updatePartAndVariants が
+  // card_keys / card_<key>_* を読んで本体＋複数バリアントを一括で保存する。
   children?: ReactNode;
 };
 
@@ -100,34 +100,8 @@ export default function PartForm({
         </div>
       </div>
 
-      {/* 二階＝標準の売り方。新規登録時のみ同じ画面で入力し、汎用バリアント（車種空）として保存する。
-          社内品番・定価・掛率は売り方ごとの値。車種別は登録後の編集画面で追加する。売価(sale_price)は廃止。 */}
-      {!isEdit && (
-        <div className="border border-[var(--color-line)] p-3 space-y-3">
-          <div className="text-xs font-semibold text-[var(--color-ink-mid)]">
-            標準の売価
-          </div>
-          <div>
-            <label htmlFor="general_part_number" className="wos-label">
-              社内品番{" "}
-              <span className="text-xs text-[var(--color-ink-light)]">
-                （任意・お客様に見せる品番）
-              </span>
-            </label>
-            <input
-              id="general_part_number"
-              name="general_part_number"
-              defaultValue=""
-              className="wos-input"
-              placeholder="例: A-001"
-            />
-          </div>
-          <PriceMarkupGroup initialListPrice={null} initialMarkupRate={null} />
-          <p className="text-xs text-[var(--color-ink-light)]">
-            定価・掛率は任意です。車種ごとに品番や定価を分けたいときは、登録後の編集画面で「車種別価格」を追加できます。
-          </p>
-        </div>
-      )}
+      {/* 二階＝売り方（価格カード）は新規・編集とも下部の VariantEditorFields（children）で入力する。
+          社内品番・定価・掛率は売り方ごとの値。車種空（全車種共通）は1枚まで。売価(sale_price)は廃止。 */}
 
       {/* 「明細に出す」フラグは視覚的に隠す（要素は残し checked のまま送信する）。
           DOM から消すと pickBool が false を返し間接材料扱いになるため、隠すだけにする。 */}

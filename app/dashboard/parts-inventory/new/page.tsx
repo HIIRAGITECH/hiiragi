@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import PartForm from "../part-form";
+import { VariantEditorFields } from "../variants-section";
 import { createPart } from "../actions";
 
 export const metadata: Metadata = {
@@ -27,7 +28,9 @@ export default function NewPartPage() {
             action={createPart}
             submitLabel="登録する"
             cancelHref="/dashboard/parts-inventory"
-          />
+          >
+            <VariantEditorFields initial={[]} seedEmpty />
+          </PartForm>
         </div>
       </div>
     </>

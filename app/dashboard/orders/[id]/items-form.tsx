@@ -23,7 +23,8 @@ import {
 import { formatYen } from "@/lib/format";
 import { moneyDefault } from "@/lib/forms/money-default";
 import SearchInput from "@/lib/components/search-input";
-import { registerOrderItemAsMenu } from "../../work-menus/actions";
+import WorkMenuForm from "../../work-menus/work-menu-form";
+import { createWorkMenuReturning } from "../../work-menus/actions";
 import type { FolderActionResult, FormState } from "../actions";
 
 type SetWithItems = {
@@ -195,6 +196,42 @@ function rowFromPart(
     // 業販対応 段2-1: 参考定価は掛け率をかける前の素の定価 (listPrice)。
     // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
     list_price: listPrice > 0 ? String(listPrice) : "",
+  };
+}
+
+// 受注明細の1行を、作業メニュー登録フォーム（WorkMenuForm）の初期値に変換する。
+// メニューは「1メニュー＝1金額」構造なので、明細の対応フィールドをメニューの欄に流し込む:
+//   作業内容(name) → メニュー名(work_name)。空なら部品名で補う。
+//   単価(unit_price) → 金額/売値(default_unit_price)。フォームの「金額」欄に入る。
+//   原価(labor_cost_price ?? parts_cost_price) → メニュー原価(labor_cost_price)。
+//   数量・税区分・業務カテゴリもそのまま引き継ぐ。掛率(markup_rate)は明細が持たないので未設定。
+// id 等は使われないが WorkMenuItem 型を満たすためにダミーを詰める（フォームは値の prefill にのみ使う）。
+function rowToMenuInitial(r: ItemRow): WorkMenuItem {
+  const unit = Number(r.unit_price) || 0;
+  const qty = Number(r.quantity) || 1;
+  const cost = Number(r.labor_cost_price || r.parts_cost_price) || 0;
+  return {
+    id: "",
+    user_id: "",
+    work_name: r.name.trim() || r.part_name.trim() || "",
+    part_name: null,
+    category: "normal",
+    default_quantity: qty,
+    default_unit_price: unit,
+    default_labor_cost: 0,
+    default_parts_cost: 0,
+    labor_cost_price: cost,
+    parts_cost_price: 0,
+    tax_free: r.tax_category === "shaken_non_tax",
+    display_order: 0,
+    memo: null,
+    deleted_at: null,
+    tax_category: r.tax_category,
+    item_category_id: r.item_category_id || null,
+    linked_part_id: null,
+    markup_rate: null,
+    created_at: "",
+    updated_at: "",
   };
 }
 
@@ -578,67 +615,32 @@ export default function ItemsForm({
     setPartPickerOpen(false);
   }
 
-  // 行の ☆ ボタン: その行をマスター（work_menu_items）に登録する。
-  // 登録成功時は当該 row.source_menu_id を新規 id でセットして二重登録を抑止する。
-  const [registeringRow, setRegisteringRow] = useState<{
+  // 行の ☆ ボタン: その行を作業メニューマスター（work_menu_items）に登録する。
+  // 旧仕様（確認ダイアログ→一発INSERT）から、既存のメニュー登録フォーム（WorkMenuForm）を
+  // ポップアップで開く方式に変更。明細の情報を初期値として詰めた状態で開き、ユーザーが確認・
+  // 追記してから登録する。登録成功時は当該 row.source_menu_id に新規 id をセットして二重登録抑止。
+  const [menuModalRow, setMenuModalRow] = useState<{
     categoryId: string;
     index: number;
   } | null>(null);
-  function handleRegisterRow(
-    categoryId: string,
-    index: number,
-  ): Promise<void> {
-    const list = rowsByCat[categoryId] ?? [];
-    const r = list[index];
-    if (!r) return Promise.resolve();
-    if (!r.name.trim()) {
-      alert("作業内容が空のため登録できません。");
-      return Promise.resolve();
-    }
-    if (!r.item_category_id) {
-      alert("業務カテゴリが未設定のため登録できません。");
-      return Promise.resolve();
-    }
-    if (
-      !confirm(
-        `「${r.name}」を作業メニューマスターに登録しますか？\n（補足は登録されません）`,
-      )
-    ) {
-      return Promise.resolve();
-    }
-    const categoryName = categoryNameById.get(r.item_category_id) ?? null;
-    const item = toItem(r, categoryName);
-    setRegisteringRow({ categoryId, index });
-    return registerOrderItemAsMenu({
-      work_name: item.work_name,
-      part_name: item.part_name ?? null,
-      default_quantity: item.quantity,
-      default_unit_price: item.unit_price,
-      default_labor_cost: item.labor_cost ?? 0,
-      default_parts_cost: item.parts_cost ?? 0,
-      labor_cost_price: item.labor_cost_price ?? 0,
-      parts_cost_price: item.parts_cost_price ?? 0,
-      tax_category: r.tax_category,
-      item_category_id: r.item_category_id,
-      // 明細がリンクを持っていればマスター側にも引き継ぐ。
-      linked_part_id: r.linked_part_id !== "" ? r.linked_part_id : null,
-    })
-      .then((res) => {
-        if ("error" in res) {
-          alert(res.error);
-          return;
-        }
-        setRowsByCat((prev) => {
-          const cur = prev[categoryId] ?? [];
-          return {
-            ...prev,
-            [categoryId]: cur.map((row, idx) =>
-              idx === index ? { ...row, source_menu_id: res.id } : row,
-            ),
-          };
-        });
-      })
-      .finally(() => setRegisteringRow(null));
+
+  function openMenuModal(categoryId: string, index: number) {
+    setMenuModalRow({ categoryId, index });
+  }
+
+  function handleMenuRegistered(id: string) {
+    if (!menuModalRow) return;
+    const { categoryId, index } = menuModalRow;
+    setRowsByCat((prev) => {
+      const cur = prev[categoryId] ?? [];
+      return {
+        ...prev,
+        [categoryId]: cur.map((row, idx) =>
+          idx === index ? { ...row, source_menu_id: id } : row,
+        ),
+      };
+    });
+    setMenuModalRow(null);
   }
 
   // 全セクションの item 配列を組み立てて totals 計算 & 保存 JSON を作る。
@@ -761,8 +763,7 @@ export default function ItemsForm({
               categoryId={catId}
               categoryName={cat?.name ?? null}
               defaultTaxCategory={sectionTaxCategory}
-              onRegisterRow={handleRegisterRow}
-              registeringRow={registeringRow}
+              onRegisterRow={openMenuModal}
               isBusiness={isBusiness}
             />
           </section>
@@ -1089,7 +1090,74 @@ export default function ItemsForm({
           onClose={() => setPartPickerOpen(false)}
         />
       )}
+      {menuModalRow &&
+        (() => {
+          const r = rowsByCat[menuModalRow.categoryId]?.[menuModalRow.index];
+          if (!r) return null;
+          return (
+            <MenuRegisterModal
+              initial={rowToMenuInitial(r)}
+              allCategories={allCategories}
+              allParts={allParts}
+              onSuccess={handleMenuRegistered}
+              onClose={() => setMenuModalRow(null)}
+            />
+          );
+        })()}
     </form>
+  );
+}
+
+// ============================================
+// 「☆ メニュー登録」モーダル
+// ============================================
+// 既存の作業メニュー登録フォーム（WorkMenuForm）をそのままポップアップで再利用する。
+// 明細行から作った initial を prefill し、redirect しない createWorkMenuReturning を action に渡す。
+// 登録成功（{ ok, id }）で onSuccess(id) が呼ばれ、親が行に source_menu_id をセットしてモーダルを閉じる。
+function MenuRegisterModal({
+  initial,
+  allCategories,
+  allParts,
+  onSuccess,
+  onClose,
+}: {
+  initial: WorkMenuItem;
+  allCategories: WorkItemCategory[];
+  allParts: PartsInventory[];
+  onSuccess: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="my-8 w-full max-w-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 rounded-t-lg bg-white px-4 py-3 dark:bg-zinc-900">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+            作業メニューに登録
+          </h3>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            明細の内容を初期値として入れています。確認・追記して登録してください。登録後はこの受注画面に戻ります。
+          </p>
+        </div>
+        <WorkMenuForm
+          action={createWorkMenuReturning}
+          initial={initial}
+          allCategories={allCategories}
+          allParts={allParts}
+          submitLabel="メニューに登録"
+          cancelHref="#"
+          onSuccess={onSuccess}
+          onCancel={onClose}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -1100,7 +1168,6 @@ function ItemTableEditor({
   categoryName,
   defaultTaxCategory,
   onRegisterRow,
-  registeringRow,
   isBusiness,
 }: {
   rows: ItemRow[];
@@ -1110,8 +1177,8 @@ function ItemTableEditor({
   categoryName: string | null;
   // セクションの推奨税区分。「+ 明細行を追加」で空行を作るときに使う。
   defaultTaxCategory: TaxCategory;
-  onRegisterRow: (categoryId: string, index: number) => Promise<void>;
-  registeringRow: { categoryId: string; index: number } | null;
+  // ☆ ボタン: その行のメニュー登録モーダルを開く（同期。登録自体はモーダル内のフォームが行う）。
+  onRegisterRow: (categoryId: string, index: number) => void;
   // 業販対応 段2-1: 法人時は「単価/業販/参考定価」3列、個人時は「単価」1列に切替。
   isBusiness: boolean;
 }) {
@@ -1261,10 +1328,6 @@ function ItemTableEditor({
                 <button
                   type="button"
                   onClick={() => onRegisterRow(categoryId, i)}
-                  disabled={
-                    registeringRow?.categoryId === categoryId &&
-                    registeringRow?.index === i
-                  }
                   aria-label="この行をマスターに登録"
                   title={
                     r.source_menu_id
