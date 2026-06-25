@@ -384,6 +384,7 @@ export default async function OrderDetailPage(
               orderId={order.id}
               customerName={customer?.name ?? null}
               invoicedAt={order.invoiced_at}
+              paymentDueDate={order.payment_due_date}
             />
             {/* HTML プレビュー（印刷）への既存導線は温存。見積書プレビューは従来どおり発行済に更新。 */}
             <div className="mt-4 flex flex-wrap items-center gap-2">

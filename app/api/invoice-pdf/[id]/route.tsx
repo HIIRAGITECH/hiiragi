@@ -83,6 +83,14 @@ export async function GET(
   const types = resolveTypes(request);
   const receiptNote =
     request.nextUrl.searchParams.get("receiptNote") ?? undefined;
+  // 領収書の領収日（YYYY-MM-DD）。未指定なら ReceiptDocument 側で当日。
+  const receiptDate =
+    request.nextUrl.searchParams.get("receiptDate") ?? undefined;
+  // 振込期限（YYYY-MM-DD）。帳票ポップアップからの一時上書き用。
+  //   - param が存在する: その値で請求書PDFの振込期限を上書き（空文字 = 期限なし）。
+  //     受注の payment_due_date 自体は更新しない（PDF出力のみ反映）。
+  //   - param が無い（旧 ?type= 等）: 受注の payment_due_date をそのまま使う（後方互換）。
+  const dueDateParam = request.nextUrl.searchParams.get("dueDate");
 
   const supabase = await createClient();
   const {
@@ -102,6 +110,11 @@ export async function GET(
     return new Response("Not Found", { status: 404 });
   }
   const order = orderData as Order;
+  // 振込期限の一時上書き（PDF出力のみ反映）。param 未指定なら受注の値を維持。
+  const orderForRender: Order =
+    dueDateParam !== null
+      ? { ...order, payment_due_date: dueDateParam || null }
+      : order;
 
   const [{ data: customerData }, vehicleResult, shop, catsRes] =
     await Promise.all([
@@ -147,7 +160,7 @@ export async function GET(
       renderToBuffer(
         <InvoiceDocument
           documentType={documentType}
-          order={order}
+          order={orderForRender}
           customer={customer}
           vehicle={vehicle}
           shop={shop}
@@ -155,6 +168,7 @@ export async function GET(
           stampBuffer={stampBuffer}
           allCategories={allCategories}
           receiptNote={receiptNote}
+          receiptDate={receiptDate}
         />,
       ),
     ),

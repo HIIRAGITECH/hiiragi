@@ -10,11 +10,22 @@ import { markEstimateIssued } from "../actions";
 // DEFAULT_RECEIPT_NOTE と一致させる（client から react-pdf を import しないため複製）。
 const DEFAULT_RECEIPT_NOTE = "整備代として";
 
+// ローカル（端末）時刻での今日の日付 YYYY-MM-DD。領収日の既定値に使う。
+function todayLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear().toString().padStart(4, "0");
+  const m = (d.getMonth() + 1).toString().padStart(2, "0");
+  const day = d.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 type Props = {
   orderId: string;
   customerName: string | null;
   // 請求書のファイル名に使う請求日（無ければ当日）。
   invoicedAt: string | null;
+  // 受注に保存済みの振込期限（YYYY-MM-DD）。振込期限入力欄の初期値に使う。
+  paymentDueDate: string | null;
 };
 
 // 出力対象の帳票（表示順 = 出力順）。
@@ -29,18 +40,24 @@ export default function DocumentOutput({
   orderId,
   customerName,
   invoicedAt,
+  paymentDueDate,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 既定はすべて未チェック（開いた時点で何も選ばれていない）。
   const [selected, setSelected] = useState<Record<PdfDocType, boolean>>({
     estimate: false,
     delivery: false,
-    invoice: true,
+    invoice: false,
     receipt: false,
   });
   const [receiptNote, setReceiptNote] = useState(DEFAULT_RECEIPT_NOTE);
+  // 振込期限（請求書用）。初期値は受注の保存値。PDF出力のみに反映（受注は更新しない）。
+  const [dueDate, setDueDate] = useState(paymentDueDate ?? "");
+  // 領収日（領収書用）。既定は操作日（今日）。
+  const [receiptDate, setReceiptDate] = useState(todayLocal());
 
   useEffect(() => {
     if (!open) return;
@@ -69,11 +86,16 @@ export default function DocumentOutput({
     try {
       const params = new URLSearchParams();
       params.set("types", chosen.join(","));
+      if (selected.invoice) {
+        // 振込期限を請求書PDFに反映（空なら期限なし）。受注データは更新しない。
+        params.set("dueDate", dueDate);
+      }
       if (selected.receipt) {
         params.set(
           "receiptNote",
           receiptNote.trim() === "" ? DEFAULT_RECEIPT_NOTE : receiptNote.trim(),
         );
+        if (receiptDate) params.set("receiptDate", receiptDate);
       }
       const url = `/api/invoice-pdf/${encodeURIComponent(orderId)}?${params.toString()}`;
       const res = await fetch(url, { cache: "no-store" });
@@ -167,24 +189,65 @@ export default function DocumentOutput({
                 ))}
               </div>
 
-              {/* 領収書を選んだときのみ但し書きを表示。 */}
-              {selected.receipt && (
+              {/* 請求書を選んだときのみ振込期限を表示（PDF出力のみに反映）。 */}
+              {selected.invoice && (
                 <div className="mt-4">
                   <label
-                    htmlFor="receipt_note"
+                    htmlFor="due_date"
                     className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
                   >
-                    領収書の但し書き
+                    振込期限
                   </label>
                   <input
-                    id="receipt_note"
-                    value={receiptNote}
-                    onChange={(e) => setReceiptNote(e.target.value)}
-                    placeholder={DEFAULT_RECEIPT_NOTE}
+                    id="due_date"
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
                     disabled={generating}
-                    maxLength={100}
-                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
+                    className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
                   />
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    この請求書PDFにのみ反映します（受注の振込期限は変更しません）。空欄なら期限を表示しません。
+                  </p>
+                </div>
+              )}
+
+              {/* 領収書を選んだときのみ但し書き・領収日を表示。 */}
+              {selected.receipt && (
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <label
+                      htmlFor="receipt_note"
+                      className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    >
+                      領収書の但し書き
+                    </label>
+                    <input
+                      id="receipt_note"
+                      value={receiptNote}
+                      onChange={(e) => setReceiptNote(e.target.value)}
+                      placeholder={DEFAULT_RECEIPT_NOTE}
+                      disabled={generating}
+                      maxLength={100}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="receipt_date"
+                      className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+                    >
+                      領収日
+                    </label>
+                    <input
+                      id="receipt_date"
+                      type="date"
+                      value={receiptDate}
+                      onChange={(e) => setReceiptDate(e.target.value)}
+                      disabled={generating}
+                      className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50"
+                    />
+                  </div>
                 </div>
               )}
 

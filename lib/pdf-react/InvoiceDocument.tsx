@@ -79,6 +79,9 @@ interface InvoiceDocumentProps {
   allCategories: WorkItemCategory[];
   // 領収書の但し書き（documentType === "receipt" のときのみ使用）。
   receiptNote?: string;
+  // 領収書の日付（YYYY-MM-DD、documentType === "receipt" のときのみ使用）。
+  // 未指定なら当日。
+  receiptDate?: string;
 }
 
 const COLORS = {
@@ -596,6 +599,7 @@ export function InvoiceDocument({
   stampBuffer,
   allCategories,
   receiptNote,
+  receiptDate,
 }: InvoiceDocumentProps) {
   // 領収書は明細レイアウトと構成が大きく異なるため、専用ドキュメントに分岐する。
   // estimate/invoice/delivery は以下の共通レイアウトを使う。
@@ -608,6 +612,7 @@ export function InvoiceDocument({
         logoBuffer={logoBuffer}
         stampBuffer={stampBuffer}
         receiptNote={receiptNote}
+        receiptDate={receiptDate}
       />
     );
   }
@@ -1130,6 +1135,7 @@ interface ReceiptDocumentProps {
   logoBuffer: Buffer | null;
   stampBuffer: Buffer | null;
   receiptNote?: string;
+  receiptDate?: string;
 }
 
 function ReceiptDocument({
@@ -1139,6 +1145,7 @@ function ReceiptDocument({
   logoBuffer,
   stampBuffer,
   receiptNote,
+  receiptDate,
 }: ReceiptDocumentProps) {
   const totals = calculateTotals(
     order.items ?? [],
@@ -1151,7 +1158,11 @@ function ReceiptDocument({
     receiptNote && receiptNote.trim() !== ""
       ? receiptNote.trim()
       : DEFAULT_RECEIPT_NOTE;
-  const today = new Date().toISOString().slice(0, 10);
+  // 領収日。受け取った値（YYYY-MM-DD）を優先し、無ければ当日。
+  const receiptDateStr =
+    receiptDate && receiptDate.trim() !== ""
+      ? receiptDate.trim()
+      : new Date().toISOString().slice(0, 10);
 
   return (
     <Document>
@@ -1169,7 +1180,9 @@ function ReceiptDocument({
           </View>
           <View style={receiptStyles.metaRow}>
             <Text style={receiptStyles.metaLabel}>発行日</Text>
-            <Text style={receiptStyles.metaValue}>{formatDate(today)}</Text>
+            <Text style={receiptStyles.metaValue}>
+              {formatDate(receiptDateStr)}
+            </Text>
           </View>
         </View>
 
