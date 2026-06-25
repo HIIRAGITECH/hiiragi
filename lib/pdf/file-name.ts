@@ -21,13 +21,26 @@ function toYyyymmdd(date: Date | string | null | undefined): string {
   return `${y}${m}${day}`;
 }
 
+export type PdfDocType = "estimate" | "invoice" | "delivery" | "receipt";
+
+const DOC_TYPE_LABELS: Record<PdfDocType, string> = {
+  estimate: "見積書",
+  invoice: "請求書",
+  delivery: "納品書",
+  receipt: "領収書",
+};
+
 export function buildPdfFileName(params: {
-  documentType: "estimate" | "invoice";
+  // 単一種別なら種別ラベル、複数種別をまとめた結合 PDF なら "帳票" を使う。
+  documentType: PdfDocType | "combined";
   date: Date | string | null;
   customerName: string | null;
   orderNumber: string | null;
 }): string {
-  const typeLabel = params.documentType === "estimate" ? "見積書" : "請求書";
+  const typeLabel =
+    params.documentType === "combined"
+      ? "帳票"
+      : DOC_TYPE_LABELS[params.documentType];
   const dateStr = toYyyymmdd(params.date);
   const rawCustomer =
     params.customerName && params.customerName.trim() !== ""

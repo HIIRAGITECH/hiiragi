@@ -25,6 +25,7 @@ import {
   restoreOrderFormAction,
   updateOrderItems,
 } from "../actions";
+import DocumentOutput from "./document-output";
 import ItemsForm from "./items-form";
 import MypageSection from "./mypage-section";
 import OrderStatusBar from "./order-status-bar";
@@ -376,19 +377,29 @@ export default async function OrderDetailPage(
           <section className="wos-card">
             <div className="wos-sec-label mb-3">帳票出力</div>
             <p className="text-sm text-[var(--color-ink-mid)] mb-4">
-              内容を保存してから出力してください。「見積書を出力」を押すと、見積ステータスが自動で「発行済」に更新されます。
+              内容を保存してから出力してください。「帳票を出力」では見積書・納品書・請求書・領収書を選んで
+              1 つの PDF にまとめて出力できます（見積書を含めると見積ステータスが「発行済」に更新されます）。
             </p>
-            <div className="flex flex-wrap gap-2">
+            <DocumentOutput
+              orderId={order.id}
+              customerName={customer?.name ?? null}
+              invoicedAt={order.invoiced_at}
+            />
+            {/* HTML プレビュー（印刷）への既存導線は温存。見積書プレビューは従来どおり発行済に更新。 */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-[var(--color-ink-mid)]">
+                プレビュー（印刷）:
+              </span>
               <form action={openEstimateAction}>
-                <button type="submit" className="wos-btn wos-btn-sm">
-                  見積書を出力
+                <button type="submit" className="wos-btn-ghost wos-btn-sm">
+                  見積書
                 </button>
               </form>
               <Link
                 href={`/dashboard/orders/${order.id}/invoice`}
                 className="wos-btn-ghost wos-btn-sm"
               >
-                請求書を出力
+                請求書
               </Link>
             </div>
           </section>

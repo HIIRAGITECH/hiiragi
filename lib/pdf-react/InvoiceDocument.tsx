@@ -28,7 +28,42 @@ import { registerJapaneseFont } from "./fonts";
 
 registerJapaneseFont();
 
-export type PdfDocumentType = "estimate" | "invoice";
+// 帳票種別。estimate/invoice は従来からの2種。delivery（納品書）/receipt（領収書）を追加。
+//   - estimate/invoice/delivery: 共通の明細レイアウト（InvoiceDocument 本体）を流用。
+//   - receipt: 明細を持たない領収書専用レイアウト（ReceiptDocument）に分岐する。
+export type PdfDocumentType = "estimate" | "invoice" | "delivery" | "receipt";
+
+// 領収書の但し書きデフォルト。UI 側（帳票出力モーダル）でも同じ既定値を使う。
+export const DEFAULT_RECEIPT_NOTE = "整備代として";
+
+// タイトル / リード文 / 金額ラベルを帳票種別ごとに集約。
+// 2値前提の三項演算子を 4値対応の Record に置き換え（estimate/invoice の文言は従来と同一）。
+const DOC_LABELS: Record<
+  PdfDocumentType,
+  { title: string; lead: string; amountLabel: string }
+> = {
+  estimate: {
+    title: "見積書",
+    lead: "下記の通りお見積申し上げます。",
+    amountLabel: "御見積金額",
+  },
+  invoice: {
+    title: "請求書",
+    lead: "下記の通りご請求申し上げます。",
+    amountLabel: "ご請求金額",
+  },
+  delivery: {
+    title: "納品書",
+    lead: "下記の通り納品いたします。",
+    amountLabel: "納品金額",
+  },
+  // receipt は ReceiptDocument 側で独自に文言を持つため、ここでは参照されない。
+  receipt: {
+    title: "領収書",
+    lead: "",
+    amountLabel: "領収金額",
+  },
+};
 
 interface InvoiceDocumentProps {
   documentType: PdfDocumentType;
@@ -42,6 +77,8 @@ interface InvoiceDocumentProps {
   // 業務カテゴリ一覧（display_order 昇順、削除済みも含む）。
   // 過去明細が削除済みカテゴリを参照していても表示できるよう全件渡す前提。
   allCategories: WorkItemCategory[];
+  // 領収書の但し書き（documentType === "receipt" のときのみ使用）。
+  receiptNote?: string;
 }
 
 const COLORS = {
@@ -558,7 +595,23 @@ export function InvoiceDocument({
   logoBuffer,
   stampBuffer,
   allCategories,
+  receiptNote,
 }: InvoiceDocumentProps) {
+  // 領収書は明細レイアウトと構成が大きく異なるため、専用ドキュメントに分岐する。
+  // estimate/invoice/delivery は以下の共通レイアウトを使う。
+  if (documentType === "receipt") {
+    return (
+      <ReceiptDocument
+        order={order}
+        customer={customer}
+        shop={shop}
+        logoBuffer={logoBuffer}
+        stampBuffer={stampBuffer}
+        receiptNote={receiptNote}
+      />
+    );
+  }
+
   const allItems = order.items ?? [];
   const totals = calculateTotals(
     allItems,
@@ -576,15 +629,9 @@ export function InvoiceDocument({
   const isBusiness = customer?.customer_type === "business";
   const listPriceTotals = calculateListPriceTotals(allItems);
 
-  const title = documentType === "estimate" ? "見積書" : "請求書";
-  const lead =
-    documentType === "estimate"
-      ? "下記の通りお見積申し上げます。"
-      : "下記の通りご請求申し上げます。";
+  const { title, lead, amountLabel } = DOC_LABELS[documentType];
   // 1ページ目上部に大きく出す金額。預かり金がある請求書では差引請求額、
   // それ以外は total（=税込合計）を採用する。
-  const amountLabel =
-    documentType === "estimate" ? "御見積金額" : "ご請求金額";
   const headlineAmount =
     documentType === "invoice" && totals.deposit > 0
       ? totals.balance
@@ -856,7 +903,9 @@ export function InvoiceDocument({
               value={formatYen(listPriceTotals.total)}
             />
           )}
-          {totals.deposit > 0 && (
+          {/* 預かり金・差引請求額は請求/見積の精算情報。納品書（delivery）には出さない。
+              estimate/invoice は従来どおり deposit>0 のとき表示。 */}
+          {documentType !== "delivery" && totals.deposit > 0 && (
             <>
               <TotalsRow
                 label="預かり金"
@@ -923,10 +972,13 @@ export function InvoiceDocument({
         {/* 備考: 見積書は estimate_notes、請求書は invoice_notes を参照する。
             order.notes（入荷時メモ）は社内向けなので帳票には出さない。 */}
         {(() => {
+          // 見積=estimate_notes、請求=invoice_notes。納品書は備考を出さない。
           const noteText =
             documentType === "estimate"
               ? order.estimate_notes
-              : order.invoice_notes;
+              : documentType === "invoice"
+                ? order.invoice_notes
+                : null;
           if (!noteText || noteText.trim() === "") return null;
           return (
             <View style={styles.notesBox}>
@@ -935,6 +987,246 @@ export function InvoiceDocument({
             </View>
           );
         })()}
+      </Page>
+    </Document>
+  );
+}
+
+// ───────────────────────────────────────────────────────────
+// 領収書（receipt）専用レイアウト
+//   明細を持たず「宛名 + 領収金額 + 但し書き + 収入印紙欄 + 発行者」が中心。
+//   一般的な領収書の体裁に合わせ、明細の羅列はしない（但し書き + 合計金額が主）。
+//   金額は税込合計（calculateTotals().total）を採用し、内訳として消費税額を併記する。
+// ───────────────────────────────────────────────────────────
+const MM = 2.83465;
+
+const receiptStyles = StyleSheet.create({
+  page: {
+    paddingTop: 25 * MM,
+    paddingBottom: 20 * MM,
+    paddingLeft: 18 * MM,
+    paddingRight: 18 * MM,
+    fontFamily: "NotoSansJP",
+    fontSize: 10,
+    color: COLORS.black,
+    lineHeight: 1.4,
+  },
+  watermark: {
+    position: "absolute",
+    top: "32%",
+    left: "20%",
+    width: "60%",
+    opacity: 0.08,
+  },
+  title: {
+    textAlign: "center",
+    fontSize: 24,
+    fontWeight: "bold",
+    letterSpacing: 10,
+    marginBottom: 6,
+  },
+  metaBlock: {
+    alignSelf: "flex-end",
+    fontSize: 8,
+    color: COLORS.gray,
+    marginBottom: 18,
+  },
+  metaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minWidth: 140,
+    marginBottom: 2,
+  },
+  metaLabel: { color: COLORS.gray },
+  metaValue: { color: COLORS.black, textAlign: "right" },
+
+  // 宛名
+  addressee: {
+    fontSize: 16,
+    paddingBottom: 3,
+    borderBottomWidth: 0.8,
+    borderBottomColor: COLORS.black,
+  },
+  addresseeWrap: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 22,
+  },
+  addresseeHonor: { fontSize: 12, marginLeft: 2 },
+
+  // 領収金額（大きく枠付きで表示）
+  amountBox: {
+    borderWidth: 1.2,
+    borderColor: COLORS.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 4,
+  },
+  amountLabel: {
+    fontSize: 9,
+    color: COLORS.gray,
+    letterSpacing: 2,
+    marginBottom: 2,
+  },
+  amountValue: {
+    fontSize: 26,
+    fontWeight: "bold",
+    color: COLORS.primary,
+  },
+  amountTaxNote: {
+    fontSize: 8,
+    color: COLORS.gray,
+    marginTop: 4,
+    marginBottom: 14,
+  },
+
+  // 但し書き
+  noteRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 16,
+  },
+  noteLabel: { fontSize: 11, marginRight: 6 },
+  noteValue: {
+    fontSize: 12,
+    flex: 1,
+    paddingBottom: 2,
+    borderBottomWidth: 0.6,
+    borderBottomColor: COLORS.tableLine,
+  },
+
+  confirm: { fontSize: 11, marginBottom: 26 },
+
+  // 下段: 収入印紙欄（左） + 発行者（右）
+  footerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  stampDutyBox: {
+    width: 32 * MM,
+    height: 32 * MM,
+    borderWidth: 0.6,
+    borderColor: COLORS.tableLine,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stampDutyLabel: {
+    fontSize: 8,
+    color: COLORS.gray,
+    letterSpacing: 2,
+  },
+  issuerBlock: { alignItems: "flex-end", maxWidth: "60%" },
+  issuerName: { fontSize: 12, fontWeight: "bold", marginBottom: 2 },
+  issuerLine: { fontSize: 8, textAlign: "right", marginBottom: 1 },
+  issuerStampWrap: { marginTop: 6, alignItems: "flex-end" },
+  issuerStamp: { width: 20 * MM, height: 20 * MM, flexShrink: 0 },
+});
+
+interface ReceiptDocumentProps {
+  order: Order;
+  customer: Customer | null;
+  shop: ShopInfo;
+  logoBuffer: Buffer | null;
+  stampBuffer: Buffer | null;
+  receiptNote?: string;
+}
+
+function ReceiptDocument({
+  order,
+  customer,
+  shop,
+  logoBuffer,
+  stampBuffer,
+  receiptNote,
+}: ReceiptDocumentProps) {
+  const totals = calculateTotals(
+    order.items ?? [],
+    order.discount_amount,
+    order.deposit_amount,
+  );
+  // 領収金額は税込合計。内訳として消費税額を併記する。
+  const receiptAmount = totals.total;
+  const note =
+    receiptNote && receiptNote.trim() !== ""
+      ? receiptNote.trim()
+      : DEFAULT_RECEIPT_NOTE;
+  const today = new Date().toISOString().slice(0, 10);
+
+  return (
+    <Document>
+      <Page size="A4" style={receiptStyles.page}>
+        {logoBuffer && (
+          <Image src={logoBuffer} style={receiptStyles.watermark} fixed />
+        )}
+
+        <Text style={receiptStyles.title}>領収書</Text>
+
+        <View style={receiptStyles.metaBlock}>
+          <View style={receiptStyles.metaRow}>
+            <Text style={receiptStyles.metaLabel}>管理No.</Text>
+            <Text style={receiptStyles.metaValue}>{order.id}</Text>
+          </View>
+          <View style={receiptStyles.metaRow}>
+            <Text style={receiptStyles.metaLabel}>発行日</Text>
+            <Text style={receiptStyles.metaValue}>{formatDate(today)}</Text>
+          </View>
+        </View>
+
+        {/* 宛名 */}
+        <View style={receiptStyles.addresseeWrap}>
+          <Text style={receiptStyles.addressee}>{customer?.name ?? "—"}</Text>
+          <Text style={receiptStyles.addresseeHonor}> 様</Text>
+        </View>
+
+        {/* 領収金額 */}
+        <View style={receiptStyles.amountBox}>
+          <Text style={receiptStyles.amountLabel}>領収金額（税込）</Text>
+          <Text style={receiptStyles.amountValue}>
+            {formatYen(receiptAmount)}
+          </Text>
+        </View>
+        <Text style={receiptStyles.amountTaxNote}>
+          （内 消費税額 {formatYen(totals.tax)}）
+        </Text>
+
+        {/* 但し書き */}
+        <View style={receiptStyles.noteRow}>
+          <Text style={receiptStyles.noteLabel}>但</Text>
+          <Text style={receiptStyles.noteValue}>{sanitizeText(note)}</Text>
+        </View>
+
+        <Text style={receiptStyles.confirm}>
+          上記正に領収いたしました。
+        </Text>
+
+        {/* 収入印紙欄 + 発行者 */}
+        <View style={receiptStyles.footerRow}>
+          <View style={receiptStyles.stampDutyBox}>
+            <Text style={receiptStyles.stampDutyLabel}>収入印紙</Text>
+          </View>
+          <View style={receiptStyles.issuerBlock}>
+            <Text style={receiptStyles.issuerName}>
+              {shop.shop_name || "（店舗名 未設定）"}
+            </Text>
+            {shop.address ? (
+              <Text style={receiptStyles.issuerLine}>{shop.address}</Text>
+            ) : null}
+            {shop.phone ? (
+              <Text style={receiptStyles.issuerLine}>TEL: {shop.phone}</Text>
+            ) : null}
+            {shop.registration_no ? (
+              <Text style={receiptStyles.issuerLine}>
+                登録番号: {shop.registration_no}
+              </Text>
+            ) : null}
+            {stampBuffer ? (
+              <View style={receiptStyles.issuerStampWrap}>
+                <Image src={stampBuffer} style={receiptStyles.issuerStamp} />
+              </View>
+            ) : null}
+          </View>
+        </View>
       </Page>
     </Document>
   );

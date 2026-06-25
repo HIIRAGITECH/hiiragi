@@ -903,6 +903,35 @@ export async function openEstimate(id: string) {
   redirect(`/dashboard/orders/${id}/estimate`);
 }
 
+// 帳票出力モーダルから見積書を含む PDF を出力したときに呼ぶ。
+// openEstimate と同じく「未作成」→「発行済」のみ更新（後退させない）。
+// redirect しない版（モーダルはダウンロード後に router.refresh() するだけ）。
+export async function markEstimateIssued(id: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { data: current } = await supabase
+    .from("orders")
+    .select("estimate_status")
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const currentStatus = (current?.estimate_status ?? "未作成") as EstimateStatus;
+  if (currentStatus === "未作成") {
+    await supabase
+      .from("orders")
+      .update({ estimate_status: "発行済" satisfies EstimateStatus })
+      .eq("id", id)
+      .eq("user_id", user.id);
+    revalidatePath(`/dashboard/orders/${id}`);
+    revalidatePath("/dashboard/orders");
+  }
+}
+
 // ============================================
 // 受注を作業セットとして保存
 // ============================================
