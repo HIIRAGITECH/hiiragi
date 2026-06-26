@@ -974,14 +974,14 @@ export function InvoiceDocument({
           </Text>
         ) : null}
 
-        {/* 備考: 見積書は estimate_notes、請求書は invoice_notes を参照する。
+        {/* 備考: 見積書は estimate_notes、請求書・納品書は invoice_notes を参照する。
             order.notes（入荷時メモ）は社内向けなので帳票には出さない。 */}
         {(() => {
-          // 見積=estimate_notes、請求=invoice_notes。納品書は備考を出さない。
+          // 見積=estimate_notes、請求・納品=invoice_notes。領収書は備考を出さない。
           const noteText =
             documentType === "estimate"
               ? order.estimate_notes
-              : documentType === "invoice"
+              : documentType === "invoice" || documentType === "delivery"
                 ? order.invoice_notes
                 : null;
           if (!noteText || noteText.trim() === "") return null;
