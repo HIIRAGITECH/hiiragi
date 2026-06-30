@@ -332,7 +332,7 @@ export default async function SalesPage({
                   整備＋車検整備・税抜（値引き後）｜ 請求 {enriched.length}件
                 </div>
 
-                {/* 入金状況チップ（税込・請求合計の内訳） */}
+                {/* 回収状況チップ（税込・請求合計を入金済／未入金で分割） */}
                 <div className="mt-4 flex flex-wrap gap-2">
                   <span
                     className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm"
@@ -375,22 +375,18 @@ export default async function SalesPage({
                     </span>
                   )}
 
-                  {advanceCount > 0 && (
-                    <span
-                      className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm"
-                      style={{
-                        background: "var(--color-cream)",
-                        color: "var(--color-ink-mid)",
-                      }}
-                    >
-                      <span className="font-medium">前受金</span>
-                      <span className="wos-yen">{formatYen(advanceTotal)}</span>
-                      <span className="text-xs opacity-80">
-                        （作業未完了 {advanceCount}件・税抜）
-                      </span>
-                    </span>
-                  )}
                 </div>
+
+                {/* 前受金は「足し算の項」ではなく内数（未完了分のタイミング注記）として表示。 */}
+                {advanceCount > 0 && (
+                  <div className="mt-3 text-xs text-[var(--color-ink-light)]">
+                    うち作業未完了分（前受金）
+                    <span className="wos-yen mx-1 text-[var(--color-ink-soft)]">
+                      {formatYen(advanceTotal)}
+                    </span>
+                    （税抜・{advanceCount}件）— 売上＋非課税の内数。作業完了時に売上へ振替され、請求合計に含みます。
+                  </div>
+                )}
 
                 {/* 預かり（取り分ではない）。請求合計は内訳カード下段で強調表示。 */}
                 <div className="mt-4 border-t border-[var(--color-line)] pt-3 text-xs text-[var(--color-ink-light)]">
