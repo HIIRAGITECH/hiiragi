@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { TAX_RATE, calculateTotals } from "@/lib/orders/totals";
+import { TAX_RATE, calculateTotals, calculateProfit } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
 import type {
   EstimateStatus,
@@ -10,6 +10,11 @@ import type {
   WorkItemCategory,
   WorkStatus,
 } from "@/lib/types";
+import {
+  Collapsible,
+  OrderDetailTable,
+  type DetailRow,
+} from "./sales-interactive";
 
 export const metadata: Metadata = {
   title: "売上集計 | HIIRAGI",
@@ -27,6 +32,16 @@ type SalesRow = {
   customer: { id: string; name: string } | null;
 };
 
+// 業務カテゴリ別の割合バーに使う配色（slate 系で統一）。
+const BAR_COLORS = [
+  "#3f5b7a",
+  "#41685d",
+  "#5a606c",
+  "#8a8f99",
+  "#243348",
+  "#b3b6bc",
+];
+
 function pickInt(
   v: string | string[] | undefined,
   fallback: number,
@@ -38,10 +53,6 @@ function pickInt(
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function formatDateOnly(iso: string): string {
-  return iso.slice(0, 10).replace(/-/g, "/");
 }
 
 export default async function SalesPage({
@@ -87,6 +98,7 @@ export default async function SalesPage({
   const rows = (ordersRes.data ?? []) as unknown as SalesRow[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
+  // ── 数値ロジックは従来どおり（見せ方のみ変更）。total = 税抜純額（小計 − 値引き）。
   const enriched = rows.map((o) => {
     const totals = calculateTotals(o.items ?? [], o.discount_amount, 0);
     const total = Math.max(0, totals.subtotal - totals.discount);
@@ -96,6 +108,8 @@ export default async function SalesPage({
       isComplete: o.work_status === "完了",
     };
   });
+  const completeCount = enriched.filter((o) => o.isComplete).length;
+  const advanceCount = enriched.length - completeCount;
   const salesTotal = enriched
     .filter((o) => o.isComplete)
     .reduce((acc, o) => acc + o.total, 0);
@@ -211,6 +225,31 @@ export default async function SalesPage({
   const unpaidTax = Math.floor(unpaidTaxAfter * TAX_RATE);
   const unpaidWithTax = unpaidTaxExcl + unpaidTax;
 
+  const netTaxExcl = categorySumTotal - discountTotal; // = 売上 + 前受金（税抜）
+
+  // 利益（原価後）: 構造上は算出可能。ただし原価未入力だと粗利率が無意味になるため、
+  // 原価合計 > 0 のときだけ経営者向けに表示する（PDF・マイページには絶対に流さない）。
+  const allItems = rows.flatMap((o) => o.items ?? []);
+  const profit = calculateProfit(allItems);
+  const showProfit = profit.cost > 0;
+
+  // 業務カテゴリ別の割合バー（税抜・値引き前の小計ベース）。
+  const barRows = categoryRows.map((c, i) => ({
+    ...c,
+    color: BAR_COLORS[i % BAR_COLORS.length],
+    pct: categorySumTotal > 0 ? (c.subtotal / categorySumTotal) * 100 : 0,
+  }));
+
+  const detailRows: DetailRow[] = enriched.map((o) => ({
+    id: o.id,
+    invoiced_at: o.invoiced_at,
+    customerId: o.customer?.id ?? null,
+    customerName: o.customer?.name ?? null,
+    workStatus: o.work_status,
+    isComplete: o.isComplete,
+    total: o.total,
+  }));
+
   const prev =
     month === 1
       ? { year: year - 1, month: 12 }
@@ -220,8 +259,11 @@ export default async function SalesPage({
       ? { year: year + 1, month: 1 }
       : { year, month: month + 1 };
 
+  const empty = enriched.length === 0;
+
   return (
     <>
+      {/* 1. 月ヘッダー（前月／翌月ナビ） */}
       <div className="wos-pagehead">
         <div className="min-w-0 flex-1">
           <div className="wos-crumbs">会計 ／ 売上集計</div>
@@ -262,132 +304,172 @@ export default async function SalesPage({
         </div>
       )}
 
-      {/* サマリー 4連 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 border-b border-[var(--color-line)] bg-[var(--color-paper)]">
-        <SummaryCell label="売上" sub="作業完了・税抜" value={salesTotal} />
-        <SummaryCell label="前受金" sub="作業未完了・税抜" value={advanceTotal} />
-        <SummaryCell label="消費税" sub="税率10%" value={consumptionTax} />
-        <SummaryCell
-          label="請求合計"
-          sub={`税込・${enriched.length}件`}
-          value={totalWithTax}
-          accent
-          last
-        />
-      </div>
-
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 flex flex-col gap-6">
-          {/* キャッシュフロー */}
-          {enriched.length > 0 && (
-            <section className="wos-card">
-              <div className="wos-sec-label mb-3">
-                請求合計の内訳（キャッシュフロー）
-              </div>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
-                <div className="flex items-baseline justify-between gap-3 border-b border-[var(--color-line)] py-2">
-                  <dt className="text-sm text-[var(--color-ink-soft)]">
-                    うち入金済
-                  </dt>
-                  <dd className="wos-yen text-base">
-                    {formatYen(paidWithTax)}
-                    <span className="ml-2 text-xs text-[var(--color-ink-light)]">
-                      （{paidCount}件）
+        <div className="mx-auto w-full max-w-3xl px-4 sm:px-8 py-6 flex flex-col gap-6">
+          {empty ? (
+            <div className="wos-card text-center py-16 text-sm text-[var(--color-ink-light)]">
+              この月に請求済の受注はありません。
+            </div>
+          ) : (
+            <>
+              {/* 2. ヒーロー：主役は「今月の売上（税抜）」 */}
+              <section className="wos-card">
+                <div className="text-xs font-medium tracking-[0.12em] text-[var(--color-ink-mid)]">
+                  今月の売上（税抜）
+                </div>
+                <div
+                  className="wos-num-big mt-1"
+                  style={{ fontSize: "2.6rem", lineHeight: 1.1 }}
+                >
+                  {formatYen(salesTotal)}
+                </div>
+                <div className="mt-1 text-xs text-[var(--color-ink-light)]">
+                  作業完了 {completeCount}件・税抜
+                </div>
+
+                {/* 入金状況チップ（税込・請求合計の内訳） */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span
+                    className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm"
+                    style={{
+                      background: "rgba(65,104,93,0.10)",
+                      color: "var(--color-go)",
+                    }}
+                  >
+                    <span className="font-medium">入金済</span>
+                    <span className="wos-yen">{formatYen(paidWithTax)}</span>
+                    <span className="text-xs opacity-80">（{paidCount}件）</span>
+                  </span>
+
+                  {unpaidCount > 0 ? (
+                    <Link
+                      href="/dashboard/payments"
+                      className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm hover:underline"
+                      style={{
+                        background: "rgba(184,80,64,0.10)",
+                        color: "var(--color-warn)",
+                      }}
+                    >
+                      <span className="font-medium">未入金</span>
+                      <span className="wos-yen">{formatYen(unpaidWithTax)}</span>
+                      <span className="text-xs opacity-80">
+                        （{unpaidCount}件 →）
+                      </span>
+                    </Link>
+                  ) : (
+                    <span
+                      className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm"
+                      style={{
+                        background: "rgba(184,80,64,0.08)",
+                        color: "var(--color-warn)",
+                      }}
+                    >
+                      <span className="font-medium">未入金</span>
+                      <span className="wos-yen">{formatYen(0)}</span>
+                      <span className="text-xs opacity-80">（0件）</span>
                     </span>
-                  </dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-3 border-b border-[var(--color-line)] py-2">
-                  <dt className="text-sm text-[var(--color-ink-soft)]">
-                    うち未入金
-                  </dt>
-                  <dd className="wos-yen text-base">
-                    {unpaidCount > 0 ? (
-                      <Link
-                        href="/dashboard/payments"
-                        className="text-[var(--color-accent)] hover:underline"
-                      >
-                        {formatYen(unpaidWithTax)}
-                        <span className="ml-2 text-xs">
-                          （{unpaidCount}件 →）
-                        </span>
-                      </Link>
-                    ) : (
-                      <>
-                        {formatYen(unpaidWithTax)}
-                        <span className="ml-2 text-xs text-[var(--color-ink-light)]">
-                          （0件）
-                        </span>
-                      </>
-                    )}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-          )}
+                  )}
 
-          {/* 2ペイン: 業務カテゴリ別 / 税区分別 */}
-          {enriched.length > 0 && (
-            <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-              <div>
-                <div className="wos-sec-label mb-3">業務カテゴリ別</div>
-                <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
-                  <tbody>
-                    {categoryRows.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={2}
-                          className="wos-td text-center muted"
-                        >
-                          対象明細がありません。
-                        </td>
-                      </tr>
-                    ) : (
-                      categoryRows.map((c) => (
-                        <tr
-                          key={c.id}
-                          className="border-b border-[var(--color-line)]"
-                        >
-                          <td className="wos-td">
-                            {c.isDeleted || c.isOrphan
-                              ? `（削除済み）${c.name}`
-                              : c.name}
-                          </td>
-                          <td className="wos-td num right">
-                            {formatYen(c.subtotal)}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                    {categoryRows.length > 0 && discountTotal > 0 && (
-                      <>
-                        <tr className="border-t border-[var(--color-line)]">
-                          <td className="wos-td muted">小計</td>
-                          <td className="wos-td num right muted">
-                            {formatYen(categorySumTotal)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="wos-td muted">値引き合計</td>
-                          <td className="wos-td num right muted">
-                            − {formatYen(discountTotal)}
-                          </td>
-                        </tr>
-                      </>
-                    )}
-                    {categoryRows.length > 0 && (
-                      <tr className="border-t-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                        <td className="wos-td font-semibold">合計</td>
-                        <td className="wos-td num right font-semibold">
-                          {formatYen(categorySumTotal - discountTotal)}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  {advanceCount > 0 && (
+                    <span
+                      className="inline-flex items-baseline gap-2 rounded px-3 py-1.5 text-sm"
+                      style={{
+                        background: "var(--color-cream)",
+                        color: "var(--color-ink-mid)",
+                      }}
+                    >
+                      <span className="font-medium">前受金</span>
+                      <span className="wos-yen">{formatYen(advanceTotal)}</span>
+                      <span className="text-xs opacity-80">
+                        （作業未完了 {advanceCount}件・税抜）
+                      </span>
+                    </span>
+                  )}
+                </div>
 
-              <div>
-                <div className="wos-sec-label mb-3">税区分別</div>
+                {/* 預かり（取り分ではない）＋ 請求合計（税込） */}
+                <div className="mt-4 border-t border-[var(--color-line)] pt-3 text-xs text-[var(--color-ink-light)]">
+                  預かり：消費税 {formatYen(consumptionTax)}・車検法定費用{" "}
+                  {formatYen(shakenNonTaxBucket)}（取り分ではない）　｜　請求合計（税込）{" "}
+                  <span className="wos-yen text-[var(--color-ink-soft)]">
+                    {formatYen(totalWithTax)}
+                  </span>
+                  <span className="ml-1">（{enriched.length}件）</span>
+                </div>
+              </section>
+
+              {/* 3. 売上の内訳（業務別）：割合バー＋ 小計→値引き→売上（税抜） */}
+              <section className="wos-card">
+                <div className="wos-sec-label mb-3">売上の内訳（業務別）</div>
+
+                {categorySumTotal > 0 && (
+                  <div className="mb-4 flex h-3 w-full overflow-hidden rounded-full bg-[var(--color-cream)]">
+                    {barRows.map((c) => (
+                      <div
+                        key={c.id}
+                        title={`${c.name}: ${formatYen(c.subtotal)}`}
+                        style={{
+                          width: `${c.pct}%`,
+                          background: c.color,
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <ul className="flex flex-col gap-1.5">
+                  {barRows.map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex items-baseline justify-between gap-3 text-sm"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                          style={{ background: c.color }}
+                        />
+                        <span className="truncate">
+                          {c.isDeleted || c.isOrphan
+                            ? `（削除済み）${c.name}`
+                            : c.name}
+                        </span>
+                        <span className="text-xs text-[var(--color-ink-light)]">
+                          {c.pct.toFixed(0)}%
+                        </span>
+                      </span>
+                      <span className="wos-yen shrink-0">
+                        {formatYen(c.subtotal)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {/* 小計（税抜）→ 値引き ▲ → 売上（税抜） を段階表示 */}
+                <dl className="mt-4 border-t border-[var(--color-line)] pt-3 flex flex-col gap-1.5 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-[var(--color-ink-soft)]">小計（税抜）</dt>
+                    <dd className="wos-yen">{formatYen(categorySumTotal)}</dd>
+                  </div>
+                  {discountTotal > 0 && (
+                    <div className="flex items-baseline justify-between gap-3 text-[var(--color-warn)]">
+                      <dt>値引き</dt>
+                      <dd className="wos-yen">▲ {formatYen(discountTotal)}</dd>
+                    </div>
+                  )}
+                  <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-line)] pt-1.5">
+                    <dt className="font-semibold">売上（税抜）</dt>
+                    <dd className="wos-yen font-semibold text-[var(--color-accent)]">
+                      {formatYen(netTaxExcl)}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-2 text-xs text-[var(--color-ink-light)]">
+                  ※ 値引きは税抜（課税対象）の段階で差し引いています。
+                </p>
+              </section>
+
+              {/* 4. 税区分別：デフォルト閉じの折りたたみに格下げ */}
+              <Collapsible title="税区分別" hint="税抜・内訳" defaultOpen={false}>
                 <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
                   <tbody>
                     <tr className="border-b border-[var(--color-line)]">
@@ -419,138 +501,68 @@ export default async function SalesPage({
                       </>
                     )}
                     <tr className="border-t-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                      <td className="wos-td font-semibold">合計</td>
+                      <td className="wos-td font-semibold">合計（税抜）</td>
                       <td className="wos-td num right font-semibold">
                         {formatYen(
-                          taxableBucket +
-                            shakenNonTaxBucket -
-                            discountTotal,
+                          taxableBucket + shakenNonTaxBucket - discountTotal,
                         )}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="wos-td muted">消費税（10%）</td>
+                      <td className="wos-td num right muted">
+                        {formatYen(consumptionTax)}
                       </td>
                     </tr>
                   </tbody>
                 </table>
-              </div>
-            </section>
-          )}
+              </Collapsible>
 
-          {enriched.length > 0 && (
-            <p className="text-xs text-[var(--color-ink-light)]">
-              ※ 業務カテゴリ別・税区分別はいずれも税抜の金額で、値引きを反映した「合計」がサマリーの「売上 + 前受金」と一致します。税込の請求額はサマリーの「請求合計」をご確認ください。
-            </p>
-          )}
+              {/* 利益（原価後）：経営者向けトグル。原価入力がある場合のみ。 */}
+              {showProfit && (
+                <Collapsible
+                  title="利益（原価後）"
+                  hint="社内のみ・PDF非表示"
+                  defaultOpen={false}
+                >
+                  <dl className="flex flex-col gap-1.5 text-sm">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-[var(--color-ink-soft)]">
+                        売上（税抜・値引き前）
+                      </dt>
+                      <dd className="wos-yen">{formatYen(profit.revenue)}</dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-[var(--color-ink-soft)]">原価</dt>
+                      <dd className="wos-yen">▲ {formatYen(profit.cost)}</dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-line)] pt-1.5">
+                      <dt className="font-semibold">粗利</dt>
+                      <dd className="wos-yen font-semibold text-[var(--color-accent)]">
+                        {formatYen(profit.profit)}
+                        <span className="ml-2 text-xs text-[var(--color-ink-light)]">
+                          （{profit.profitRatePercent.toFixed(1)}%）
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-xs text-[var(--color-ink-light)]">
+                    ※ 原価・粗利は社内管理用。顧客向けPDF／マイページには表示されません。
+                  </p>
+                </Collapsible>
+              )}
 
-          {/* 明細 */}
-          <section>
-            <div className="wos-sec-label mb-3">
-              明細<span className="wos-ct">{enriched.length}件</span>
-            </div>
-            {enriched.length === 0 ? (
-              <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
-                この月に請求済の受注はありません。
-              </div>
-            ) : (
-              <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
-                <thead>
-                  <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                    <th className="wos-th">請求日</th>
-                    <th className="wos-th">管理番号</th>
-                    <th className="wos-th">顧客名</th>
-                    <th className="wos-th">作業</th>
-                    <th className="wos-th">区分</th>
-                    <th className="wos-th right">金額</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {enriched.map((o, i) => (
-                    <tr
-                      key={o.id}
-                      className="border-b border-[var(--color-line)]"
-                      style={{
-                        background:
-                          i % 2 === 1 ? "var(--color-cream)" : "transparent",
-                      }}
-                    >
-                      <td className="wos-td num muted">
-                        {formatDateOnly(o.invoiced_at)}
-                      </td>
-                      <td className="wos-td">
-                        <Link
-                          href={`/dashboard/orders/${o.id}`}
-                          className="wos-serif-num hover:underline"
-                        >
-                          {o.id.slice(0, 8)}
-                        </Link>
-                      </td>
-                      <td className="wos-td">
-                        {o.customer ? (
-                          <Link
-                            href={`/dashboard/customers/${o.customer.id}`}
-                            className="font-semibold text-[var(--color-ink)] hover:underline"
-                          >
-                            {o.customer.name} 様
-                          </Link>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="wos-td muted">{o.work_status}</td>
-                      <td className="wos-td">
-                        {o.isComplete ? (
-                          <span className="wos-status w-k">売上</span>
-                        ) : (
-                          <span className="wos-status w-s">前受金</span>
-                        )}
-                      </td>
-                      <td className="wos-td num right">{formatYen(o.total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </section>
+              {/* 5. 受注明細：直近数件＋全件展開 */}
+              <section className="wos-card">
+                <div className="wos-sec-label mb-3">
+                  受注明細<span className="wos-ct">{enriched.length}件</span>
+                </div>
+                <OrderDetailTable rows={detailRows} initial={8} />
+              </section>
+            </>
+          )}
         </div>
       </div>
     </>
-  );
-}
-
-function SummaryCell({
-  label,
-  sub,
-  value,
-  accent,
-  last,
-}: {
-  label: string;
-  sub: string;
-  value: number;
-  accent?: boolean;
-  last?: boolean;
-}) {
-  return (
-    <div
-      className="px-6 py-5 flex flex-col gap-1.5"
-      style={{
-        borderRight: last ? "none" : "1px solid var(--color-line)",
-      }}
-    >
-      <div
-        className="text-xs font-medium"
-        style={{
-          color: accent ? "var(--color-accent)" : "var(--color-ink-mid)",
-          letterSpacing: "0.12em",
-        }}
-      >
-        {label}
-      </div>
-      <div className="text-xs text-[var(--color-ink-light)]">{sub}</div>
-      <div
-        className="wos-num-big text-2xl mt-1"
-        style={{ color: accent ? "var(--color-accent)" : "var(--color-ink)" }}
-      >
-        {formatYen(value)}
-      </div>
-    </div>
   );
 }
