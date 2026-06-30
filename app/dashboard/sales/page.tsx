@@ -126,7 +126,9 @@ export default async function SalesPage({
     return "整備";
   }
 
-  const subtotalsByCategoryId = new Map<string, number>();
+  // 表示用: カテゴリ小計を課税／非課税で分離して集計（数値ロジックは不変）。
+  const taxableSubByCat = new Map<string, number>();
+  const nonTaxSubByCat = new Map<string, number>();
   let taxableBucket = 0;
   let shakenNonTaxBucket = 0;
   let discountTotal = 0;
@@ -148,17 +150,16 @@ export default async function SalesPage({
       if (!catId) {
         catId = categoryByName.get(legacyNameFor(it))?.id ?? "_orphan";
       }
-      subtotalsByCategoryId.set(
-        catId,
-        (subtotalsByCategoryId.get(catId) ?? 0) + sub,
-      );
       const isShakenNonTax =
         it.tax_category === "shaken_non_tax" ||
         (it.tax_category == null && it.tax_free === true);
-      if (isShakenNonTax) shakenNonTaxBucket += sub;
-      else {
+      if (isShakenNonTax) {
+        shakenNonTaxBucket += sub;
+        nonTaxSubByCat.set(catId, (nonTaxSubByCat.get(catId) ?? 0) + sub);
+      } else {
         taxableBucket += sub;
         orderTaxableSum += sub;
+        taxableSubByCat.set(catId, (taxableSubByCat.get(catId) ?? 0) + sub);
       }
     }
     const rawDiscount = Math.max(0, o.discount_amount ?? 0);
@@ -186,37 +187,43 @@ export default async function SalesPage({
     isDeleted: boolean;
     isOrphan: boolean;
   };
-  const categoryRows: CategoryRow[] = [];
-  const handled = new Set<string>();
-  for (const c of allCategories) {
-    const sub = subtotalsByCategoryId.get(c.id) ?? 0;
-    if (sub === 0) continue;
-    categoryRows.push({
-      id: c.id,
-      name: c.name,
-      subtotal: sub,
-      isDeleted: c.deleted_at !== null,
-      isOrphan: false,
-    });
-    handled.add(c.id);
+  // カテゴリ小計マップ → 表示順に整列した行配列（display_order 準拠＋孤児を末尾）。
+  function buildCategoryRows(map: Map<string, number>): CategoryRow[] {
+    const out: CategoryRow[] = [];
+    const handled = new Set<string>();
+    for (const c of allCategories) {
+      const sub = map.get(c.id) ?? 0;
+      if (sub === 0) continue;
+      out.push({
+        id: c.id,
+        name: c.name,
+        subtotal: sub,
+        isDeleted: c.deleted_at !== null,
+        isOrphan: false,
+      });
+      handled.add(c.id);
+    }
+    for (const [k, v] of map) {
+      if (handled.has(k)) continue;
+      if (v === 0) continue;
+      const cat = categoryNameMap.get(k);
+      out.push({
+        id: k,
+        name: cat?.name ?? "（カテゴリ未分類）",
+        subtotal: v,
+        isDeleted: cat?.deleted_at != null,
+        isOrphan: !cat,
+      });
+    }
+    return out;
   }
-  for (const [k, v] of subtotalsByCategoryId) {
-    if (handled.has(k)) continue;
-    if (v === 0) continue;
-    const cat = categoryNameMap.get(k);
-    categoryRows.push({
-      id: k,
-      name: cat?.name ?? "（カテゴリ未分類）",
-      subtotal: v,
-      isDeleted: cat?.deleted_at != null,
-      isOrphan: !cat,
-    });
-  }
-  const categorySumTotal = categoryRows.reduce((a, r) => a + r.subtotal, 0);
+  const taxableCatRows = buildCategoryRows(taxableSubByCat);
+  const nonTaxCatRows = buildCategoryRows(nonTaxSubByCat);
 
   const taxableAfterDiscount = Math.max(0, taxableBucket - discountTotal);
   const consumptionTax = Math.floor(taxableAfterDiscount * TAX_RATE);
-  const totalWithTax = salesTotal + advanceTotal + consumptionTax;
+  const taxableWithTax = taxableAfterDiscount + consumptionTax; // 課税分（税込）
+  const totalWithTax = salesTotal + advanceTotal + consumptionTax; // 請求合計（税込）= 課税分（税込）＋ 非課税
 
   const paidTaxAfter = Math.max(0, paidTaxable - paidDiscount);
   const paidTax = Math.floor(paidTaxAfter * TAX_RATE);
@@ -225,19 +232,17 @@ export default async function SalesPage({
   const unpaidTax = Math.floor(unpaidTaxAfter * TAX_RATE);
   const unpaidWithTax = unpaidTaxExcl + unpaidTax;
 
-  const netTaxExcl = categorySumTotal - discountTotal; // = 売上 + 前受金（税抜）
-
   // 利益（原価後）: 構造上は算出可能。ただし原価未入力だと粗利率が無意味になるため、
   // 原価合計 > 0 のときだけ経営者向けに表示する（PDF・マイページには絶対に流さない）。
   const allItems = rows.flatMap((o) => o.items ?? []);
   const profit = calculateProfit(allItems);
   const showProfit = profit.cost > 0;
 
-  // 業務カテゴリ別の割合バー（税抜・値引き前の小計ベース）。
-  const barRows = categoryRows.map((c, i) => ({
+  // 課税ブロックの割合バー（課税対象＝整備＋車検整備、税抜・値引き前の小計ベース）。
+  const taxableBars = taxableCatRows.map((c, i) => ({
     ...c,
     color: BAR_COLORS[i % BAR_COLORS.length],
-    pct: categorySumTotal > 0 ? (c.subtotal / categorySumTotal) * 100 : 0,
+    pct: taxableBucket > 0 ? (c.subtotal / taxableBucket) * 100 : 0,
   }));
 
   const detailRows: DetailRow[] = enriched.map((o) => ({
@@ -315,16 +320,16 @@ export default async function SalesPage({
               {/* 2. ヒーロー：主役は「今月の売上（税抜）」 */}
               <section className="wos-card">
                 <div className="text-xs font-medium tracking-[0.12em] text-[var(--color-ink-mid)]">
-                  今月の売上（税抜）
+                  今月の売上（税抜・課税対象）
                 </div>
                 <div
                   className="wos-num-big mt-1"
                   style={{ fontSize: "2.6rem", lineHeight: 1.1 }}
                 >
-                  {formatYen(salesTotal)}
+                  {formatYen(taxableAfterDiscount)}
                 </div>
                 <div className="mt-1 text-xs text-[var(--color-ink-light)]">
-                  作業完了 {completeCount}件・税抜
+                  整備＋車検整備・税抜（値引き後）｜ 請求 {enriched.length}件
                 </div>
 
                 {/* 入金状況チップ（税込・請求合計の内訳） */}
@@ -387,136 +392,145 @@ export default async function SalesPage({
                   )}
                 </div>
 
-                {/* 預かり（取り分ではない）＋ 請求合計（税込） */}
+                {/* 預かり（取り分ではない）。請求合計は内訳カード下段で強調表示。 */}
                 <div className="mt-4 border-t border-[var(--color-line)] pt-3 text-xs text-[var(--color-ink-light)]">
-                  預かり：消費税 {formatYen(consumptionTax)}・車検法定費用{" "}
-                  {formatYen(shakenNonTaxBucket)}（取り分ではない）　｜　請求合計（税込）{" "}
-                  <span className="wos-yen text-[var(--color-ink-soft)]">
-                    {formatYen(totalWithTax)}
-                  </span>
-                  <span className="ml-1">（{enriched.length}件）</span>
+                  預かり（取り分ではない）：消費税 {formatYen(consumptionTax)}・車検法定費用{" "}
+                  {formatYen(shakenNonTaxBucket)}
                 </div>
               </section>
 
-              {/* 3. 売上の内訳（業務別）：割合バー＋ 小計→値引き→売上（税抜） */}
-              <section className="wos-card">
-                <div className="wos-sec-label mb-3">売上の内訳（業務別）</div>
+              {/* 3. 売上の内訳：課税／非課税を分離して段階表示 */}
+              <section className="wos-card flex flex-col gap-5">
+                <div className="wos-sec-label">売上の内訳</div>
 
-                {categorySumTotal > 0 && (
-                  <div className="mb-4 flex h-3 w-full overflow-hidden rounded-full bg-[var(--color-cream)]">
-                    {barRows.map((c) => (
-                      <div
+                {/* 〔課税 ― あなたの売上〕 */}
+                <div>
+                  <div className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-ink-mid)]">
+                    課税 ― あなたの売上
+                  </div>
+
+                  {taxableBucket > 0 && (
+                    <div className="mb-3 flex h-3 w-full overflow-hidden rounded-full bg-[var(--color-cream)]">
+                      {taxableBars.map((c) => (
+                        <div
+                          key={c.id}
+                          title={`${c.name}: ${formatYen(c.subtotal)}`}
+                          style={{ width: `${c.pct}%`, background: c.color }}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <ul className="flex flex-col gap-1.5">
+                    {taxableBars.map((c) => (
+                      <li
                         key={c.id}
-                        title={`${c.name}: ${formatYen(c.subtotal)}`}
-                        style={{
-                          width: `${c.pct}%`,
-                          background: c.color,
-                        }}
-                      />
+                        className="flex items-baseline justify-between gap-3 text-sm"
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                            style={{ background: c.color }}
+                          />
+                          <span className="truncate">
+                            {c.isDeleted || c.isOrphan
+                              ? `（削除済み）${c.name}`
+                              : c.name}
+                          </span>
+                          <span className="text-xs text-[var(--color-ink-light)]">
+                            {c.pct.toFixed(0)}%
+                          </span>
+                        </span>
+                        <span className="wos-yen shrink-0">
+                          {formatYen(c.subtotal)}
+                        </span>
+                      </li>
                     ))}
+                  </ul>
+
+                  {/* 小計（税抜）→ 値引き ▲ → 課税対象（税抜）＝売上 → 消費税 */}
+                  <dl className="mt-3 border-t border-[var(--color-line)] pt-3 flex flex-col gap-1.5 text-sm">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-[var(--color-ink-soft)]">
+                        小計（税抜）
+                      </dt>
+                      <dd className="wos-yen">{formatYen(taxableBucket)}</dd>
+                    </div>
+                    {discountTotal > 0 && (
+                      <div className="flex items-baseline justify-between gap-3 text-[var(--color-warn)]">
+                        <dt>値引き</dt>
+                        <dd className="wos-yen">▲ {formatYen(discountTotal)}</dd>
+                      </div>
+                    )}
+                    <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-line)] pt-1.5">
+                      <dt className="font-semibold">課税対象（税抜）＝売上</dt>
+                      <dd className="wos-yen font-semibold text-[var(--color-accent)]">
+                        {formatYen(taxableAfterDiscount)}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <dt className="text-[var(--color-ink-soft)]">
+                        消費税（10%）
+                      </dt>
+                      <dd className="wos-yen">{formatYen(consumptionTax)}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-xs text-[var(--color-ink-light)]">
+                    ※ 値引きは税抜（課税対象）の段階で差し引いています。
+                  </p>
+                </div>
+
+                {/* 〔非課税 ― 預かり・立替〕。金額0の月は控えめ表示。 */}
+                {shakenNonTaxBucket > 0 ? (
+                  <div className="border-t border-[var(--color-line)] pt-4">
+                    <div className="mb-2 text-xs font-semibold tracking-wide text-[var(--color-ink-mid)]">
+                      非課税 ― 預かり・立替
+                    </div>
+                    <dl className="flex flex-col gap-1.5 text-sm">
+                      {nonTaxCatRows.map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-baseline justify-between gap-3"
+                        >
+                          <dt className="text-[var(--color-ink-soft)]">
+                            {c.isDeleted || c.isOrphan
+                              ? `（削除済み）${c.name}`
+                              : c.name}
+                          </dt>
+                          <dd className="wos-yen">{formatYen(c.subtotal)}</dd>
+                        </div>
+                      ))}
+                      <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-line)] pt-1.5">
+                        <dt className="font-semibold">非課税 合計</dt>
+                        <dd className="wos-yen font-semibold">
+                          {formatYen(shakenNonTaxBucket)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <p className="mt-2 text-xs text-[var(--color-ink-light)]">
+                      ※ 車検法定費用は消費税がかからず、お客様からの預かりとしてそのまま通過します（売上には含めません）。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border-t border-[var(--color-line)] pt-3 text-xs text-[var(--color-ink-light)]">
+                    非課税（車検法定費用）：今月はなし
                   </div>
                 )}
 
-                <ul className="flex flex-col gap-1.5">
-                  {barRows.map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-baseline justify-between gap-3 text-sm"
-                    >
-                      <span className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
-                          style={{ background: c.color }}
-                        />
-                        <span className="truncate">
-                          {c.isDeleted || c.isOrphan
-                            ? `（削除済み）${c.name}`
-                            : c.name}
-                        </span>
-                        <span className="text-xs text-[var(--color-ink-light)]">
-                          {c.pct.toFixed(0)}%
-                        </span>
-                      </span>
-                      <span className="wos-yen shrink-0">
-                        {formatYen(c.subtotal)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                {/* 小計（税抜）→ 値引き ▲ → 売上（税抜） を段階表示 */}
-                <dl className="mt-4 border-t border-[var(--color-line)] pt-3 flex flex-col gap-1.5 text-sm">
+                {/* 〔請求合計（税込）〕＝ 課税分（税込）＋ 非課税 */}
+                <div className="border-t-2 border-[var(--color-line-strong)] pt-3">
                   <div className="flex items-baseline justify-between gap-3">
-                    <dt className="text-[var(--color-ink-soft)]">小計（税抜）</dt>
-                    <dd className="wos-yen">{formatYen(categorySumTotal)}</dd>
+                    <span className="font-semibold">請求合計（税込）</span>
+                    <span className="wos-yen text-lg font-semibold text-[var(--color-accent)]">
+                      {formatYen(totalWithTax)}
+                    </span>
                   </div>
-                  {discountTotal > 0 && (
-                    <div className="flex items-baseline justify-between gap-3 text-[var(--color-warn)]">
-                      <dt>値引き</dt>
-                      <dd className="wos-yen">▲ {formatYen(discountTotal)}</dd>
-                    </div>
-                  )}
-                  <div className="flex items-baseline justify-between gap-3 border-t border-[var(--color-line)] pt-1.5">
-                    <dt className="font-semibold">売上（税抜）</dt>
-                    <dd className="wos-yen font-semibold text-[var(--color-accent)]">
-                      {formatYen(netTaxExcl)}
-                    </dd>
+                  <div className="mt-1 text-xs text-[var(--color-ink-light)]">
+                    課税分（税込）{formatYen(taxableWithTax)} ＋ 非課税{" "}
+                    {formatYen(shakenNonTaxBucket)}　／　{enriched.length}件
                   </div>
-                </dl>
-                <p className="mt-2 text-xs text-[var(--color-ink-light)]">
-                  ※ 値引きは税抜（課税対象）の段階で差し引いています。
-                </p>
+                </div>
               </section>
-
-              {/* 4. 税区分別：デフォルト閉じの折りたたみに格下げ */}
-              <Collapsible title="税区分別" hint="税抜・内訳" defaultOpen={false}>
-                <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
-                  <tbody>
-                    <tr className="border-b border-[var(--color-line)]">
-                      <td className="wos-td">課税対象</td>
-                      <td className="wos-td num right">
-                        {formatYen(taxableBucket)}
-                      </td>
-                    </tr>
-                    <tr className="border-b border-[var(--color-line)]">
-                      <td className="wos-td">車検法定費用</td>
-                      <td className="wos-td num right">
-                        {formatYen(shakenNonTaxBucket)}
-                      </td>
-                    </tr>
-                    {discountTotal > 0 && (
-                      <>
-                        <tr className="border-t border-[var(--color-line)]">
-                          <td className="wos-td muted">小計</td>
-                          <td className="wos-td num right muted">
-                            {formatYen(taxableBucket + shakenNonTaxBucket)}
-                          </td>
-                        </tr>
-                        <tr>
-                          <td className="wos-td muted">値引き合計</td>
-                          <td className="wos-td num right muted">
-                            − {formatYen(discountTotal)}
-                          </td>
-                        </tr>
-                      </>
-                    )}
-                    <tr className="border-t-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                      <td className="wos-td font-semibold">合計（税抜）</td>
-                      <td className="wos-td num right font-semibold">
-                        {formatYen(
-                          taxableBucket + shakenNonTaxBucket - discountTotal,
-                        )}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="wos-td muted">消費税（10%）</td>
-                      <td className="wos-td num right muted">
-                        {formatYen(consumptionTax)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </Collapsible>
 
               {/* 利益（原価後）：経営者向けトグル。原価入力がある場合のみ。 */}
               {showProfit && (
