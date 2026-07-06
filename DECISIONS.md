@@ -1031,6 +1031,17 @@
 
 ---
 
+## 【2026-07-06 夜】作業メニュー／作業セット強化 一連（①〜④）
+
+この夜に作業メニュー・作業セット周りを4本立てで実装（各詳細は直下の節）。それぞれ別ブランチ→main へ ff マージ＆push。
+- **① 作業メニュー一覧 D&D 並べ替え**（DB変更なし）— 直下の節。
+- **② 作業セットに「部品」を含める＝`work_menu_set_parts` 新設**（DB変更あり・**prod 適用済**）— 下記の節。
+- **③ 受注明細から部品もまとめてセット化**（DB変更なし。②のテーブルを受け皿に流用）— 下記の節。
+- **④ 作業セット一覧に部品を汎用定価で「参考価格」表示**（DB変更なし・表示のみ）— 下記の節。
+DB変更は②のみ。②を prod 適用してから③④のコードを push（DB先・コード後を厳守）。
+
+---
+
 ## 作業メニュー一覧：↑↓ボタン → ドラッグ&ドロップ並べ替え（2026-07-06）
 
 **変更の趣旨**：UIのみ。**DBスキーマ無変更**（既存の `work_menu_items.display_order` をそのまま使用）。
@@ -1072,7 +1083,8 @@
 - セット登録/編集フォームに「含まれる部品」セクション追加（PartPicker で選択・数量入力・並べ替え・削除）。new/edit ページで allParts(show_in_detail=true のアクティブ部品)・initialParts を読み込み。
 - 受注 SetPickerModal のプレビューに部品を表示。確認ボタンはメニュー0でも部品があれば有効。
 
-**DB反映順（厳守）**：dev 適用→prod は SQL Editor で手動適用→**その後** コード push（コード先行 push はしない。本番コードが未作成テーブルを参照して壊れるのを防ぐ）。マイグレーション: `supabase/migrations/20260706000000_create_work_menu_set_parts.sql`。
+**DB反映順（厳守）**：dev 適用→prod は SQL Editor で手動適用→**その後** コード push（コード先行 push はしない。本番コードが未作成テーブルを参照して壊れるのを防ぐ）。マイグレーション: `supabase/migrations/20260706000000_create_work_menu_set_parts.sql`（prod 手動適用用 SQL: `supabase/prod-apply/20260706000000_create_work_menu_set_parts.PROD.sql`）。
+- **prod 適用済み（2026-07-06 確認）**：事後確認で col_count=6 / policy_count=4 / rls_enabled=true / GRANT(authenticated・service_role の SELECT/INSERT/UPDATE/DELETE) を確認。既存データは不変（新テーブル追加のみ）。適用完了後にコードを main へ push した。
 
 **既存への無影響**：メニューのみセット（parts 空配列）は従来どおり展開。部品行は手動「部品在庫から追加」と同じ ItemRow 形状（linked_part_id 付き）なので calculateTotals / PDF / 受注ピッカーに影響なし。`work_menu_set_items` は不変。
 
