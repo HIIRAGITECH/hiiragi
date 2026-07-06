@@ -54,6 +54,9 @@ import type { FolderActionResult, FormState } from "../actions";
 type SetWithItems = {
   set: WorkMenuSet;
   items: { menu: WorkMenuItem; position: number }[];
+  // 案2: セットに含まれる部品。価格は展開時にその受注の車種で解決する（quantity を反映）。
+  // 部品なしの既存セットは空配列で従来どおり動く。
+  parts?: { part: PartsInventory; quantity: number; position: number }[];
 };
 
 type Props = {
@@ -511,6 +514,33 @@ export default function ItemsForm({
     return JSON.stringify(Object.fromEntries(categoryNameById));
   }, [categoryNameById]);
 
+  // 作業セットに含まれる部品を展開するとき用の variant 解決マップ（PartPickerModal と同じ二段構え）。
+  //   車種一致（タグあり）を全走査で先に確定し、無い部品だけ標準（車種空）をフォールバック。
+  // PartPickerModal 内のロジックと同一だが、あちらはモーダル内 useMemo なのでここで別途用意する。
+  const effectiveVariantByPart = useMemo(() => {
+    const target = normalizeForVehicleMatch(vehicle?.model ?? "");
+    const general = new Map<string, PartsInventoryVariant>();
+    for (const v of allVariants) {
+      if (v.vehicle_tags.length !== 0) continue; // 標準（車種空）のみ
+      if (general.has(v.part_id)) continue; // 先頭（display_order 最小）を採用
+      general.set(v.part_id, v);
+    }
+    const map = new Map<string, PartsInventoryVariant>(general);
+    if (target) {
+      const vehicleMatch = new Map<string, PartsInventoryVariant>();
+      for (const v of allVariants) {
+        if (v.vehicle_tags.length === 0) continue; // 標準は車種一致の対象外
+        if (vehicleMatch.has(v.part_id)) continue;
+        const hit = v.vehicle_tags.some(
+          (t) => normalizeForVehicleMatch(t) === target,
+        );
+        if (hit) vehicleMatch.set(v.part_id, v);
+      }
+      for (const [pid, v] of vehicleMatch) map.set(pid, v);
+    }
+    return map;
+  }, [allVariants, vehicle?.model]);
+
   // 初期 state: 既存 items を category id 単位の Record に振り分ける。
   // カテゴリ未登録（極端なケース）でも壊れないようフォールバック空オブジェクトで初期化。
   const [rowsByCat, setRowsByCat] = useState<Record<string, ItemRow[]>>(() => {
@@ -624,12 +654,29 @@ export default function ItemsForm({
 
   function handleSetPickerConfirm(set: SetWithItems) {
     const fallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
-    const rows = set.items.map((x) => {
+    const menuRows = set.items.map((x) => {
       const row = rowFromMenu(x.menu, indirectByMenu, isBusiness);
       if (!row.item_category_id) row.item_category_id = fallbackId;
       return row;
     });
-    addRowsByCategory(rows);
+    // 案2: セットに含まれる部品も明細に追加。価格はこの受注の車種で解決（法人=業販/個人=定価）、
+    // 数量はセットの quantity を反映する。部品ピッカーからの追加と同じ rowFromPart を使う。
+    const partFallbackId =
+      allCategories.find((c) => c.name === "整備")?.id ??
+      allCategories[0]?.id ??
+      "";
+    const partRows = (set.parts ?? []).map((x) => {
+      const row = rowFromPart(
+        x.part,
+        partFallbackId,
+        effectiveVariantByPart.get(x.part.id) ?? null,
+        isBusiness,
+      );
+      const qty = Number(x.quantity);
+      if (Number.isFinite(qty) && qty > 0) row.quantity = String(qty);
+      return row;
+    });
+    addRowsByCategory([...menuRows, ...partRows]);
     setSetPickerOpen(false);
   }
 
@@ -2120,6 +2167,7 @@ function SetPickerModal({
                     (sum, x) => sum + menuRowTotal(x.menu),
                     0,
                   );
+                  const partCount = s.parts?.length ?? 0;
                   const active = pickedId === s.set.id;
                   return (
                     <li key={s.set.id}>
@@ -2136,7 +2184,9 @@ function SetPickerModal({
                           {s.set.name}
                         </div>
                         <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                          {s.items.length} 件 / 合計 {formatYen(total)}
+                          メニュー {s.items.length} 件
+                          {partCount > 0 ? ` / 部品 ${partCount} 件` : ""} / 合計{" "}
+                          {formatYen(total)}
                         </div>
                       </button>
                     </li>
@@ -2144,44 +2194,80 @@ function SetPickerModal({
                 })}
               </ul>
 
-              {/* 右: 中身プレビュー */}
+              {/* 右: 中身プレビュー（メニュー＋部品） */}
               <div className="p-4">
                 {!picked ? (
                   <p className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">
-                    左のセットを選ぶと、含まれるメニューが表示されます。
+                    左のセットを選ぶと、含まれるメニューと部品が表示されます。
                   </p>
-                ) : picked.items.length === 0 ? (
+                ) : picked.items.length === 0 &&
+                  (picked.parts?.length ?? 0) === 0 ? (
                   <p className="px-2 py-4 text-sm text-zinc-500 dark:text-zinc-400">
-                    （メニュー未登録）
+                    （中身なし）
                   </p>
                 ) : (
-                  <ol className="space-y-1.5 text-sm">
-                    {picked.items.map((x, idx) => (
-                      <li
-                        key={`${x.menu.id}-${idx}`}
-                        className="flex items-start justify-between gap-3"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-zinc-900 dark:text-zinc-50">
-                            {x.menu.work_name}
-                          </div>
-                          <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                            {x.menu.item_category_id
-                              ? (categoryNameById.get(x.menu.item_category_id) ??
-                                "（不明）")
-                              : "（未分類）"}
-                            {x.menu.tax_category === "shaken_non_tax"
-                              ? "・非課税"
-                              : ""}
-                            {x.menu.part_name ? ` / ${x.menu.part_name}` : ""}
-                          </div>
+                  <div className="space-y-3">
+                    {picked.items.length > 0 && (
+                      <ol className="space-y-1.5 text-sm">
+                        {picked.items.map((x, idx) => (
+                          <li
+                            key={`${x.menu.id}-${idx}`}
+                            className="flex items-start justify-between gap-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-zinc-900 dark:text-zinc-50">
+                                {x.menu.work_name}
+                              </div>
+                              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                {x.menu.item_category_id
+                                  ? (categoryNameById.get(
+                                      x.menu.item_category_id,
+                                    ) ?? "（不明）")
+                                  : "（未分類）"}
+                                {x.menu.tax_category === "shaken_non_tax"
+                                  ? "・非課税"
+                                  : ""}
+                                {x.menu.part_name ? ` / ${x.menu.part_name}` : ""}
+                              </div>
+                            </div>
+                            <div className="text-zinc-700 dark:text-zinc-300">
+                              {formatYen(menuRowTotal(x.menu))}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {(picked.parts?.length ?? 0) > 0 && (
+                      <div>
+                        <div className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-400">
+                          部品
                         </div>
-                        <div className="text-zinc-700 dark:text-zinc-300">
-                          {formatYen(menuRowTotal(x.menu))}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
+                        <ol className="space-y-1.5 text-sm">
+                          {picked.parts!.map((x, idx) => (
+                            <li
+                              key={`${x.part.id}-${idx}`}
+                              className="flex items-start justify-between gap-3"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-zinc-900 dark:text-zinc-50">
+                                  🔩 {x.part.name}
+                                  {x.quantity > 1 ? ` ×${x.quantity}` : ""}
+                                </div>
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                  価格は車両に合わせて計算
+                                </div>
+                              </div>
+                              <div className="text-zinc-500 dark:text-zinc-400">
+                                {x.part.sale_price != null
+                                  ? formatYen(x.part.sale_price)
+                                  : "—"}
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -2198,7 +2284,10 @@ function SetPickerModal({
           </button>
           <button
             type="button"
-            disabled={!picked || picked.items.length === 0}
+            disabled={
+              !picked ||
+              (picked.items.length === 0 && (picked.parts?.length ?? 0) === 0)
+            }
             onClick={() => picked && onConfirm(picked)}
             className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >

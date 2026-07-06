@@ -30,10 +30,35 @@ function parseMenuItemIds(json: string | null): string[] | null {
   }
 }
 
+// part_items_json: [{part_id, quantity}, ...] の position 順序付き配列（案2で追加）。
+// 部品は part_id ＋ quantity のみ保持。価格は受注展開時に解決する。
+type SetPartInput = { part_id: string; quantity: number };
+function parsePartItems(json: string | null): SetPartInput[] | null {
+  if (!json) return [];
+  try {
+    const raw = JSON.parse(json);
+    if (!Array.isArray(raw)) return null;
+    const parts: SetPartInput[] = [];
+    for (const v of raw) {
+      if (!v || typeof v !== "object") return null;
+      const pid = (v as { part_id?: unknown }).part_id;
+      const qtyRaw = (v as { quantity?: unknown }).quantity;
+      if (typeof pid !== "string" || pid === "") return null;
+      const qty = Number(qtyRaw);
+      if (!Number.isFinite(qty) || qty <= 0) return null;
+      parts.push({ part_id: pid, quantity: qty });
+    }
+    return parts;
+  } catch {
+    return null;
+  }
+}
+
 type SetPayload = {
   name: string;
   memo: string | null;
   menu_item_ids: string[];
+  parts: SetPartInput[];
 };
 
 function readPayload(formData: FormData): SetPayload | { error: string } {
@@ -46,14 +71,26 @@ function readPayload(formData: FormData): SetPayload | { error: string } {
       : null,
   );
   if (ids === null) return { error: "メニューの選択が不正です。" };
-  if (ids.length === 0) {
-    return { error: "セットには 1 つ以上の作業メニューを追加してください。" };
+
+  const parts = parsePartItems(
+    typeof formData.get("part_items_json") === "string"
+      ? (formData.get("part_items_json") as string)
+      : null,
+  );
+  if (parts === null) return { error: "部品の選択が不正です。" };
+
+  // メニューのみ・部品のみ・両方いずれも可。最低 1 つは必要。
+  if (ids.length === 0 && parts.length === 0) {
+    return {
+      error: "セットには作業メニューまたは部品を 1 つ以上追加してください。",
+    };
   }
 
   return {
     name,
     memo: pickString(formData, "memo"),
     menu_item_ids: ids,
+    parts,
   };
 }
 
@@ -77,6 +114,27 @@ async function ensureOwnedMenus(
   return undefined;
 }
 
+// 指定した部品 ID 群が現ユーザーのものか確認する（メニューと同じ方式）。
+async function ensureOwnedParts(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  ids: string[],
+): Promise<{ error: string } | undefined> {
+  if (ids.length === 0) return undefined;
+  const uniq = Array.from(new Set(ids));
+  const { data, error } = await supabase
+    .from("parts_inventory")
+    .select("id")
+    .eq("user_id", userId)
+    .in("id", uniq);
+  if (error) return { error: `部品存在確認に失敗しました: ${error.message}` };
+  const found = new Set((data ?? []).map((r) => r.id));
+  for (const id of uniq) {
+    if (!found.has(id)) return { error: "存在しない部品が含まれています。" };
+  }
+  return undefined;
+}
+
 export async function createWorkMenuSet(
   _prev: FormState,
   formData: FormData,
@@ -92,6 +150,12 @@ export async function createWorkMenuSet(
 
   const guard = await ensureOwnedMenus(supabase, user.id, result.menu_item_ids);
   if (guard) return guard;
+  const partGuard = await ensureOwnedParts(
+    supabase,
+    user.id,
+    result.parts.map((p) => p.part_id),
+  );
+  if (partGuard) return partGuard;
 
   const { data: maxRow } = await supabase
     .from("work_menu_sets")
@@ -137,6 +201,27 @@ export async function createWorkMenuSet(
     }
   }
 
+  const partLinks = result.parts.map((p, i) => ({
+    set_id: inserted.id,
+    part_id: p.part_id,
+    quantity: p.quantity,
+    position: i,
+  }));
+  if (partLinks.length > 0) {
+    const { error: partErr } = await supabase
+      .from("work_menu_set_parts")
+      .insert(partLinks);
+    if (partErr) {
+      // 中間テーブル(メニュー/部品)ごと set を消して不整合を防ぐ（CASCADE で子も消える）。
+      await supabase
+        .from("work_menu_sets")
+        .delete()
+        .eq("id", inserted.id)
+        .eq("user_id", user.id);
+      return { error: `登録に失敗しました: ${partErr.message}` };
+    }
+  }
+
   revalidatePath("/dashboard/work-menu-sets");
   redirect("/dashboard/work-menu-sets");
 }
@@ -157,6 +242,12 @@ export async function updateWorkMenuSet(
 
   const guard = await ensureOwnedMenus(supabase, user.id, result.menu_item_ids);
   if (guard) return guard;
+  const partGuard = await ensureOwnedParts(
+    supabase,
+    user.id,
+    result.parts.map((p) => p.part_id),
+  );
+  if (partGuard) return partGuard;
 
   const { error: setErr } = await supabase
     .from("work_menu_sets")
@@ -177,6 +268,21 @@ export async function updateWorkMenuSet(
       .from("work_menu_set_items")
       .insert(links);
     if (linkErr) return { error: `更新に失敗しました: ${linkErr.message}` };
+  }
+
+  // 部品も同様に「全削除 → 再挿入」（メニューとは別テーブルなので独立）。
+  await supabase.from("work_menu_set_parts").delete().eq("set_id", id);
+  const partLinks = result.parts.map((p, i) => ({
+    set_id: id,
+    part_id: p.part_id,
+    quantity: p.quantity,
+    position: i,
+  }));
+  if (partLinks.length > 0) {
+    const { error: partErr } = await supabase
+      .from("work_menu_set_parts")
+      .insert(partLinks);
+    if (partErr) return { error: `更新に失敗しました: ${partErr.message}` };
   }
 
   revalidatePath("/dashboard/work-menu-sets");
@@ -251,6 +357,12 @@ export async function duplicateWorkMenuSet(formData: FormData) {
     .eq("set_id", id)
     .order("position", { ascending: true });
 
+  const { data: partItems } = await supabase
+    .from("work_menu_set_parts")
+    .select("part_id, quantity, position")
+    .eq("set_id", id)
+    .order("position", { ascending: true });
+
   const { data: maxRow } = await supabase
     .from("work_menu_sets")
     .select("display_order")
@@ -277,6 +389,17 @@ export async function duplicateWorkMenuSet(formData: FormData) {
       items.map((it, i) => ({
         set_id: inserted.id,
         menu_item_id: it.menu_item_id,
+        position: i,
+      })),
+    );
+  }
+
+  if (inserted?.id && partItems && partItems.length > 0) {
+    await supabase.from("work_menu_set_parts").insert(
+      partItems.map((it, i) => ({
+        set_id: inserted.id,
+        part_id: it.part_id,
+        quantity: it.quantity,
         position: i,
       })),
     );

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { WorkMenuItem } from "@/lib/types";
+import type { PartsInventory, WorkMenuItem } from "@/lib/types";
 import WorkMenuSetForm from "../work-menu-set-form";
 import { createWorkMenuSet } from "../actions";
 
@@ -15,13 +15,25 @@ export default async function NewWorkMenuSetPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data } = await supabase
-    .from("work_menu_items")
-    .select("*")
-    .eq("user_id", user!.id)
-    .is("deleted_at", null)
-    .order("display_order", { ascending: true });
-  const allMenus = (data ?? []) as WorkMenuItem[];
+  const [menusRes, partsRes] = await Promise.all([
+    supabase
+      .from("work_menu_items")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .order("display_order", { ascending: true }),
+    // 明細に出せるアクティブ部品のみ（間接材料 show_in_detail=false は除外）。受注ピッカーと同条件。
+    supabase
+      .from("parts_inventory")
+      .select("*")
+      .eq("user_id", user!.id)
+      .is("deleted_at", null)
+      .eq("show_in_detail", true)
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: true }),
+  ]);
+  const allMenus = (menusRes.data ?? []) as WorkMenuItem[];
+  const allParts = (partsRes.data ?? []) as PartsInventory[];
 
   return (
     <>
@@ -41,7 +53,9 @@ export default async function NewWorkMenuSetPage() {
           <WorkMenuSetForm
             action={createWorkMenuSet}
             initialMenuItemIds={[]}
+            initialParts={[]}
             allMenus={allMenus}
+            allParts={allParts}
             submitLabel="登録する"
             cancelHref="/dashboard/work-menu-sets"
           />

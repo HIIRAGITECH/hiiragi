@@ -228,6 +228,17 @@ export type WorkMenuSetItem = {
   created_at: string;
 };
 
+// 作業セットに含まれる部品（work_menu_set_parts テーブルの 1 行）。案2で新設。
+// 価格・variant は持たず、受注展開時にその受注の車種で解決する。
+export type WorkMenuSetPart = {
+  id: string;
+  set_id: string;
+  part_id: string;
+  quantity: number;
+  position: number;
+  created_at: string;
+};
+
 export type Order = {
   id: string;
   user_id: string;

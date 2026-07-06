@@ -1046,3 +1046,32 @@
 - 検索・カテゴリフィルタ・編集・複製・削除（使用回数確認モーダル/soft・hard）・非表示/復元は不変。
 - **新規登録が最上部に来る挙動を維持**：`insertWorkMenuCore` は `display_order` 最小-1 採番。reorder後は 0..n-1 になるため、新規は -1 で先頭に入り整合。
 - `router.refresh()` でリロード後も並び順保持（`display_order` 昇順取得）。
+
+
+---
+
+## 作業セットに「部品」を含められるように（案2：別テーブル新設）（2026-07-06）
+
+**趣旨**：作業セットは従来「作業メニューのみ」だったが、部品も含められるようにする。セットを受注で展開すると、メニューと部品の両方が明細に追加される。部品の価格は展開時にその受注の車種で解決（既存の二階建て価格解決を流用）。
+
+**設計判断：案2（別テーブル新設）**
+- 新テーブル `work_menu_set_parts`（id, set_id→work_menu_sets CASCADE, part_id→parts_inventory RESTRICT, quantity, position, created_at）。
+- 既存のメニュー中間テーブル `work_menu_set_items` は一切変更せず、メニュー経路・メニューのみセットを壊さない。
+- 部品は **part_id ＋ quantity ＋ position のみ** 保持。価格・variant は持たない（受注展開時に解決）。
+- RLS は `work_menu_set_items` に倣い、親 `work_menu_sets` の所有者のみ（EXISTS 判定）。DML GRANT を authenticated/service_role に明示付与（既存は default privileges 依存だが prod 設定に依存せず 42501 を確実回避）。
+
+**価格解決の考え方（二階建て流用）**
+- セットは part_id と quantity だけ持ち、受注展開時にその受注の車両で価格を解決する（メニューが展開時に価格算出されるのと同じ思想）。
+- 受注の PartPickerModal と同じ二段構え（車種一致タグ→無ければ標準/汎用）を items-form のフォームスコープに `effectiveVariantByPart` として再実装し、`rowFromPart` に渡す。法人=業販(markup_rate)、個人=定価。quantity をセットの値で上書き。
+
+**保存（work-menu-sets/actions.ts）**
+- SetPayload に parts を追加。create/update/duplicate を拡張し、`work_menu_set_parts` へ並行保存（update は menu と同じく全削除→再挿入。部品は独立テーブルなので menu と干渉しない）。
+- バリデーション緩和：従来「メニュー1件以上必須」→「メニューまたは部品が合計1件以上」。メニューのみ/部品のみ/両方すべて可。
+
+**UI**
+- セット登録/編集フォームに「含まれる部品」セクション追加（PartPicker で選択・数量入力・並べ替え・削除）。new/edit ページで allParts(show_in_detail=true のアクティブ部品)・initialParts を読み込み。
+- 受注 SetPickerModal のプレビューに部品を表示。確認ボタンはメニュー0でも部品があれば有効。
+
+**DB反映順（厳守）**：dev 適用→prod は SQL Editor で手動適用→**その後** コード push（コード先行 push はしない。本番コードが未作成テーブルを参照して壊れるのを防ぐ）。マイグレーション: `supabase/migrations/20260706000000_create_work_menu_set_parts.sql`。
+
+**既存への無影響**：メニューのみセット（parts 空配列）は従来どおり展開。部品行は手動「部品在庫から追加」と同じ ItemRow 形状（linked_part_id 付き）なので calculateTotals / PDF / 受注ピッカーに影響なし。`work_menu_set_items` は不変。

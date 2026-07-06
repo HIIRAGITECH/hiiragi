@@ -62,6 +62,7 @@ export default async function OrderDetailPage(
     menusRes,
     setsRes,
     setItemsRes,
+    setPartsRes,
     catsRes,
     partsRes,
     indirectRes,
@@ -100,6 +101,11 @@ export default async function OrderDetailPage(
     supabase
       .from("work_menu_set_items")
       .select("set_id, menu_item_id, position")
+      .order("position", { ascending: true }),
+    // 作業セットに含まれる部品（案2）。展開時にその受注の車種で価格解決する。
+    supabase
+      .from("work_menu_set_parts")
+      .select("set_id, part_id, quantity, position")
       .order("position", { ascending: true }),
     supabase
       .from("work_item_categories")
@@ -152,6 +158,12 @@ export default async function OrderDetailPage(
     menu_item_id: string;
     position: number;
   }[];
+  const allSetParts = (setPartsRes.data ?? []) as {
+    set_id: string;
+    part_id: string;
+    quantity: number;
+    position: number;
+  }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
   const allParts = (pickerPartsRes.data ?? []) as PartsInventory[];
   const allVariants = (variantsRes.data ?? []) as PartsInventoryVariant[];
@@ -179,6 +191,7 @@ export default async function OrderDetailPage(
   }
 
   const menuMap = new Map(allMenus.map((m) => [m.id, m]));
+  const partMap = new Map(allParts.map((p) => [p.id, p]));
   const allSetsWithItems = allSets.map((s) => ({
     set: s,
     items: allSetItems
@@ -188,6 +201,23 @@ export default async function OrderDetailPage(
         return menu ? { menu, position: l.position } : null;
       })
       .filter((x): x is { menu: WorkMenuItem; position: number } => !!x)
+      .sort((a, b) => a.position - b.position),
+    // 部品は allParts（アクティブ・明細表示可）に無い（＝ソフト削除/非表示）ものは
+    // メニュー同様スキップする。価格は展開時に items-form 側で車種解決する。
+    parts: allSetParts
+      .filter((l) => l.set_id === s.id)
+      .map((l) => {
+        const part = partMap.get(l.part_id);
+        return part
+          ? { part, quantity: Number(l.quantity ?? 1), position: l.position }
+          : null;
+      })
+      .filter(
+        (
+          x,
+        ): x is { part: PartsInventory; quantity: number; position: number } =>
+          !!x,
+      )
       .sort((a, b) => a.position - b.position),
   }));
 
