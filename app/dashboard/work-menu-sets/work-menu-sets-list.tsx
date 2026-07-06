@@ -11,14 +11,32 @@ import {
   restoreWorkMenuSet,
 } from "./actions";
 
+// 部品の参考表示（金額は固定保存しない。refUnitPrice は汎用価格でサーバー側で算出済み）。
+type SetPart = {
+  partId: string;
+  name: string;
+  quantity: number;
+  position: number;
+  refUnitPrice: number | null; // 汎用(定価)ベースの参考単価。不明なら null。
+};
+
 type SetWithItems = WorkMenuSet & {
   items: { menu: WorkMenuItem; position: number }[];
+  parts: SetPart[];
 };
 
 function menuTotal(m: WorkMenuItem): number {
   return m.default_labor_cost > 0 || m.default_parts_cost > 0
     ? m.default_labor_cost + m.default_parts_cost
     : m.default_unit_price;
+}
+
+// 部品の参考金額合計（refUnitPrice が不明な行は 0 として集計から除外）。
+function partsRefTotal(parts: SetPart[]): number {
+  return parts.reduce(
+    (sum, p) => sum + (p.refUnitPrice ?? 0) * p.quantity,
+    0,
+  );
 }
 
 type Props = {
@@ -94,6 +112,8 @@ export default function WorkMenuSetsList({ rows, includeDeleted }: Props) {
               (sum, x) => sum + menuTotal(x.menu),
               0,
             );
+            const partRef = partsRefTotal(s.parts);
+            const hasParts = s.parts.length > 0;
             const open = openIds.has(s.id);
             const deleted = s.deleted_at !== null;
             return (
@@ -120,7 +140,13 @@ export default function WorkMenuSetsList({ rows, includeDeleted }: Props) {
                         </span>
                       )}
                       <span className="text-xs text-[var(--color-ink-light)]">
-                        {s.items.length} 件 / 合計 {formatYen(total)}
+                        メニュー {s.items.length}件 {formatYen(total)}
+                        {hasParts && (
+                          <>
+                            {" ／ "}
+                            部品(参考) {s.parts.length}件 {formatYen(partRef)}
+                          </>
+                        )}
                       </span>
                       <span
                         aria-hidden
@@ -180,33 +206,75 @@ export default function WorkMenuSetsList({ rows, includeDeleted }: Props) {
                   }`}
                 >
                   <div className="overflow-hidden">
-                    {s.items.length === 0 ? (
+                    {s.items.length === 0 && !hasParts ? (
                       <p className="px-5 py-3 text-xs text-[var(--color-ink-light)]">
-                        （メニュー未登録）
+                        （中身なし）
                       </p>
                     ) : (
-                      <ol className="divide-y divide-[var(--color-line)]">
-                        {s.items.map((x) => (
-                          <li
-                            key={`${s.id}-${x.position}-${x.menu.id}`}
-                            className="flex items-center justify-between gap-3 px-5 py-2 text-sm"
-                          >
-                            <div className="min-w-0 flex-1 truncate">
-                              <span className="text-[var(--color-ink)]">
-                                {x.menu.work_name}
-                              </span>
-                              {x.menu.part_name && (
-                                <span className="ml-2 text-xs text-[var(--color-ink-light)]">
-                                  {x.menu.part_name}
+                      <>
+                        {s.items.length > 0 && (
+                          <ol className="divide-y divide-[var(--color-line)]">
+                            {s.items.map((x) => (
+                              <li
+                                key={`${s.id}-${x.position}-${x.menu.id}`}
+                                className="flex items-center justify-between gap-3 px-5 py-2 text-sm"
+                              >
+                                <div className="min-w-0 flex-1 truncate">
+                                  <span className="text-[var(--color-ink)]">
+                                    {x.menu.work_name}
+                                  </span>
+                                  {x.menu.part_name && (
+                                    <span className="ml-2 text-xs text-[var(--color-ink-light)]">
+                                      {x.menu.part_name}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="wos-num text-[var(--color-ink-soft)]">
+                                  {formatYen(menuTotal(x.menu))}
                                 </span>
-                              )}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+
+                        {hasParts && (
+                          <div className="border-t border-[var(--color-line)] bg-[var(--color-cream)]/40">
+                            <div className="flex items-center gap-2 px-5 pt-2.5 pb-1">
+                              <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-ink-light)]">
+                                部品
+                              </span>
+                              <span className="rounded-full border border-[var(--color-line)] px-1.5 py-px text-[10px] text-[var(--color-ink-light)]">
+                                参考価格
+                              </span>
                             </div>
-                            <span className="wos-num text-[var(--color-ink-soft)]">
-                              {formatYen(menuTotal(x.menu))}
-                            </span>
-                          </li>
-                        ))}
-                      </ol>
+                            <ol className="divide-y divide-[var(--color-line)]">
+                              {s.parts.map((p) => (
+                                <li
+                                  key={`${s.id}-part-${p.position}-${p.partId}`}
+                                  className="flex items-center justify-between gap-3 px-5 py-2 text-sm"
+                                >
+                                  <div className="min-w-0 flex-1 truncate">
+                                    <span className="text-[var(--color-ink)]">
+                                      {p.name}
+                                    </span>
+                                    <span className="ml-2 text-xs text-[var(--color-ink-light)]">
+                                      × {p.quantity}
+                                    </span>
+                                  </div>
+                                  <span className="wos-num text-[var(--color-ink-soft)]">
+                                    {p.refUnitPrice != null
+                                      ? formatYen(p.refUnitPrice * p.quantity)
+                                      : "—"}
+                                  </span>
+                                </li>
+                              ))}
+                            </ol>
+                            <p className="px-5 pb-2.5 pt-1.5 text-[11px] text-[var(--color-ink-light)]">
+                              ※ 部品は汎用価格（車種指定なし）の目安です。受注では車両に合わせた車種別価格で計算されます。
+                            </p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
