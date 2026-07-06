@@ -76,14 +76,18 @@ export default function SaveAsSetButton({
     }
     const created = result.newMenuCount;
     const reused = result.reusedMenuCount;
-    const detail =
+    const parts = result.partCount;
+    const menuDetail =
       created > 0 && reused > 0
-        ? `（既存メニュー ${reused} 件を再利用、新規メニュー ${created} 件を作成）`
+        ? `既存メニュー ${reused} 件を再利用、新規メニュー ${created} 件を作成`
         : created > 0
-          ? `（新規メニュー ${created} 件を作成）`
+          ? `新規メニュー ${created} 件を作成`
           : reused > 0
-            ? `（既存メニュー ${reused} 件を再利用）`
+            ? `既存メニュー ${reused} 件を再利用`
             : "";
+    const partDetail = parts > 0 ? `部品 ${parts} 件を登録` : "";
+    const detailParts = [menuDetail, partDetail].filter(Boolean);
+    const detail = detailParts.length > 0 ? `（${detailParts.join("、")}）` : "";
     setSuccess(`作業セット「${trimmed}」を作成しました。${detail}`);
     // 「セットから追加」で見えるようキャッシュを更新する。
     router.refresh();

@@ -278,7 +278,13 @@ export default async function OrderDetailPage(
                 : ""
             }
             itemsCount={(order.items ?? []).filter(
-              (i) => typeof i?.work_name === "string" && i.work_name.trim() !== "",
+              (i) =>
+                // メニュー行（work_name あり）＋ 在庫リンク済み部品行（work_name 空＋linked_part_id）
+                (typeof i?.work_name === "string" && i.work_name.trim() !== "") ||
+                (typeof i?.linked_part_id === "string" &&
+                  i.linked_part_id !== "" &&
+                  (typeof i?.work_name !== "string" ||
+                    i.work_name.trim() === "")),
             ).length}
           />
           {order.is_archived ? (

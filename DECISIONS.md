@@ -1075,3 +1075,31 @@
 **DB反映順（厳守）**：dev 適用→prod は SQL Editor で手動適用→**その後** コード push（コード先行 push はしない。本番コードが未作成テーブルを参照して壊れるのを防ぐ）。マイグレーション: `supabase/migrations/20260706000000_create_work_menu_set_parts.sql`。
 
 **既存への無影響**：メニューのみセット（parts 空配列）は従来どおり展開。部品行は手動「部品在庫から追加」と同じ ItemRow 形状（linked_part_id 付き）なので calculateTotals / PDF / 受注ピッカーに影響なし。`work_menu_set_items` は不変。
+
+
+---
+
+## 受注明細からの作業セット登録で部品もまとめてセット化（2026-07-06）
+
+**趣旨**：受注詳細の「📦 作業セットとして保存」（saveOrderAsSet）は従来メニュー行のみをセット化していた。明細に在庫リンク済みの部品行があれば、それも `work_menu_set_parts` に登録し、メニュー＋部品の両方をセット化する。
+
+**調査で判明した現状（重要）**
+- `saveOrderAsSet`（orders/actions.ts）は `order.items` を **work_name 非空でフィルタ**してから処理しており、部品行（work_name 空）は**完全に捨てられていた**。よって部品はセットに一切入らなかった。
+- 明細行の種別判別: メニュー行=work_name 非空／在庫リンク済み部品行=work_name 空 かつ linked_part_id あり（rowFromPart 由来）。
+
+**DB変更**：**不要**。今夜作成済みの `work_menu_set_parts`（part_id＋quantity＋position）をそのまま受け皿に使用。新規カラム等なし。
+
+**実装**
+- 明細を menu 行（従来どおりメニューマスター作成/再利用→work_menu_set_items）と part 行に分離。
+- part 行から part_id＋quantity を取り出し `work_menu_set_parts` に position 順で保存。**価格・variant は保存しない**（今夜の設計＝展開時に受注の車種で解決）。
+- 所有 parts_inventory のみ受理（FK保護＋RLS補助）。存在しない部品行は静かにスキップ。
+- バリデーション緩和：「メニューまたは部品が1件以上」。メニューのみ/部品のみ/混在すべて可。部品のみのときは work_menu_set_items 挿入をスキップ。
+- エラー時ロールバック：set 削除（set_items/set_parts は CASCADE 連鎖）＋この実行で作成した menu を削除。
+- 結果型に partCount 追加。SaveAsSetButton の成功メッセージに「部品 N 件を登録」を表示。page.tsx の itemsCount も部品行を含めてカウント。
+
+**既存への無影響**
+- メニューのみ明細のセット化は従来どおり（part 行が無ければ partCount=0 で従来と同一挙動）。
+- 受注の計算・PDFは `order.items` を読むだけで saveOrderAsSet は書き換えない → 影響なし。
+- work_menu_set_items 経路・型は不変。
+
+**判断した点**：在庫リンクの無い手入力部品名（linked_part_id 無し）は part_id が無く受け皿に載らないためセット化対象外（スキップ）。同一 part_id が複数行あってもメニュー行と同じく 1:1 でそのまま保存（重複マージしない）。

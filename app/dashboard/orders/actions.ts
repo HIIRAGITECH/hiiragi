@@ -999,7 +999,14 @@ function deriveLegacyCategoryInline(
 
 export type SaveOrderAsSetResult =
   | { error: string }
-  | { success: true; setId: string; newMenuCount: number; reusedMenuCount: number };
+  | {
+      success: true;
+      setId: string;
+      newMenuCount: number;
+      reusedMenuCount: number;
+      // 案2: セットに保存した部品行の件数（part_id＋quantity のみ。価格は展開時に受注の車種で解決）。
+      partCount: number;
+    };
 
 export async function saveOrderAsSet(
   orderId: string,
@@ -1026,10 +1033,27 @@ export async function saveOrderAsSet(
     .maybeSingle();
   if (!order) return { error: "受注が見つかりません。" };
 
-  const items = ((order.items ?? []) as OrderItem[]).filter(
+  const allItems = (order.items ?? []) as OrderItem[];
+  // 明細行の種別判別:
+  //   - メニュー行 : work_name が非空 → 従来どおり作業メニューマスターへ作成/再利用しセット化。
+  //   - 部品行     : work_name が空 かつ linked_part_id あり（在庫リンク済み部品行。
+  //                  「部品在庫から追加」やセット展開で入る）→ work_menu_set_parts へ part_id＋quantity で保存。
+  //   - それ以外   : 空行 / 在庫リンクの無い手入力部品名 → セット化対象外（part_id が無く受け皿に載らない）。
+  const items = allItems.filter(
     (i) => typeof i?.work_name === "string" && i.work_name.trim() !== "",
   );
-  if (items.length === 0) {
+  const partRows: { part_id: string; quantity: number }[] = allItems
+    .filter(
+      (i) =>
+        (typeof i?.work_name !== "string" || i.work_name.trim() === "") &&
+        typeof i?.linked_part_id === "string" &&
+        i.linked_part_id !== "",
+    )
+    .map((i) => ({
+      part_id: i.linked_part_id as string,
+      quantity: Number(i.quantity ?? 1) > 0 ? Number(i.quantity ?? 1) : 1,
+    }));
+  if (items.length === 0 && partRows.length === 0) {
     return { error: "明細が空の受注はセット化できません。" };
   }
 
@@ -1220,24 +1244,64 @@ export async function saveOrderAsSet(
     };
   }
 
-  // 7) work_menu_set_items でメニューを position 順に紐付け
-  const links = orderedMenuIds.map((mid, i) => ({
-    set_id: insSet.id as string,
-    menu_item_id: mid,
-    position: i,
-  }));
-  const { error: linkErr } = await supabase
-    .from("work_menu_set_items")
-    .insert(links);
-  if (linkErr) {
-    // セットを孤立させないよう削除してから返す（メニュー本体は残す: 部分成功でも価値があるため）。
+  // セットを孤立させないよう削除してから返す（メニュー本体は残す: 部分成功でも価値があるため）。
+  // work_menu_set_items / work_menu_set_parts は ON DELETE CASCADE なので子も連鎖削除される。
+  async function deleteSetAndRollback() {
     await supabase
       .from("work_menu_sets")
       .delete()
-      .eq("id", insSet.id as string)
-      .eq("user_id", user.id);
+      .eq("id", insSet!.id as string)
+      .eq("user_id", user!.id);
     await rollback();
-    return { error: `セット項目の作成に失敗しました: ${linkErr.message}` };
+  }
+
+  // 7) work_menu_set_items でメニューを position 順に紐付け（部品のみのセットでは空なのでスキップ）。
+  if (orderedMenuIds.length > 0) {
+    const links = orderedMenuIds.map((mid, i) => ({
+      set_id: insSet.id as string,
+      menu_item_id: mid,
+      position: i,
+    }));
+    const { error: linkErr } = await supabase
+      .from("work_menu_set_items")
+      .insert(links);
+    if (linkErr) {
+      await deleteSetAndRollback();
+      return { error: `セット項目の作成に失敗しました: ${linkErr.message}` };
+    }
+  }
+
+  // 8) 部品行を work_menu_set_parts に保存（案2）。part_id＋quantity のみ。価格・variant は持たない。
+  // 所有 parts_inventory のみ受け付ける（FK 保護＋RLS 補助）。存在しない部品行は静かにスキップ。
+  let partCount = 0;
+  if (partRows.length > 0) {
+    const { data: ownedParts } = await supabase
+      .from("parts_inventory")
+      .select("id")
+      .eq("user_id", user.id)
+      .in(
+        "id",
+        partRows.map((p) => p.part_id),
+      );
+    const ownedSet = new Set((ownedParts ?? []).map((r) => r.id as string));
+    const partLinks = partRows
+      .filter((p) => ownedSet.has(p.part_id))
+      .map((p, i) => ({
+        set_id: insSet.id as string,
+        part_id: p.part_id,
+        quantity: p.quantity,
+        position: i,
+      }));
+    if (partLinks.length > 0) {
+      const { error: partErr } = await supabase
+        .from("work_menu_set_parts")
+        .insert(partLinks);
+      if (partErr) {
+        await deleteSetAndRollback();
+        return { error: `セット部品の作成に失敗しました: ${partErr.message}` };
+      }
+      partCount = partLinks.length;
+    }
   }
 
   revalidatePath(`/dashboard/orders/${orderId}`);
@@ -1248,5 +1312,6 @@ export async function saveOrderAsSet(
     setId: insSet.id as string,
     newMenuCount,
     reusedMenuCount,
+    partCount,
   };
 }
