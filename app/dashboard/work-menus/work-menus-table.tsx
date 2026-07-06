@@ -1,8 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+  type CSSProperties,
+} from "react";
 import { useRouter } from "next/navigation";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { formatYen } from "@/lib/format";
 import type { WorkItemCategory, WorkMenuItem } from "@/lib/types";
 import type { WorkMenuUsage } from "@/lib/work-menus/usage";
@@ -10,7 +33,7 @@ import {
   deleteWorkMenu,
   duplicateWorkMenu,
   getWorkMenuUsageAction,
-  moveWorkMenu,
+  reorderWorkMenus,
   restoreWorkMenu,
 } from "./actions";
 
@@ -53,6 +76,19 @@ export default function WorkMenusTable({
     return m;
   }, [allCategories]);
 
+  // ドラッグ&ドロップ並べ替え用のローカル順序。サーバー再取得（rows 変化）で同期する。
+  const [items, setItems] = useState<WorkMenuItem[]>(rows);
+  useEffect(() => {
+    setItems(rows);
+  }, [rows]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
   const filtered = useMemo(() => {
     let list = rows;
     if (filter !== "all") {
@@ -69,10 +105,21 @@ export default function WorkMenusTable({
   }, [rows, filter, query]);
 
   const isFiltering = filter !== "all" || query.trim().length > 0;
+  // 並べ替えはフィルタ解除かつ非表示を含めない通常表示のときのみ（保存中も一時無効）。
+  const dndEnabled = !isFiltering && !includeDeleted;
+  const canDrag = dndEnabled && !pending;
+  const displayRows = dndEnabled ? items : filtered;
 
-  function handleMove(id: string, direction: "up" | "down") {
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldI = items.findIndex((x) => x.id === active.id);
+    const newI = items.findIndex((x) => x.id === over.id);
+    if (oldI < 0 || newI < 0) return;
+    const next = arrayMove(items, oldI, newI);
+    setItems(next);
     startTransition(async () => {
-      await moveWorkMenu(id, direction);
+      await reorderWorkMenus(next.map((r) => r.id));
       router.refresh();
     });
   }
@@ -176,7 +223,7 @@ export default function WorkMenusTable({
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
         <div className="px-8 py-6">
-          {filtered.length === 0 ? (
+          {displayRows.length === 0 ? (
             <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
               {isFiltering
                 ? "該当する作業メニューが見つかりません。"
@@ -186,7 +233,7 @@ export default function WorkMenusTable({
             <table className="w-full border-collapse bg-[var(--color-paper)] border border-[var(--color-line)]">
               <thead>
                 <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
-                  <th className="wos-th w-16 text-center">並び</th>
+                  <th className="wos-th w-10 text-center">並び</th>
                   <th className="wos-th">作業内容</th>
                   <th className="wos-th">部品名</th>
                   <th className="wos-th">カテゴリ</th>
@@ -196,143 +243,32 @@ export default function WorkMenusTable({
                   <th className="wos-th right w-44">操作</th>
                 </tr>
               </thead>
-              <tbody>
-                {filtered.map((r, idx) => {
-                  const total =
-                    r.default_labor_cost > 0 || r.default_parts_cost > 0
-                      ? r.default_labor_cost + r.default_parts_cost
-                      : r.default_unit_price;
-                  const deleted = r.deleted_at !== null;
-                  return (
-                    <tr
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={displayRows.map((r) => r.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {displayRows.map((r) => (
+                    <SortableWorkMenuRow
                       key={r.id}
-                      className={`border-b border-[var(--color-line)] hover:bg-[var(--color-cream)] ${
-                        deleted ? "opacity-50" : ""
-                      }`}
-                    >
-                      <td className="wos-td text-center align-top">
-                        <div className="flex justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleMove(r.id, "up")}
-                            disabled={
-                              pending || idx === 0 || isFiltering || deleted
-                            }
-                            aria-label="上に移動"
-                            className="wos-btn-ghost wos-btn-xs"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMove(r.id, "down")}
-                            disabled={
-                              pending ||
-                              idx === filtered.length - 1 ||
-                              isFiltering ||
-                              deleted
-                            }
-                            aria-label="下に移動"
-                            className="wos-btn-ghost wos-btn-xs"
-                          >
-                            ↓
-                          </button>
-                        </div>
-                      </td>
-                      <td className="wos-td">
-                        {deleted ? (
-                          <span className="font-semibold">{r.work_name}</span>
-                        ) : (
-                          <Link
-                            href={`/dashboard/work-menus/${r.id}/edit`}
-                            className="font-semibold text-[var(--color-ink)] hover:underline"
-                          >
-                            {r.work_name}
-                          </Link>
-                        )}
-                        {deleted && (
-                          <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
-                            非表示
-                          </span>
-                        )}
-                      </td>
-                      <td className="wos-td muted">
-                        <span>{r.part_name ?? "—"}</span>
-                        {r.linked_part_id && (
-                          <span
-                            className="ml-1.5 text-[10px] font-medium text-[var(--color-accent)]"
-                            title="部品マスターにリンクされています（在庫管理対象）"
-                          >
-                            ◆ 在庫
-                          </span>
-                        )}
-                      </td>
-                      <td className="wos-td muted">
-                        <span className="text-[11px] text-[var(--color-ink-soft)]">
-                          {(r.item_category_id &&
-                            categoryNameMap.get(r.item_category_id)) ||
-                            "（未分類）"}
-                        </span>
-                        {r.tax_category === "shaken_non_tax" && (
-                          <span className="ml-1 text-[10px] text-[var(--color-warn)]">
-                            非課税
-                          </span>
-                        )}
-                      </td>
-                      <td className="wos-td num right">
-                        {r.default_labor_cost > 0
-                          ? formatYen(r.default_labor_cost)
-                          : "—"}
-                      </td>
-                      <td className="wos-td num right">
-                        {r.default_parts_cost > 0
-                          ? formatYen(r.default_parts_cost)
-                          : "—"}
-                      </td>
-                      <td className="wos-td num right font-semibold">
-                        {formatYen(total)}
-                      </td>
-                      <td className="wos-td">
-                        {deleted ? (
-                          <div className="flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => handleRestore(r.id)}
-                              disabled={busy}
-                              className="wos-btn-ghost wos-btn-xs"
-                            >
-                              復元
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex justify-end gap-1">
-                            <Link
-                              href={`/dashboard/work-menus/${r.id}/edit`}
-                              className="wos-btn-ghost wos-btn-xs"
-                            >
-                              編集
-                            </Link>
-                            <form action={duplicateWorkMenu}>
-                              <input type="hidden" name="id" value={r.id} />
-                              <button type="submit" className="wos-btn-ghost wos-btn-xs">
-                                複製
-                              </button>
-                            </form>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteClick(r)}
-                              disabled={busy}
-                              className="wos-btn-danger wos-btn-xs"
-                            >
-                              削除
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+                      r={r}
+                      categoryName={
+                        (r.item_category_id &&
+                          categoryNameMap.get(r.item_category_id)) ||
+                        "（未分類）"
+                      }
+                      disabled={!canDrag}
+                      busy={busy}
+                      onDeleteClick={handleDeleteClick}
+                      onRestore={handleRestore}
+                    />
+                  ))}
+                </SortableContext>
+              </DndContext>
             </table>
           )}
         </div>
@@ -457,5 +393,152 @@ export default function WorkMenusTable({
         </div>
       )}
     </>
+  );
+}
+
+// 1 メニュー = 1 <tbody>（本体行）。<tbody> 単位でドラッグ並べ替え可能にする。
+function SortableWorkMenuRow({
+  r,
+  categoryName,
+  disabled,
+  busy,
+  onDeleteClick,
+  onRestore,
+}: {
+  r: WorkMenuItem;
+  categoryName: string;
+  disabled: boolean;
+  busy: boolean;
+  onDeleteClick: (row: WorkMenuItem) => void;
+  onRestore: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: r.id, disabled });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+    position: isDragging ? "relative" : undefined,
+    zIndex: isDragging ? 10 : undefined,
+  };
+  const deleted = r.deleted_at !== null;
+  const total =
+    r.default_labor_cost > 0 || r.default_parts_cost > 0
+      ? r.default_labor_cost + r.default_parts_cost
+      : r.default_unit_price;
+
+  return (
+    <tbody
+      ref={setNodeRef}
+      style={style}
+      className={`border-b border-[var(--color-line)] ${
+        deleted ? "opacity-50" : ""
+      } ${isDragging ? "bg-[var(--color-cream)]" : "hover:bg-[var(--color-cream)]"}`}
+    >
+      <tr>
+        <td className="wos-td text-center align-top">
+          {disabled ? (
+            <span
+              className="select-none text-[var(--color-ink-light)] opacity-30"
+              title="並べ替えはフィルタ解除・通常表示のときのみ"
+            >
+              ⠿
+            </span>
+          ) : (
+            <button
+              type="button"
+              className="cursor-grab select-none text-[var(--color-ink-light)] hover:text-[var(--color-ink)] active:cursor-grabbing"
+              aria-label="ドラッグして並べ替え"
+              {...attributes}
+              {...listeners}
+            >
+              ⠿
+            </button>
+          )}
+        </td>
+        <td className="wos-td">
+          {deleted ? (
+            <span className="font-semibold">{r.work_name}</span>
+          ) : (
+            <Link
+              href={`/dashboard/work-menus/${r.id}/edit`}
+              className="font-semibold text-[var(--color-ink)] hover:underline"
+            >
+              {r.work_name}
+            </Link>
+          )}
+          {deleted && (
+            <span className="ml-2 text-[10px] px-1.5 py-0.5 border border-[var(--color-line)] text-[var(--color-ink-light)]">
+              非表示
+            </span>
+          )}
+        </td>
+        <td className="wos-td muted">
+          <span>{r.part_name ?? "—"}</span>
+          {r.linked_part_id && (
+            <span
+              className="ml-1.5 text-[10px] font-medium text-[var(--color-accent)]"
+              title="部品マスターにリンクされています（在庫管理対象）"
+            >
+              ◆ 在庫
+            </span>
+          )}
+        </td>
+        <td className="wos-td muted">
+          <span className="text-[11px] text-[var(--color-ink-soft)]">
+            {categoryName}
+          </span>
+          {r.tax_category === "shaken_non_tax" && (
+            <span className="ml-1 text-[10px] text-[var(--color-warn)]">
+              非課税
+            </span>
+          )}
+        </td>
+        <td className="wos-td num right">
+          {r.default_labor_cost > 0 ? formatYen(r.default_labor_cost) : "—"}
+        </td>
+        <td className="wos-td num right">
+          {r.default_parts_cost > 0 ? formatYen(r.default_parts_cost) : "—"}
+        </td>
+        <td className="wos-td num right font-semibold">{formatYen(total)}</td>
+        <td className="wos-td">
+          {deleted ? (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => onRestore(r.id)}
+                disabled={busy}
+                className="wos-btn-ghost wos-btn-xs"
+              >
+                復元
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-end gap-1">
+              <Link
+                href={`/dashboard/work-menus/${r.id}/edit`}
+                className="wos-btn-ghost wos-btn-xs"
+              >
+                編集
+              </Link>
+              <form action={duplicateWorkMenu}>
+                <input type="hidden" name="id" value={r.id} />
+                <button type="submit" className="wos-btn-ghost wos-btn-xs">
+                  複製
+                </button>
+              </form>
+              <button
+                type="button"
+                onClick={() => onDeleteClick(r)}
+                disabled={busy}
+                className="wos-btn-danger wos-btn-xs"
+              >
+                削除
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
+    </tbody>
   );
 }

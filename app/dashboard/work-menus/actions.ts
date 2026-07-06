@@ -668,54 +668,30 @@ export async function registerOrderItemAsMenu(
   return { success: true, id: inserted.id };
 }
 
-// ↑↓ ボタン用: 隣接行と display_order を入れ替える。
-export async function moveWorkMenu(
-  id: string,
-  direction: "up" | "down",
-): Promise<{ error: string } | undefined> {
+// ドラッグ&ドロップ並べ替え: 渡された id 配列の順に display_order を 0..n-1 で振り直す。
+// 部品一覧の reorderParts と同じ方式。リロード後も並びが保持される。
+// フィルタ解除・非表示を含めない通常表示でのみ呼ばれる前提（クライアント側で制御）。
+export async function reorderWorkMenus(
+  orderedIds: string[],
+): Promise<{ error: string } | { success: true }> {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return { success: true };
+  }
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
 
-  const { data: cur } = await supabase
-    .from("work_menu_items")
-    .select("id, display_order")
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!cur) return { error: "対象が見つかりません。" };
-
-  const op = direction === "up" ? "lt" : "gt";
-  const { data: neighbor } = await supabase
-    .from("work_menu_items")
-    .select("id, display_order")
-    .eq("user_id", user.id)
-    .filter("display_order", op, cur.display_order)
-    .order("display_order", { ascending: direction !== "up" })
-    .limit(1)
-    .maybeSingle();
-  if (!neighbor) return; // 端なので無視
-
-  // 2 行の display_order を入れ替え（衝突回避のため一時値を使う）
-  const TEMP = -999_999_999;
-  await supabase
-    .from("work_menu_items")
-    .update({ display_order: TEMP })
-    .eq("id", cur.id)
-    .eq("user_id", user.id);
-  await supabase
-    .from("work_menu_items")
-    .update({ display_order: cur.display_order })
-    .eq("id", neighbor.id)
-    .eq("user_id", user.id);
-  await supabase
-    .from("work_menu_items")
-    .update({ display_order: neighbor.display_order })
-    .eq("id", cur.id)
-    .eq("user_id", user.id);
+  for (let i = 0; i < orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("work_menu_items")
+      .update({ display_order: i })
+      .eq("id", orderedIds[i])
+      .eq("user_id", user.id);
+    if (error) return { error: `並べ替えに失敗しました: ${error.message}` };
+  }
 
   revalidatePath("/dashboard/work-menus");
-  return undefined;
+  return { success: true };
 }

@@ -1027,3 +1027,22 @@
 - **前受金0の月は注記を非表示**（`advanceCount > 0` ガード）。レイアウト不変。
 
 **不変条件**：`請求合計(税込)=totalWithTax` は従来式のまま1円も変更なし。
+
+
+---
+
+## 作業メニュー一覧：↑↓ボタン → ドラッグ&ドロップ並べ替え（2026-07-06）
+
+**変更の趣旨**：UIのみ。**DBスキーマ無変更**（既存の `work_menu_items.display_order` をそのまま使用）。
+部品一覧(`parts-inventory-table.tsx`)で実績のある @dnd-kit 実装を作業メニュー一覧へ流用し、並べ替えUXを統一。
+
+**実装内容**
+- `work-menus-table.tsx` を @dnd-kit 化：`DndContext` + `SortableContext` + `useSortable`、`arrayMove` → 楽観的更新(`setItems`) → `reorderWorkMenus` → `router.refresh()`。部品一覧と同じパターン。
+- 各メニュー行を 1 `<tbody>`（本体1行）にして `<tbody>` 単位でソート。ドラッグハンドルは ⠿。
+- サーバーアクション `moveWorkMenu`（隣接スワップ）を**廃止し** `reorderWorkMenus(orderedIds)` に一本化。渡されたID配列順に `display_order` を 0..n-1 で振り直す（`reorderParts` と同一方式）。
+- **フィルタ/検索/非表示表示中はD&D無効**（`dndEnabled = !isFiltering && !includeDeleted`、保存中`pending`も無効）。フィルタ時は従来の `filtered` を表示、通常時のみローカル `items` を表示。
+
+**既存挙動への影響なし**
+- 検索・カテゴリフィルタ・編集・複製・削除（使用回数確認モーダル/soft・hard）・非表示/復元は不変。
+- **新規登録が最上部に来る挙動を維持**：`insertWorkMenuCore` は `display_order` 最小-1 採番。reorder後は 0..n-1 になるため、新規は -1 で先頭に入り整合。
+- `router.refresh()` でリロード後も並び順保持（`display_order` 昇順取得）。
