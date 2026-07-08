@@ -204,12 +204,22 @@ function VehicleCard({ order }: { order: MypageOrder }) {
 }
 
 // 見積セクション: 発行済 / 了承済 のとき表示。
+//
+// 請求済(または入金済)かつ作業完了のときは、明細を「作業完了」カードが担っているため、
+// 見積は重複表示になる。そこで見積を「（参考）お見積り内容」として <details> で折りたたむ
+// （デフォルト閉じ・クリックで展開）。accent 枠を外し控えめなトーンにして「参考」であることを示す。
+//   ★AND 条件（請求済/入金済 かつ 完了）にしているのは意図的★
+//   「請求済だが作業未完了」（前払い・部品先取り等の運用）では作業完了カードが無く明細の
+//   担い手が見積だけになるため、そのケースは折りたたまず従来通り展開したまま残す。
+// 実装はネイティブ <details>/<summary>。クライアント境界を増やさずサーバーコンポーネントのまま。
 function EstimateSection({ order }: { order: MypageOrder }) {
   const show =
     order.estimate_status === "発行済" || order.estimate_status === "了承済";
   if (!show) return null;
-  return (
-    <Card title="お見積り" accent>
+
+  // 折りたたみ時も導入文はそのまま中身に残す（開いたときに文脈が読める）。
+  const body = (
+    <>
       <p className="mb-3 text-sm text-[var(--color-ink-mid)]">
         {order.estimate_status === "了承済"
           ? "ご承認ありがとうございます。下記内容で作業を進めてまいります。"
@@ -217,6 +227,40 @@ function EstimateSection({ order }: { order: MypageOrder }) {
       </p>
       <ItemList items={order.items} />
       <TotalsBlock order={order} mode="estimate" />
+    </>
+  );
+
+  const collapseEstimate =
+    (order.invoice_status === "請求済" || order.invoice_status === "入金済") &&
+    order.work_status === "完了";
+
+  if (collapseEstimate) {
+    return (
+      <details
+        className="group rounded-xl border p-5 shadow-sm [&_summary::-webkit-details-marker]:hidden"
+        style={{
+          background: "var(--color-paper)",
+          borderColor: "var(--color-line)",
+        }}
+      >
+        {/* summary 全幅をタップ領域に。標準の三角マーカーは list-none + webkit 非表示で消す。 */}
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium text-[var(--color-ink-mid)]">
+          <span>（参考）お見積り内容</span>
+          <span
+            aria-hidden
+            className="text-xs text-[var(--color-ink-light)] transition-transform group-open:rotate-180"
+          >
+            ▼
+          </span>
+        </summary>
+        <div className="mt-4">{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <Card title="お見積り" accent>
+      {body}
     </Card>
   );
 }
