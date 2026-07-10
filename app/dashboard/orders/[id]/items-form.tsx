@@ -148,6 +148,8 @@ function rowFromMenu(
   // メニューの原価は labor_cost_price に統一済み (段1)。
   const costPrice = m.labor_cost_price ?? 0;
   return {
+    // メニュー由来は必ず作業行。
+    kind: "labor",
     name: m.work_name,
     // 段1: メニューは部品リンク (linked_part_id) を持たない設計に変更。
     // 既存データで part_name が入っているメニューは残存表示する (新規からは空)。
@@ -206,6 +208,8 @@ function rowFromPart(
       : listPrice;
   const cost = p.cost_price ?? 0;
   return {
+    // 部品在庫由来は必ず部品行。
+    kind: "part",
     name: "",
     part_name: p.name,
     note: "",
@@ -264,7 +268,17 @@ function rowToMenuInitial(r: ItemRow): WorkMenuItem {
   };
 }
 
+// 明細作り直し 段階2 (2026-07-11): 手入力行の種別。UI 専用の概念で、DB（OrderItem）には
+// 保存しない（保存データは従来どおり work_name / part_name / linked_part_id で表現する）。
+//   labor = 作業行（名前は work_name に入る）
+//   part  = 部品行（名前は part_name に入る。work_name は空のまま）
+// 読み込み時は toRow が既存フィールドから種別を推定するため、保存→再読込で種別は自然に復元される。
+type ItemKind = "labor" | "part";
+
 type ItemRow = {
+  // 明細作り直し 段階2: 行の種別（UI 専用・非保存）。簡易入力の「作業/部品」トグルと、
+  // どちらの名前欄（name / part_name）を主として編集するかを制御する。
+  kind: ItemKind;
   // 旧 name を work_name にリネーム済み。OrderItem.work_name と対応する。
   name: string;
   // 部品名（任意、マスター対象）
@@ -296,6 +310,9 @@ type ItemRow = {
   // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
   // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
   _noteExpanded?: boolean;
+  // UI 専用（段階2）: 「詳細」パネル（原価・定価・業販・マスター登録・補足）を展開している行で true。
+  // 保存対象外（toItem で詰めない）。
+  _detailOpen?: boolean;
   // UI 専用: ドラッグ並べ替え（@dnd-kit）の安定キー。行オブジェクトは更新で作り直されるため、
   // 配列 index ではなくこの uid を sortable id / React key に使う。保存対象外（toItem で詰めない）。
   _uid?: string;
@@ -327,7 +344,16 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
     itemCategoryId =
       allCategories.find((c) => c.name === fallbackName)?.id ?? "";
   }
+  // 段階2: 種別を既存フィールドから推定（段階1調査の分類ルールと同一）。
+  //   work_name が空で、部品名か在庫リンクを持つ行 → 部品行。それ以外 → 作業行。
+  //   これにより保存→再読込で「作業/部品」トグルの状態が自然に復元される。
+  const workEmpty = !(i.work_name && i.work_name.trim() !== "");
+  const hasPart =
+    (i.part_name != null && i.part_name.trim() !== "") ||
+    (i.linked_part_id != null && i.linked_part_id !== "");
+  const kind: ItemKind = workEmpty && hasPart ? "part" : "labor";
   return {
+    kind,
     name: i.work_name,
     part_name: i.part_name ?? "",
     note: i.note ?? "",
@@ -423,6 +449,8 @@ const emptyRow = (
   itemCategoryId: string,
   taxCategory: TaxCategory,
 ): ItemRow => ({
+  // 手入力の新規行は既定で「作業」。ユーザーが種別トグルで部品に切替できる。
+  kind: "labor",
   name: "",
   part_name: "",
   note: "",
@@ -1319,6 +1347,30 @@ function ItemTableEditor({
       parts_cost_price: "",
     });
   }
+  // 段階2: 種別（作業/部品）の切替。表示中の名前を新しい種別の名前欄へ移し、もう片方を空にする。
+  //   これで「打ち間違えて種別を変えた」ときも入力済みの名前が消えない。
+  //   linked_part_id / source_menu_id はここでは触らない（マスター連携・在庫を勝手に壊さない）。
+  function changeKind(i: number, kind: ItemKind) {
+    const r = rows[i];
+    if (!r || r.kind === kind) return;
+    if (kind === "part") {
+      const name = r.name.trim() !== "" ? r.name : r.part_name;
+      update(i, { kind, part_name: name, name: "" });
+    } else {
+      const name = r.part_name.trim() !== "" ? r.part_name : r.name;
+      update(i, { kind, name, part_name: "" });
+    }
+  }
+  // 段階2: 簡易入力の「名前」欄。種別に応じて work_name(name) か part_name のどちらかを編集する。
+  function updateName(i: number, v: string) {
+    const r = rows[i];
+    if (r?.kind === "part") update(i, { part_name: v });
+    else update(i, { name: v });
+  }
+  // 段階2: 「詳細」パネルの開閉。
+  function toggleDetail(i: number) {
+    update(i, { _detailOpen: !(rows[i]?._detailOpen === true) });
+  }
   function add() {
     onChange([...rows, emptyRow(categoryId, defaultTaxCategory)]);
   }
@@ -1377,65 +1429,73 @@ function ItemTableEditor({
             strategy={verticalListSortingStrategy}
           >
             {rows.map((r, i) => {
-              // 部品在庫から追加した行（部品リンクあり・作業内容空）。種別バッジ表示に使う。
-              const isPartRow = r.linked_part_id !== "" && r.name.trim() === "";
               // 偶数行（i=1,3,5...）にゼブラ背景。
               const zebra = i % 2 === 1;
               const noteOpen = r.note !== "" || r._noteExpanded === true;
+              // 段階2: 「詳細」パネルの開閉。補足に既存の文言がある行は詳細を自動展開して
+              //   （内部に補足を内包するため）中身を隠さない。
+              const detailOpen = r._detailOpen === true || noteOpen;
+              // マスター（メニュー/部品在庫）由来の行は種別が確定しているので種別トグルは不可。
+              const isMaster = r.linked_part_id !== "" || r.source_menu_id !== "";
+              // 小計・業販表示に使う OrderItem 換算（表示専用。保存とは無関係）。
+              const rowItem = toItem(r, categoryName);
               return (
                 <SortableItemRow key={rowId(r, i)} id={rowId(r, i)} zebra={zebra}>
                   {(handle) => (
                     <>
-              {/* 2 段グリッド: [#] [作業/工賃] [部品名/部品代] [数量/—] [単価/小計] [☆/×]
-                  items-end で各セルを下端揃え（ラベル付きセルと入力単独セルの底辺を一致）。
-                  # バッジは row-span-2 + self-center で縦方向中央。 */}
-              {/* 最終列（☆ / ×）はモバイルは 36px のアイコン幅のまま（横スクロール防止）、
-                  sm 以上では auto にして「☆ メニュー登録」ラベル分だけ広げる。 */}
-              <div className="grid items-end gap-x-2 gap-y-1.5 grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_36px] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_70px_90px_auto]">
-                <div className="row-span-2 flex flex-col items-center justify-center gap-1 self-center">
-                  {/* # バッジ＝ドラッグハンドル。番号入力欄等を誤ってつかまないよう、ハンドルだけに
-                      listeners を付ける（行内の各 input はドラッグ対象外のまま編集できる）。 */}
-                  <button
-                    type="button"
-                    aria-label="ドラッグして並べ替え"
-                    title="ドラッグで並べ替え（同カテゴリ内）"
-                    className="inline-flex h-6 w-6 cursor-grab items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300"
-                    {...handle.attributes}
-                    {...handle.listeners}
+              {/* 段階2: 簡易入力行 = [#] [種別] [名前] [数量] [金額+バッジ] [詳細/×]。
+                  原価・定価・業販・マスター登録・補足は下の「詳細」パネルに格納し、普段はすっきり保つ。
+                  items-end で各セルを下端揃え（ラベル付きセルの入力底辺を一致）。 */}
+              <div className="grid items-end gap-x-2 gap-y-1 grid-cols-[24px_72px_minmax(0,1fr)_52px_100px_auto] sm:grid-cols-[28px_84px_minmax(0,1fr)_60px_116px_auto]">
+                {/* # バッジ＝ドラッグハンドル。ハンドルだけに listeners を付け、行内 input は掴まず編集可。 */}
+                <button
+                  type="button"
+                  aria-label="ドラッグして並べ替え"
+                  title="ドラッグで並べ替え（同カテゴリ内）"
+                  className="mb-0.5 inline-flex h-8 w-6 cursor-grab items-center justify-center rounded bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300"
+                  {...handle.attributes}
+                  {...handle.listeners}
+                >
+                  {i + 1}
+                </button>
+
+                {/* 種別（作業/部品）。マスター由来の行は種別が確定なので変更不可。 */}
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    種別
+                  </label>
+                  <select
+                    value={r.kind}
+                    disabled={isMaster}
+                    onChange={(e) => changeKind(i, e.target.value as ItemKind)}
+                    aria-label="種別（作業/部品）"
+                    title={
+                      isMaster
+                        ? "マスター（メニュー/部品在庫）から追加した行は種別が確定しています"
+                        : "作業か部品かを選びます"
+                    }
+                    className={`${cellInputClass} disabled:opacity-70`}
                   >
-                    {i + 1}
-                  </button>
-                  {isPartRow && (
-                    <span
-                      className="rounded bg-sky-100 px-1 py-0.5 text-[9px] font-medium leading-tight text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
-                      title="部品在庫から追加した行（部品マスターにリンク）"
-                    >
-                      部品
-                    </span>
-                  )}
+                    <option value="labor">作業</option>
+                    <option value="part">部品</option>
+                  </select>
                 </div>
 
-                {/* 列2 上: 作業内容 */}
-                <input
-                  value={r.name}
-                  onChange={(e) => update(i, { name: e.target.value })}
-                  placeholder="作業内容"
-                  aria-label="作業内容"
-                  className={cellInputClass}
-                />
+                {/* 名前（種別に応じて work_name / part_name を編集） */}
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    {r.kind === "part" ? "部品名" : "作業内容"}
+                  </label>
+                  <input
+                    value={r.kind === "part" ? r.part_name : r.name}
+                    onChange={(e) => updateName(i, e.target.value)}
+                    placeholder={r.kind === "part" ? "部品名" : "作業内容"}
+                    aria-label={r.kind === "part" ? "部品名" : "作業内容"}
+                    className={cellInputClass}
+                  />
+                </div>
 
-                {/* 列3 上: 部品名 */}
-                <input
-                  value={r.part_name}
-                  onChange={(e) =>
-                    update(i, { part_name: e.target.value })
-                  }
-                  placeholder="部品名（任意）"
-                  aria-label="部品名"
-                  className={cellInputClass}
-                />
-
-                {/* 列4 上: 数量（ラベル上） */}
+                {/* 数量 */}
                 <div>
                   <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                     数量
@@ -1446,19 +1506,16 @@ function ItemTableEditor({
                     min={0}
                     step={1}
                     value={r.quantity}
-                    onChange={(e) =>
-                      update(i, { quantity: e.target.value })
-                    }
+                    onChange={(e) => update(i, { quantity: e.target.value })}
                     aria-label="数量"
                     className={`${cellInputClass} text-center`}
                   />
                 </div>
 
-                {/* 列5 上: 単価 (段2-1: 常時編集可能。1個あたりの売値=業販単価) */}
+                {/* 金額（単価）＋業販/定価バッジ */}
                 <div>
-                  {/* 明細作り直し 段階1: 単価が業販/定価どちらかを示すバッジ（表示のみ）。 */}
                   <label className="mb-0.5 flex items-center justify-between gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    <span>単価</span>
+                    <span>金額</span>
                     <PriceKindBadge isBusiness={isBusiness} />
                   </label>
                   <input
@@ -1469,154 +1526,157 @@ function ItemTableEditor({
                     value={r.unit_price}
                     onChange={(e) => updateUnitPrice(i, e.target.value)}
                     placeholder="—"
-                    aria-label="単価"
+                    aria-label="金額（単価）"
                     className={`${cellInputClass} text-right`}
                   />
                 </div>
 
-                {/* 列6 上: ☆ ボタン */}
-                <button
-                  type="button"
-                  onClick={() => onRegisterRow(categoryId, i)}
-                  aria-label="この行をマスターに登録"
-                  title={
-                    r.source_menu_id
-                      ? "現在の内容で別のマスターとして登録"
-                      : "マスターに登録"
-                  }
-                  className="flex h-9 w-9 items-center justify-center gap-1 rounded-md border border-amber-200 bg-white text-sm text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:px-2.5 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
-                >
-                  ☆
-                  <span className="hidden whitespace-nowrap text-xs font-medium sm:inline">
-                    メニュー登録
-                  </span>
-                </button>
-
-                {/* 列2 下: 原価 (段2-1: 1欄に統合。labor_cost_price 単独で編集、過去データの
-                    parts_cost_price は読み取り時のみフォールバック表示) */}
-                <div className="flex items-center gap-2">
-                  <span
-                    className="w-9 shrink-0 text-[10px] text-zinc-400 dark:text-zinc-500"
-                    title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
+                {/* 操作: 詳細トグル / 行削除 */}
+                <div className="flex items-center gap-1 justify-self-end">
+                  <button
+                    type="button"
+                    onClick={() => toggleDetail(i)}
+                    aria-expanded={detailOpen}
+                    title="原価・定価・業販・マスター登録・補足を表示"
+                    className={`flex h-9 items-center justify-center gap-0.5 rounded-md border px-2 text-xs font-medium transition-colors ${
+                      detailOpen
+                        ? "border-zinc-400 bg-zinc-100 text-zinc-800 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100"
+                        : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    }`}
                   >
-                    原価
-                  </span>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step={1}
-                    value={
-                      r.labor_cost_price !== ""
-                        ? r.labor_cost_price
-                        : r.parts_cost_price
-                    }
-                    onChange={(e) => updateCostPrice(i, e.target.value)}
-                    placeholder="—"
-                    aria-label="原価（社内管理用）"
-                    title="社内管理用（粗利計算）。PDF・印刷物には出ません。"
-                    className={`${cellInputClass} text-right text-[12px] text-zinc-600 dark:text-zinc-400`}
-                  />
+                    詳細
+                    <span aria-hidden className={detailOpen ? "rotate-180" : ""}>
+                      ▾
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(i)}
+                    aria-label="行を削除"
+                    className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                  >
+                    ×
+                  </button>
                 </div>
-
-                {/* 列3 下: 業販 (法人時のみ表示・readonly。行の業販合計＝小計と同じ値) */}
-                {isBusiness ? (
-                  <div>
-                    <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      業販
-                    </div>
-                    <div className="px-2 py-1.5 text-right text-sm text-zinc-700 dark:text-zinc-300">
-                      {formatYen(rowSubtotal(toItem(r, categoryName)))}
-                    </div>
-                  </div>
-                ) : (
-                  <div aria-hidden />
-                )}
-
-                {/* 列4 下: 参考定価 (法人時のみ表示・readonly。list_price × quantity)
-                    list_price 未保存（過去明細など）の行は「—」表示 */}
-                {isBusiness ? (
-                  <div>
-                    <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      参考定価
-                    </div>
-                    <div className="px-2 py-1.5 text-right text-sm text-zinc-500 dark:text-zinc-400">
-                      {(() => {
-                        const lp = Number(r.list_price);
-                        const qty = Number(r.quantity);
-                        if (
-                          !Number.isFinite(lp) ||
-                          lp <= 0 ||
-                          !Number.isFinite(qty) ||
-                          qty <= 0
-                        ) {
-                          return "—";
-                        }
-                        return formatYen(Math.round(qty * lp));
-                      })()}
-                    </div>
-                  </div>
-                ) : (
-                  <div aria-hidden />
-                )}
-
-                {/* 列5 下: 小計（ラベル上 / 値表示） */}
-                <div>
-                  <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    小計
-                  </div>
-                  <div className="px-2 py-1.5 text-right text-sm font-bold text-zinc-900 dark:text-zinc-50">
-                    {formatYen(rowSubtotal(toItem(r, categoryName)))}
-                  </div>
-                </div>
-
-                {/* 列6 下: × ボタン */}
-                <button
-                  type="button"
-                  onClick={() => remove(i)}
-                  aria-label="行を削除"
-                  className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 sm:justify-self-end dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
-                >
-                  ×
-                </button>
               </div>
 
-              {/* 補足（折りたたみ）: グリッド外 / # 列幅 + gap = 36px インデント */}
-              <div className="mt-1.5 pl-9">
-                {noteOpen ? (
-                  <div className="space-y-1">
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => toggleNote(i)}
-                        className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
-                      >
-                        × 補足を閉じる
-                      </button>
+              {/* 行の小計（右寄せ・控えめ）。合計は下のサマリーに集約。 */}
+              <div className="mt-0.5 pr-1 text-right text-[11px] text-zinc-500 dark:text-zinc-400">
+                小計 {formatYen(rowSubtotal(rowItem))}
+              </div>
+
+              {/* 段階2: 詳細パネル（原価・定価・業販・この行をマスター登録・補足）。
+                  税区分はここに出さない（既存の税区分ロジックは維持）。すべて既存フィールドで完結し、
+                  金額計算・保存・PDF・在庫連携には影響しない。 */}
+              {detailOpen && (
+                <div className="mt-2 space-y-3 rounded-md border border-dashed border-zinc-300 bg-zinc-50/70 p-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {/* 原価（社内用・帳票非表示）。labor_cost_price 単独編集、過去の parts_cost_price はフォールバック表示。 */}
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        原価（社内用）
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={1}
+                        value={
+                          r.labor_cost_price !== ""
+                            ? r.labor_cost_price
+                            : r.parts_cost_price
+                        }
+                        onChange={(e) => updateCostPrice(i, e.target.value)}
+                        placeholder="—"
+                        aria-label="原価（社内管理用）"
+                        className={`${cellInputClass} text-right`}
+                      />
+                      <p className="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-500">
+                        粗利計算用。見積書・請求書には出ません。
+                      </p>
                     </div>
-                    <textarea
-                      value={r.note}
-                      onChange={(e) =>
-                        update(i, { note: e.target.value })
-                      }
-                      rows={2}
-                      placeholder="補足（任意）"
-                      aria-label="補足"
-                      className={`${cellInputClass} min-h-12 resize-y`}
-                    />
+
+                    {/* 定価（1個あたりの参考定価）。法人受注の「参考定価」列・合計に使う。 */}
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        定価
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={1}
+                        value={r.list_price}
+                        onChange={(e) =>
+                          update(i, { list_price: e.target.value })
+                        }
+                        placeholder="—"
+                        aria-label="定価（1個あたり）"
+                        className={`${cellInputClass} text-right`}
+                      />
+                      <p className="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-500">
+                        法人受注の「参考定価」列・合計に使います。
+                      </p>
+                    </div>
+
+                    {/* 業販（法人=金額が業販価格 / 個人=金額が定価）。金額の編集は上の「金額」欄で行う。 */}
+                    <div>
+                      <label className="mb-0.5 flex items-center justify-between gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        <span>業販</span>
+                        <PriceKindBadge isBusiness={isBusiness} />
+                      </label>
+                      {isBusiness ? (
+                        <>
+                          <div className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-right text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                            {formatYen(rowSubtotal(rowItem))}
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-500">
+                            金額（業販単価）× 数量。単価は上の「金額」で編集します。
+                          </p>
+                        </>
+                      ) : (
+                        <p className="rounded-md border border-dashed border-zinc-200 px-2 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                          この受注は個人（定価）です。「金額」が定価として入っています。
+                        </p>
+                      )}
+                    </div>
                   </div>
-                ) : (
-                  <div className="flex justify-end">
+
+                  {/* この行をマスター登録（既存の☆導線を流用）＋ 補足トグル */}
+                  <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-2 dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => onRegisterRow(categoryId, i)}
+                      title={
+                        r.source_menu_id
+                          ? "現在の内容で別のマスターとして登録"
+                          : "この行を作業メニューマスターに登録"
+                      }
+                      className="flex h-8 items-center gap-1 rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
+                    >
+                      ☆ この行をマスター登録
+                    </button>
                     <button
                       type="button"
                       onClick={() => toggleNote(i)}
                       className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
                     >
-                      ＋ 補足
+                      {noteOpen ? "× 補足を閉じる" : "＋ 補足"}
                     </button>
                   </div>
-                )}
-              </div>
+
+                  {noteOpen && (
+                    <textarea
+                      value={r.note}
+                      onChange={(e) => update(i, { note: e.target.value })}
+                      rows={2}
+                      placeholder="補足（任意・帳票の品名下に小さく表示されます）"
+                      aria-label="補足"
+                      className={`${cellInputClass} min-h-12 resize-y`}
+                    />
+                  )}
+                </div>
+              )}
                     </>
                   )}
                 </SortableItemRow>
