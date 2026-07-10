@@ -472,6 +472,30 @@ const cellInputClass =
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
+// 明細作り直し 段階1 (2026-07-11): 各行の単価が「業販」か「定価」かを示す控えめなバッジ。
+// 判定は受注の顧客区分のみ（business=業販 / personal・未設定=定価）。これは表示専用で、
+// 金額の値・計算・保存・PDF・在庫連携には一切影響しない（バッジを足すだけ）。
+//   ※ 部品行は二階建て価格解決で business=業販価格 / personal=定価が既に unit_price に入る。
+//   ※ 作業行も rowFromMenu で business かつ markup_rate 有りなら業販価格が入る（無ければ定価のまま）。
+//     バッジ基準は受注の顧客区分に統一する（行ごとの掛け率有無では出し分けない）。
+function PriceKindBadge({ isBusiness }: { isBusiness: boolean }) {
+  return isBusiness ? (
+    <span
+      className="rounded bg-orange-100 px-1 py-0.5 text-[9px] font-medium leading-none text-orange-700 dark:bg-orange-950/60 dark:text-orange-300"
+      title="業者価格（業販）で入っている金額です"
+    >
+      業販
+    </span>
+  ) : (
+    <span
+      className="rounded bg-zinc-200 px-1 py-0.5 text-[9px] font-medium leading-none text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+      title="通常価格（定価）で入っている金額です"
+    >
+      定価
+    </span>
+  );
+}
+
 export default function ItemsForm({
   action,
   initialItems,
@@ -1432,8 +1456,10 @@ function ItemTableEditor({
 
                 {/* 列5 上: 単価 (段2-1: 常時編集可能。1個あたりの売値=業販単価) */}
                 <div>
-                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    単価
+                  {/* 明細作り直し 段階1: 単価が業販/定価どちらかを示すバッジ（表示のみ）。 */}
+                  <label className="mb-0.5 flex items-center justify-between gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    <span>単価</span>
+                    <PriceKindBadge isBusiness={isBusiness} />
                   </label>
                   <input
                     type="number"
