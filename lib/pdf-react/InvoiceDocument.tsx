@@ -14,7 +14,7 @@ import {
   calculateTotals,
   rowSubtotal,
 } from "@/lib/orders/totals";
-import { groupItemsByCategory } from "@/lib/orders/sections";
+import { groupItemsByCategory, toDisplayUnits } from "@/lib/orders/sections";
 import type {
   BankInfo,
   Customer,
@@ -518,7 +518,61 @@ function ItemsSection({ title, items, isBusiness }: ItemsSectionProps) {
           <Text style={styles.colSubtotal}>小計</Text>
         )}
       </View>
-      {items.map((it, i) => {
+      {/* 段階3: 「1行にまとめる」= 表示結合。作業行＋部品行を1行に畳んで描画する。
+          既存の列（品名/数量/単価/小計）はそのまま。まとめOFF行は従来どおり単独描画。
+          react-pdf のページ跨ぎは wrap={false} で各行を分割不可にし、複数行セル
+          （work_name+part_name+内訳）でも崩れないようにする（既存の複数行セルと同じ流儀）。 */}
+      {toDisplayUnits(items).map((u, i) => {
+        if (u.kind === "merged") {
+          const { work, part } = u;
+          const workSub = rowSubtotal(work);
+          const partSub = rowSubtotal(part);
+          const combined = workSub + partSub;
+          const partName =
+            part.part_name && part.part_name.trim() !== ""
+              ? part.part_name
+              : null;
+          const note =
+            work.note && work.note.trim() !== "" ? work.note : null;
+          // 参考定価は作業・部品それぞれの list_price×数量 を合算。両方無ければ「—」。
+          const wLp = (work.list_price ?? 0) * (work.quantity ?? 0);
+          const pLp = (part.list_price ?? 0) * (part.quantity ?? 0);
+          const refCombined = wLp + pLp > 0 ? wLp + pLp : null;
+          return (
+            <View key={`${title}-m-${i}`} style={styles.tableRow} wrap={false}>
+              {/* 品名セル: 作業名 + 部品名（両方表示）+ 工賃/部品代の内訳。 */}
+              <View style={colNameStyle}>
+                <Text>{sanitizeText(work.work_name)}</Text>
+                {partName && (
+                  <Text style={styles.itemPartName}>
+                    {sanitizeText(partName)}
+                  </Text>
+                )}
+                <Text style={styles.itemNote}>
+                  工賃 {formatYen(workSub)} ／ 部品代 {formatYen(partSub)}
+                </Text>
+                {note && (
+                  <Text style={styles.itemNote}>※{sanitizeText(note)}</Text>
+                )}
+              </View>
+              {/* 数量・単価は結合行では 2 成分を畳むため空欄（小計に合算表示）。 */}
+              <Text style={colQtyStyle}> </Text>
+              <Text style={colUnitStyle}> </Text>
+              {isBusiness ? (
+                <>
+                  <Text style={styles.colBulk}>{formatYen(combined)}</Text>
+                  <Text style={styles.colListPrice}>
+                    {refCombined !== null ? formatYen(refCombined) : "—"}
+                  </Text>
+                </>
+              ) : (
+                <Text style={styles.colSubtotal}>{formatYen(combined)}</Text>
+              )}
+            </View>
+          );
+        }
+
+        const it = u.item;
         const partName =
           it.part_name && it.part_name.trim() !== "" ? it.part_name : null;
         const note = it.note && it.note.trim() !== "" ? it.note : null;

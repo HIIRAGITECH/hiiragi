@@ -119,6 +119,31 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-07-11 ── 明細作り直し 段階3：1行にまとめる（表示結合・作業1＋部品1・DB変更なし・本番反映）
+
+**位置づけ**
+- 明細作り直しの**最終段階3**。「1行にまとめる」を**表示結合**方式で実装（段階1バッジ・段階2簡易入力＋詳細に続く）。
+
+**DB変更の要否（結論：不要・jsonb内で完結）**
+- グルーピング識別子 `uid`（親作業行）・`parent_uid`（子部品行→親の uid）を **`orders.items` jsonb 内のキーとして追加**。`orders.items` は plain jsonb・CHECK制約0・triggerは `assign_order_id`/`touch_updated_at` のみでキーを検査しない、と本番で確認。よって **DDL・データ移行・prod手動SQL は一切不要**（過去の `list_price`/`indirect_materials` 追加と同じ流儀）。**DB先・コード後は該当せず、コードのみ push**。
+
+**表示結合の設計（データは別行のまま＝計算・在庫無改修）**
+- 作業行・部品行は**データ上ずっと別々の行**（各自の kind・金額・原価・在庫リンクを保持）。画面・PDF の**表示時だけ** `parent_uid`→`uid` の対応を解決して1行に結合。ゆえに `calculateTotals/Profit/ListPrice` も在庫RPC（reserve/consume）も**完全無改修**。
+- 共通ヘルパ `toDisplayUnits(items)`（`lib/orders/sections.ts`）で OrderItem[] を `single | merged{work,part}` の表示単位に畳む。**親が実在する子だけ結合**（親を消した/名前を空にした孤児は単独表示へフォールバック＝画面とPDFで判定一致）。作業1つにつき結合部品は**先頭1つのみ**（作業1＋部品1）。
+- 識別子は UI 側 `_uid`（"row_N" 連番）を安定 ID として流用。保存時、**子から参照された作業行にだけ** `uid` を、**結合部品行に** `parent_uid` を焼き付ける（まとめOFF行は一切付けない＝既存明細と同一形・**後方互換/無損失**）。読込時 `seedRowUidCounter` で保存済み uid の最大 N までカウンタを進め、新規 uid の衝突を防止。
+
+**編集UI（items-form.tsx）**
+- 作業行（種別=作業）の詳細に「🔗 この作業に部品を1つまとめる」チェック。ONで作業行の直後に空の部品子行を挿入し、**結合行（他店式）**として `[#][作業内容][部品名][工賃][部品代][詳細/×]`＋下段に「小計（工賃＋部品代の合算・表示のみ）＋業販/定価バッジ」を描画。**作業名と部品名を両方表示**（小野寺確認済み）。詳細に工賃原価/部品原価/作業数量/部品数量/「まとめ解除」/マスター登録/補足。
+- **まとめ解除**＝子の parent_uid を外して別行に戻す（データは元から別なので無損失）。結合行の×は作業＋部品を両方削除。**D&D は表示単位で動かし結合部品は親に追従**（units ベースに再実装）。部品在庫からの追加は従来どおり別行（自店式・複数可）。
+- **判断**：結合する子部品は当面「手入力部品」（在庫リンクなし）。在庫連携したい部品は従来どおり「部品在庫から追加」で別行（自店式）にすると reserve/consume が効く。混同を避けるためこの切り分けにした。
+
+**PDF・印刷HTML（慎重対応）**
+- react-pdf（`InvoiceDocument.tsx`）と印刷HTML（`printable-document.tsx`）の両方で `toDisplayUnits` を使い結合描画。**既存の列（品名/数量/単価/小計、法人は業販/参考定価）を一切変えず**、結合行は品名セルに「作業名＋部品名＋『工賃¥X／部品代¥Y』内訳」を積み、数量・単価は空欄、小計＝工賃＋部品代の合算を表示。**列レイアウトを増やさない**ことで react-pdf のページ跨ぎ崩れリスクを回避（既存の複数行セル＝work_name+part_name+note と同じ `wrap={false}` の実績挙動に乗せる）。まとめOFF行は従来どおり。
+- **PDFの実物確認は小野寺氏が本番で必須**（見積・納品・請求、個人/法人、複数ページ）。
+
+**スコープ/検証**
+- 変更：`lib/types.ts`（OrderItem += uid/parent_uid）・`lib/orders/sections.ts`（toDisplayUnits）・`actions.ts`（parseItems で read/persist）・`items-form.tsx`（結合UI・units D&D）・`InvoiceDocument.tsx`・`printable-document.tsx`。新ブランチ `feature/meisai-stage3-merge-row`。`tsc --noEmit`／`eslint`（対象）／`next build`（✓ Compiled・34/34）通過。DB変更なしのためコードのみ main へ ff。
+
 ### 2026-07-11 ── 明細作り直し 段階2：手入力を主役に、簡易入力＋「詳細」展開（DB変更なし・本番反映）
 
 **位置づけ**

@@ -239,6 +239,15 @@ function parseItems(
         if (!Number.isFinite(n) || n < 0) return null;
         item.list_price = Math.round(n);
       }
+      // 明細作り直し 段階3: 表示結合のグルーピング識別子（jsonb 内で完結・DDL 不要）。
+      //   uid = 親（作業行）の安定 ID、parent_uid = 子（部品行）が指す親の uid。
+      //   計算・在庫では参照しない（表示・PDF の結合にのみ使う）。空文字は省略。
+      if (typeof r?.uid === "string" && r.uid.trim() !== "") {
+        item.uid = r.uid.trim();
+      }
+      if (typeof r?.parent_uid === "string" && r.parent_uid.trim() !== "") {
+        item.parent_uid = r.parent_uid.trim();
+      }
       if (typeof r?.part_name === "string") {
         const v = r.part_name.trim();
         item.part_name = v === "" ? null : v;

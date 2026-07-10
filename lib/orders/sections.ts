@@ -24,6 +24,46 @@ export type OrderSection = {
   items: OrderItem[];
 };
 
+// 明細作り直し 段階3: 「1行にまとめる」（表示結合）のための表示単位。
+//   single = 単独行（従来どおり）。merged = 作業行 + 部品行1つを1行に結合して見せる。
+// データは別行のまま。ここでは「表示のときだけ」親子を1単位に畳む。計算・在庫には一切使わない。
+export type DisplayUnit =
+  | { kind: "single"; item: OrderItem }
+  | { kind: "merged"; work: OrderItem; part: OrderItem };
+
+// OrderItem[] を表示単位（DisplayUnit[]）に畳む。並び順は入力の順序を保つ。
+//   ・parent_uid を持つ部品行は、同じ配列内で uid が一致する作業行（親）に結合する。
+//   ・1 作業につき結合する部品は最初の 1 つだけ（作業1＋部品1の制約。余剰は単独表示）。
+//   ・親が見つからない部品行（孤児）や parent_uid 無しの行は従来どおり単独表示（後方互換）。
+export function toDisplayUnits(items: OrderItem[]): DisplayUnit[] {
+  const byUid = new Map<string, OrderItem>();
+  for (const it of items) {
+    if (typeof it.uid === "string" && it.uid !== "") byUid.set(it.uid, it);
+  }
+  // parentUid -> 結合する子の index（先頭の1つのみ）。
+  const childIndexByParent = new Map<string, number>();
+  const consumed = new Set<number>();
+  items.forEach((it, idx) => {
+    const puid = typeof it.parent_uid === "string" ? it.parent_uid : "";
+    if (!puid || !byUid.has(puid)) return; // 孤児 or まとめ無しは単独
+    if (childIndexByParent.has(puid)) return; // すでに1つ結合済み → 余剰は単独表示
+    childIndexByParent.set(puid, idx);
+    consumed.add(idx);
+  });
+  const units: DisplayUnit[] = [];
+  items.forEach((it, idx) => {
+    if (consumed.has(idx)) return; // 子は親と一緒に描画するのでスキップ
+    const uid = typeof it.uid === "string" ? it.uid : "";
+    const childIdx = uid ? childIndexByParent.get(uid) : undefined;
+    if (childIdx !== undefined) {
+      units.push({ kind: "merged", work: it, part: items[childIdx] });
+    } else {
+      units.push({ kind: "single", item: it });
+    }
+  });
+  return units;
+}
+
 // 旧 type/tax_free からカテゴリ名を推定（item_category_id 欠損時のフォールバック用）。
 function legacyCategoryNameFromOldFields(item: OrderItem): string {
   if (item.type === "shaken" && item.tax_free === true) return "車検法定費用";

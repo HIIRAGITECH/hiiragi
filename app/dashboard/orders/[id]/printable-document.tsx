@@ -12,7 +12,7 @@ import {
   calculateTotals,
   rowSubtotal,
 } from "@/lib/orders/totals";
-import { groupItemsByCategory } from "@/lib/orders/sections";
+import { groupItemsByCategory, toDisplayUnits } from "@/lib/orders/sections";
 import { formatDate, formatYen } from "@/lib/format";
 
 function hasBankInfo(b: BankInfo | undefined): b is BankInfo {
@@ -416,7 +416,63 @@ function ItemsSection({
           </tr>
         </thead>
         <tbody>
-          {items.map((it, i) => {
+          {/* 段階3: 「1行にまとめる」= 表示結合。作業行＋部品行を1行に畳んで描画。
+              まとめOFF行は従来どおり単独描画。列（品名/数量/単価/小計）は不変。 */}
+          {toDisplayUnits(items).map((u, i) => {
+            if (u.kind === "merged") {
+              const { work, part } = u;
+              const workSub = rowSubtotal(work);
+              const partSub = rowSubtotal(part);
+              const combined = workSub + partSub;
+              const partName =
+                part.part_name && part.part_name.trim() !== ""
+                  ? part.part_name
+                  : null;
+              const note =
+                work.note && work.note.trim() !== "" ? work.note : null;
+              const wLp = (work.list_price ?? 0) * (work.quantity ?? 0);
+              const pLp = (part.list_price ?? 0) * (part.quantity ?? 0);
+              const refCombined = wLp + pLp > 0 ? wLp + pLp : null;
+              return (
+                <tr
+                  key={`m-${i}`}
+                  className="border-b border-zinc-500 [&>td]:align-top"
+                >
+                  <td className="px-2 py-1 break-words">
+                    <div>{work.work_name}</div>
+                    {partName && (
+                      <div className="ml-3 break-words">{partName}</div>
+                    )}
+                    <div className="ml-3 break-words text-[10px] text-zinc-500">
+                      工賃 {formatYen(workSub)} ／ 部品代 {formatYen(partSub)}
+                    </div>
+                    {note && (
+                      <div className="ml-3 break-words text-[10px] text-zinc-500">
+                        ※{note}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1 text-right"></td>
+                  <td className="px-2 py-1 text-right"></td>
+                  {isBusiness ? (
+                    <>
+                      <td className="px-2 py-1 text-right">
+                        {formatYen(combined)}
+                      </td>
+                      <td className="px-2 py-1 text-right text-zinc-500">
+                        {refCombined !== null ? formatYen(refCombined) : "—"}
+                      </td>
+                    </>
+                  ) : (
+                    <td className="px-2 py-1 text-right">
+                      {formatYen(combined)}
+                    </td>
+                  )}
+                </tr>
+              );
+            }
+
+            const it = u.item;
             const partName =
               it.part_name && it.part_name.trim() !== ""
                 ? it.part_name

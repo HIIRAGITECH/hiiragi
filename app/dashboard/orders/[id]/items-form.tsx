@@ -174,6 +174,8 @@ function rowFromMenu(
     // 業販対応 段2-1: 参考定価は掛け率をかける前の素の売値 (baseAmount)。
     // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
     list_price: baseAmount > 0 ? String(baseAmount) : "",
+    // 段階3: メニュー由来は既定でまとめOFF（単独作業行）。
+    parent_uid: "",
     _uid: nextRowUid(),
   };
 }
@@ -228,6 +230,8 @@ function rowFromPart(
     // 業販対応 段2-1: 参考定価は掛け率をかける前の素の定価 (listPrice)。
     // 法人時の「参考定価」列で表示。個人時は表示しないが保存はしておく。
     list_price: listPrice > 0 ? String(listPrice) : "",
+    // 段階3: 部品在庫からの追加は既定でまとめOFF（別行＝自店式）。まとめは作業行側のチェックで行う。
+    parent_uid: "",
     _uid: nextRowUid(),
   };
 }
@@ -307,6 +311,9 @@ type ItemRow = {
   item_category_id: string;
   // 業販対応 段2-1: 1個あたりの参考定価 (法人受注のみ表示)。空文字 = 未保存（過去明細）。
   list_price: string;
+  // 明細作り直し 段階3: 「1行にまとめる」で親作業行に結合されている部品行が持つ、
+  //   親作業行の _uid。空文字 = まとめOFF（単独行）。保存時は OrderItem.parent_uid に落とす。
+  parent_uid: string;
   // UI 専用: 「+ 補足」ボタンで明示的に展開した行で true。
   // note に値がある行は自動展開なのでこのフラグを見ない。保存対象外。
   _noteExpanded?: boolean;
@@ -324,6 +331,20 @@ let _rowUidCounter = 0;
 function nextRowUid(): string {
   _rowUidCounter += 1;
   return `row_${_rowUidCounter}`;
+}
+
+// 段階3: 保存済み uid（"row_N"）を復元する受注では、その最大 N までカウンタを進めておき、
+// 以降 nextRowUid() が生成する新規 uid が既存 uid と衝突しないようにする。
+// （まとめの親子リンクは uid 一致で解決するため、衝突は致命的。初期化時に一度だけ呼ぶ。）
+function seedRowUidCounter(items: OrderItem[]): void {
+  for (const it of items) {
+    const uid = it.uid;
+    if (typeof uid !== "string") continue;
+    const m = /^row_(\d+)$/.exec(uid);
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > _rowUidCounter) _rowUidCounter = n;
+  }
 }
 
 // 工賃 / 部品代の少なくとも片方に値が入っているか（= 単価が自動計算モード）
@@ -382,7 +403,12 @@ function toRow(i: OrderItem, allCategories: WorkItemCategory[]): ItemRow {
       i.list_price !== undefined && i.list_price > 0
         ? String(i.list_price)
         : "",
-    _uid: nextRowUid(),
+    // 段階3: まとめ結合の親参照。子（部品行）が持つ。無ければ空文字（まとめOFF）。
+    parent_uid: typeof i.parent_uid === "string" ? i.parent_uid : "",
+    // 段階3: 保存済み uid があれば _uid として復元（親の同一性を維持し、子の parent_uid と一致させる）。
+    // 無ければ新規採番。seedRowUidCounter 済みなので新規 uid は既存 uid と衝突しない。
+    _uid:
+      typeof i.uid === "string" && i.uid !== "" ? i.uid : nextRowUid(),
   };
 }
 
@@ -466,6 +492,7 @@ const emptyRow = (
   tax_category: taxCategory,
   item_category_id: itemCategoryId,
   list_price: "",
+  parent_uid: "",
   _uid: nextRowUid(),
 });
 
@@ -596,6 +623,9 @@ export default function ItemsForm({
   // 初期 state: 既存 items を category id 単位の Record に振り分ける。
   // カテゴリ未登録（極端なケース）でも壊れないようフォールバック空オブジェクトで初期化。
   const [rowsByCat, setRowsByCat] = useState<Record<string, ItemRow[]>>(() => {
+    // 段階3: まとめの親子リンク（uid / parent_uid）を復元する前に、保存済み uid の最大値まで
+    // カウンタを進めて新規 uid の衝突を防ぐ。
+    seedRowUidCounter(initialItems);
     const split = splitByCategory(initialItems, allCategories);
     // 何も無い受注（新規）の場合、最初のカテゴリに空 1 行を置いて即入力できる UX に。
     if (initialItems.length === 0 && allCategories.length > 0) {
@@ -784,11 +814,29 @@ export default function ItemsForm({
   // 全セクションの item 配列を組み立てて totals 計算 & 保存 JSON を作る。
   // 並び順は sectionOrder で確定（display_order 昇順 + orphan 末尾）。
   const allItems: OrderItem[] = useMemo(() => {
+    // 段階3: どの作業行が「子を持つ親」かを先に確定する。
+    //   親作業行にだけ uid を焼き付け、子部品行に parent_uid を焼き付ける。
+    //   まとめに関与しない行には一切付けない（＝既存明細と同一形・後方互換）。
+    const referencedParents = new Set<string>();
+    for (const catId of sectionOrder) {
+      for (const r of rowsByCat[catId] ?? []) {
+        if (r.parent_uid && r.parent_uid !== "") {
+          referencedParents.add(r.parent_uid);
+        }
+      }
+    }
     const out: OrderItem[] = [];
     for (const catId of sectionOrder) {
       const list = rowsByCat[catId] ?? [];
       const name = categoryNameById.get(catId) ?? null;
-      for (const r of list) out.push(toItem(r, name));
+      for (const r of list) {
+        const it = toItem(r, name);
+        // 親: 子から参照されている作業行にだけ uid を付ける。
+        if (r._uid && referencedParents.has(r._uid)) it.uid = r._uid;
+        // 子: まとめ結合されている部品行に parent_uid を付ける。
+        if (r.parent_uid && r.parent_uid !== "") it.parent_uid = r.parent_uid;
+        out.push(it);
+      }
     }
     return out;
   }, [sectionOrder, rowsByCat, categoryNameById]);
@@ -1390,26 +1438,108 @@ function ItemTableEditor({
     );
   }
 
+  // ── 段階3: 「1行にまとめる」（表示結合） ──────────────────────────────
+  // 部品行(kind=part)が parent_uid で作業行(_uid)を指すと、その2行を1行に結合して表示する。
+  // データは別行のまま（計算・在庫は不変）。作業1つに結合できる部品は1つだけ。
+  //   parentUid -> 結合する子部品行の index（先頭の1つのみ）。
+  //   親作業行が実在する場合のみ結合する（親を消した/名前を空にした孤児は単独表示に戻す。
+  //   lib/orders/sections.ts の toDisplayUnits と同じ判定にして画面・PDF を一致させる）。
+  const uidPresent = new Set<string>();
+  for (const r of rows) if (r._uid) uidPresent.add(r._uid);
+  const childIndexByParentUid = new Map<string, number>();
+  rows.forEach((r, idx) => {
+    const p = r.parent_uid;
+    if (p && p !== "" && uidPresent.has(p) && !childIndexByParentUid.has(p)) {
+      childIndexByParentUid.set(p, idx);
+    }
+  });
+  const childIndices = new Set<number>(childIndexByParentUid.values());
+
+  // 表示単位。single = 単独行、merged = 作業行 + 結合部品行1つ。
+  type RenderUnit =
+    | { kind: "single"; row: ItemRow; index: number }
+    | {
+        kind: "merged";
+        work: ItemRow;
+        workIndex: number;
+        part: ItemRow;
+        partIndex: number;
+      };
+  const units: RenderUnit[] = [];
+  rows.forEach((r, idx) => {
+    if (childIndices.has(idx)) return; // 子は親と一緒に描画するのでスキップ
+    const childIdx = r._uid ? childIndexByParentUid.get(r._uid) : undefined;
+    const child = childIdx !== undefined ? rows[childIdx] : undefined;
+    if (childIdx !== undefined && child) {
+      units.push({
+        kind: "merged",
+        work: r,
+        workIndex: idx,
+        part: child,
+        partIndex: childIdx,
+      });
+    } else {
+      units.push({ kind: "single", row: r, index: idx });
+    }
+  });
+  function unitId(u: RenderUnit): string {
+    return u.kind === "merged"
+      ? (u.work._uid ?? `idx_${u.workIndex}`)
+      : (u.row._uid ?? `idx_${u.index}`);
+  }
+
+  // 作業行に空の部品行を1つ付けて「まとめる」。作業行の直後に挿入する。
+  function addMergedPart(workIndex: number) {
+    const work = rows[workIndex];
+    if (!work?._uid) return;
+    if (childIndexByParentUid.has(work._uid)) return; // すでに部品あり（作業1+部品1）
+    const child: ItemRow = {
+      ...emptyRow(work.item_category_id || categoryId, work.tax_category),
+      kind: "part",
+      parent_uid: work._uid,
+    };
+    const next = [...rows];
+    next.splice(workIndex + 1, 0, child);
+    onChange(next);
+  }
+  // まとめ解除: 子部品行の parent_uid を外して単独行に戻す（データは元から別行なので残る）。
+  function unmerge(workUid: string | undefined) {
+    if (!workUid) return;
+    onChange(
+      rows.map((r) => (r.parent_uid === workUid ? { ...r, parent_uid: "" } : r)),
+    );
+  }
+  // 結合ユニットごと削除（作業行＋結合部品行の両方を消す）。
+  function removeMerged(workIndex: number, partIndex: number) {
+    onChange(rows.filter((_, idx) => idx !== workIndex && idx !== partIndex));
+  }
+
   // カテゴリ内ドラッグ並べ替え（@dnd-kit、部品一覧と同じパターン）。各カテゴリの ItemTableEditor が
   // 独立した DndContext を持つため、ドラッグはこのカテゴリ内に限定される（カテゴリまたぎ不可）。
-  // 並び替え結果は rows 配列の順序として onChange で親に返し、既存の保存フロー（items_json →
-  // 「内容を保存」）にそのまま乗る。リロード後は order.items の配列順で復元される。
+  // 段階3: 並べ替えは「表示単位（units）」を動かし、結合部品行は親作業行に連れて移動する。
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  function rowId(r: ItemRow, i: number): string {
-    return r._uid ?? `idx_${i}`;
-  }
   function handleDragEnd(e: DragEndEvent) {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const oldI = rows.findIndex((r, i) => rowId(r, i) === active.id);
-    const newI = rows.findIndex((r, i) => rowId(r, i) === over.id);
+    const oldI = units.findIndex((u) => unitId(u) === active.id);
+    const newI = units.findIndex((u) => unitId(u) === over.id);
     if (oldI < 0 || newI < 0) return;
-    onChange(arrayMove(rows, oldI, newI));
+    const moved = arrayMove(units, oldI, newI);
+    const flat: ItemRow[] = [];
+    for (const u of moved) {
+      if (u.kind === "merged") {
+        flat.push(u.work);
+        flat.push(u.part);
+      } else {
+        flat.push(u.row);
+      }
+    }
+    onChange(flat);
   }
 
   return (
@@ -1425,12 +1555,286 @@ function ItemTableEditor({
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={rows.map((r, i) => rowId(r, i))}
+            items={units.map((u) => unitId(u))}
             strategy={verticalListSortingStrategy}
           >
-            {rows.map((r, i) => {
-              // 偶数行（i=1,3,5...）にゼブラ背景。
-              const zebra = i % 2 === 1;
+            {units.map((u, uPos) => {
+              const id = unitId(u);
+              // 表示単位ごとにゼブラ・連番（結合ユニットは1つとして数える）。
+              const zebra = uPos % 2 === 1;
+
+              // ── 結合ユニット（作業1＋部品1を1行表示・他店式） ──
+              if (u.kind === "merged") {
+                const { work, workIndex, part, partIndex } = u;
+                const workSub = rowSubtotal(toItem(work, categoryName));
+                const partSub = rowSubtotal(toItem(part, categoryName));
+                const mergedNoteOpen =
+                  work.note !== "" || work._noteExpanded === true;
+                const mergedDetailOpen =
+                  work._detailOpen === true || mergedNoteOpen;
+                return (
+                  <SortableItemRow key={id} id={id} zebra={zebra}>
+                    {(handle) => (
+                      <>
+                        {/* 段階3: 結合行（他店式）: [#][作業内容][部品名][工賃][部品代][詳細/×]、小計は下段。
+                            作業名・部品名を両方表示する。 */}
+                        <div className="grid items-end gap-x-2 gap-y-1 grid-cols-[24px_minmax(0,1fr)_minmax(0,1fr)_60px_60px_auto] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_82px_82px_auto]">
+                          <div className="mb-0.5 flex flex-col items-center gap-0.5">
+                            <button
+                              type="button"
+                              aria-label="ドラッグして並べ替え"
+                              title="ドラッグで並べ替え（同カテゴリ内）"
+                              className="inline-flex h-8 w-6 cursor-grab items-center justify-center rounded bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300"
+                              {...handle.attributes}
+                              {...handle.listeners}
+                            >
+                              {uPos + 1}
+                            </button>
+                            <span
+                              className="rounded bg-emerald-100 px-1 text-[9px] font-medium leading-tight text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                              title="作業と部品を1行にまとめて表示しています"
+                            >
+                              まとめ
+                            </span>
+                          </div>
+
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                              作業内容
+                            </label>
+                            <input
+                              value={work.name}
+                              onChange={(e) =>
+                                updateName(workIndex, e.target.value)
+                              }
+                              placeholder="作業内容"
+                              aria-label="作業内容"
+                              className={cellInputClass}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                              部品名
+                            </label>
+                            <input
+                              value={part.part_name}
+                              onChange={(e) =>
+                                updateName(partIndex, e.target.value)
+                              }
+                              placeholder="部品名"
+                              aria-label="部品名"
+                              className={cellInputClass}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                              工賃
+                            </label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              step={1}
+                              value={work.unit_price}
+                              onChange={(e) =>
+                                updateUnitPrice(workIndex, e.target.value)
+                              }
+                              placeholder="—"
+                              aria-label="工賃"
+                              className={`${cellInputClass} text-right`}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                              部品代
+                            </label>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={0}
+                              step={1}
+                              value={part.unit_price}
+                              onChange={(e) =>
+                                updateUnitPrice(partIndex, e.target.value)
+                              }
+                              placeholder="—"
+                              aria-label="部品代"
+                              className={`${cellInputClass} text-right`}
+                            />
+                          </div>
+
+                          <div className="flex items-center gap-1 justify-self-end">
+                            <button
+                              type="button"
+                              onClick={() => toggleDetail(workIndex)}
+                              aria-expanded={mergedDetailOpen}
+                              title="原価・数量・まとめ解除・補足を表示"
+                              className={`flex h-9 items-center justify-center gap-0.5 rounded-md border px-2 text-xs font-medium transition-colors ${
+                                mergedDetailOpen
+                                  ? "border-zinc-400 bg-zinc-100 text-zinc-800 dark:border-zinc-500 dark:bg-zinc-800 dark:text-zinc-100"
+                                  : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                              }`}
+                            >
+                              詳細
+                              <span
+                                aria-hidden
+                                className={mergedDetailOpen ? "rotate-180" : ""}
+                              >
+                                ▾
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeMerged(workIndex, partIndex)}
+                              aria-label="この結合行を削除"
+                              className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 小計（工賃＋部品代の合算・表示のみ）＋業販/定価バッジ */}
+                        <div className="mt-0.5 flex items-center justify-end gap-1 pr-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                          <PriceKindBadge isBusiness={isBusiness} />
+                          <span>小計 {formatYen(workSub + partSub)}</span>
+                        </div>
+
+                        {mergedDetailOpen && (
+                          <div className="mt-2 space-y-3 rounded-md border border-dashed border-emerald-300 bg-emerald-50/50 p-3 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  工賃原価（社内用）
+                                </label>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={0}
+                                  step={1}
+                                  value={
+                                    work.labor_cost_price !== ""
+                                      ? work.labor_cost_price
+                                      : work.parts_cost_price
+                                  }
+                                  onChange={(e) =>
+                                    updateCostPrice(workIndex, e.target.value)
+                                  }
+                                  placeholder="—"
+                                  aria-label="工賃原価（社内管理用）"
+                                  className={`${cellInputClass} text-right`}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  部品原価（社内用）
+                                </label>
+                                <input
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={0}
+                                  step={1}
+                                  value={
+                                    part.parts_cost_price !== ""
+                                      ? part.parts_cost_price
+                                      : part.labor_cost_price
+                                  }
+                                  onChange={(e) =>
+                                    updateCostPrice(partIndex, e.target.value)
+                                  }
+                                  placeholder="—"
+                                  aria-label="部品原価（社内管理用）"
+                                  className={`${cellInputClass} text-right`}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  作業数量
+                                </label>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={0}
+                                  step={1}
+                                  value={work.quantity}
+                                  onChange={(e) =>
+                                    update(workIndex, { quantity: e.target.value })
+                                  }
+                                  aria-label="作業数量"
+                                  className={`${cellInputClass} text-center`}
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                  部品数量
+                                </label>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={0}
+                                  step={1}
+                                  value={part.quantity}
+                                  onChange={(e) =>
+                                    update(partIndex, { quantity: e.target.value })
+                                  }
+                                  aria-label="部品数量"
+                                  className={`${cellInputClass} text-center`}
+                                />
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
+                              原価は社内管理用（粗利計算）。見積書・請求書には出ません。
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3 border-t border-emerald-200 pt-2 dark:border-emerald-900/50">
+                              <button
+                                type="button"
+                                onClick={() => unmerge(work._uid)}
+                                className="flex h-8 items-center gap-1 rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                              >
+                                🔗 まとめを解除（別行に戻す）
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onRegisterRow(categoryId, workIndex)}
+                                title="この作業を作業メニューマスターに登録"
+                                className="flex h-8 items-center gap-1 rounded-md border border-amber-200 bg-white px-2.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 dark:border-amber-900 dark:bg-zinc-900 dark:text-amber-400 dark:hover:bg-amber-950"
+                              >
+                                ☆ この作業をマスター登録
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleNote(workIndex)}
+                                className="text-xs text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
+                              >
+                                {mergedNoteOpen ? "× 補足を閉じる" : "＋ 補足"}
+                              </button>
+                            </div>
+                            {mergedNoteOpen && (
+                              <textarea
+                                value={work.note}
+                                onChange={(e) =>
+                                  update(workIndex, { note: e.target.value })
+                                }
+                                rows={2}
+                                placeholder="補足（任意・帳票の品名下に小さく表示されます）"
+                                aria-label="補足"
+                                className={`${cellInputClass} min-h-12 resize-y`}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </SortableItemRow>
+                );
+              }
+
+              // ── 単独行（段階2の簡易入力＋詳細） ──
+              const r = u.row;
+              const i = u.index;
               const noteOpen = r.note !== "" || r._noteExpanded === true;
               // 段階2: 「詳細」パネルの開閉。補足に既存の文言がある行は詳細を自動展開して
               //   （内部に補足を内包するため）中身を隠さない。
@@ -1439,8 +1843,10 @@ function ItemTableEditor({
               const isMaster = r.linked_part_id !== "" || r.source_menu_id !== "";
               // 小計・業販表示に使う OrderItem 換算（表示専用。保存とは無関係）。
               const rowItem = toItem(r, categoryName);
+              // 段階3: 作業行（labor・マスター由来でない）は「1行にまとめる」を選べる。
+              const canMerge = r.kind === "labor";
               return (
-                <SortableItemRow key={rowId(r, i)} id={rowId(r, i)} zebra={zebra}>
+                <SortableItemRow key={id} id={id} zebra={zebra}>
                   {(handle) => (
                     <>
               {/* 段階2: 簡易入力行 = [#] [種別] [名前] [数量] [金額+バッジ] [詳細/×]。
@@ -1456,7 +1862,7 @@ function ItemTableEditor({
                   {...handle.attributes}
                   {...handle.listeners}
                 >
-                  {i + 1}
+                  {uPos + 1}
                 </button>
 
                 {/* 種別（作業/部品）。マスター由来の行は種別が確定なので変更不可。 */}
@@ -1641,6 +2047,19 @@ function ItemTableEditor({
                       )}
                     </div>
                   </div>
+
+                  {/* 段階3: 作業行は「1行にまとめる」で部品を1つ付随して1行表示できる。 */}
+                  {canMerge && (
+                    <label className="flex items-center gap-2 border-t border-zinc-200 pt-2 text-xs text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        onChange={() => addMergedPart(i)}
+                        className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600"
+                      />
+                      🔗 この作業に部品を1つまとめる（1行表示・他店式）
+                    </label>
+                  )}
 
                   {/* この行をマスター登録（既存の☆導線を流用）＋ 補足トグル */}
                   <div className="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-2 dark:border-zinc-800">
