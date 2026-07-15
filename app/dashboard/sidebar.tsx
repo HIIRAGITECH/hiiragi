@@ -81,6 +81,11 @@ export default function Sidebar({
           prefix: true,
         },
         {
+          jp: "部品カテゴリ",
+          href: "/dashboard/part-categories",
+          prefix: true,
+        },
+        {
           jp: "カテゴリ管理",
           href: "/dashboard/work-item-categories",
           prefix: true,

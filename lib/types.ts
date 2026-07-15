@@ -92,6 +92,21 @@ export type WorkItemCategory = {
   updated_at: string;
 };
 
+// 部品カテゴリ（ユーザー定義、part_categories テーブル・部品カテゴリ 段階1）。
+// テナントが自由に作る自己参照ツリー。最大3階層（level 1=大 / 2=中 / 3=小）。
+// トップ(大分類)は parent_id=null。作業カテゴリ(WorkItemCategory)とは別物・完全独立。
+// 段階1では器のみ（部品への紐付けは段階2）。デフォルトカテゴリは無し(seed なし)。
+export type PartCategory = {
+  id: string;
+  user_id: string;
+  parent_id: string | null;
+  name: string;
+  level: number; // 1=大 / 2=中 / 3=小
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
 // 受注明細（orders.items jsonb 配列の 1 要素）
 //
 // type 省略時は 'normal'、tax_free 省略時は false として扱う。
