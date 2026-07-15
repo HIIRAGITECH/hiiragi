@@ -119,6 +119,49 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-07-15 ── 部品カテゴリ 段階2：部品にカテゴリを紐付け（カスケード選択・DB先・コード後・本番反映）
+
+> 段階1で作った `part_categories`（自己参照ツリー・最大3階層）を部品本体(一階)に紐付ける。
+> 部品の登録・編集画面で大→中→小のカスケード選択を追加。一覧の絞り込み＋縦長解消＝段階3（未着手）。
+> commit `1cf2147`（main ff）。DB=`20260715010000_add_category_id_to_parts_inventory.sql`。
+
+**DB（加算的・後方互換）**
+- `parts_inventory.category_id uuid NULL REFERENCES part_categories(id) **ON DELETE SET NULL**` を追加。
+  - 段階1の申し送りどおり、**カテゴリ削除で部品を壊さず未分類(null)に戻す**。`part_categories` はハード削除＋
+    CASCADE(枝ごと)なので、親カテゴリを消すと子孫も消え、それらを指す部品はすべて未分類に戻る。
+  - nullable・デフォルトなし＝**既存の全部品は未分類で従来どおり**（移行不要）。ADD COLUMN はメタデータのみで安全。
+  - 段階3の絞り込み用に部分index `parts_inventory(user_id, category_id) WHERE deleted_at IS NULL` を**先行付与**。
+  - カラム追加のため追加GRANT不要（既存 parts_inventory 権限を継承）。
+- prod適用済み（SQL Editor手動・事前0/1・本体Success・事後 uuid/YES/SET NULL/1 を小野寺氏が確認）。
+
+**カテゴリ選択UI（カスケード・途中確定・未分類）**
+- `category-select.tsx`：大→中→小の3セレクト。大選択で中が有効化、中選択で小が有効化。子が無い階層は自動無効化。
+- **保存値は「選んだ末端の id」（`small ?? mid ?? big`）**。大だけ・大中だけでも確定可（途中確定）。未選択は null（未分類）。
+- 編集時は `initial.category_id` から**祖先を辿って選択パス(大中小)を復元**（末端idだけから3セレクトを埋める）。
+- 配置は部品本体の属性として `part-form.tsx` に追加（二階建て価格エディタとは別セクション）。new/edit ページが
+  `part_categories` を取得して `PartForm` に `categories` を渡す。
+
+**サーバー（安全化）**
+- `readPartPayload` に `category_id` を追加。**保存直前に `resolveCategoryId` で所有者検証**：送られた id が
+  「このユーザーが所有する存在するカテゴリ」のときだけ採用し、他テナントの id・保存中に消えた id は **null(未分類)に
+  丸める**（エラーにしない）。DBのFKはテナントを見ないため、ここでクロステナント参照を防ぎ、SET NULL の思想と一貫。
+- `createPart`／`updatePart`／`updatePartAndVariants` の全保存経路に適用。**複製(duplicatePart)もカテゴリを引き継ぐ**
+  よう select に `category_id` を追加。
+
+**判断した点・無影響**
+- 不正/消滅カテゴリは「エラーにせず未分類に丸める」方針（`resolveCategoryId`）＝ON DELETE SET NULL と一貫。
+- 段階3用の部分indexを段階2で先行付与（加算的で無害・絞り込みを速くする）。
+- **二階建て(variants)・価格解決・在庫(stock_movements)・受注(orders)・PDF には一切非干渉**。カテゴリは部品本体に
+  列を1つ足すだけ。**作業カテゴリ(work_item_categories)にも触れていない。**
+
+**検証（dev実データ）**
+- 「部品を中分類に紐付け → 親カテゴリ削除(子もCASCADE消滅) → 部品は生存し category_id が NULL に戻る」を確認(残存0)。
+- FK delete_rule=SET NULL・nullable・indexを確認。`tsc --noEmit`・`next build` 成功。
+
+**次段階**
+- 段階3＝一覧のカテゴリ絞り込み（左ツリー＋右一覧）＋縦長解消（ぶら下がり畳み等）。原則ノーマイグレ（表示のみ）。
+  上位カテゴリで絞る際の**子孫解決**（再帰CTE or クライアントでツリー展開）が設計論点。
+
 ### 2026-07-15 ── 部品カテゴリ 段階1：3階層カテゴリの器＋管理画面（DB先・コード後・本番反映）
 
 > 部品在庫を「テナントが自由に作る大／中／小（最大3階層）」で分類する新機能。段階1は**カテゴリの
