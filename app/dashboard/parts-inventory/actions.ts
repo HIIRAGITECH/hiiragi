@@ -70,6 +70,9 @@ type PartPayload = {
   supplier: string | null;
   unit: string | null;
   memo: string | null;
+  // 部品カテゴリ 段階2: 選ばれた末端カテゴリの id（未分類は null）。
+  // ここでは raw の文字列を持つだけ。所有者検証は resolveCategoryId で行い、DB に入れる直前に確定する。
+  category_id: string | null;
 };
 
 function readPartPayload(formData: FormData): PartPayload | { error: string } {
@@ -84,7 +87,27 @@ function readPartPayload(formData: FormData): PartPayload | { error: string } {
     supplier: pickString(formData, "supplier"),
     unit: pickString(formData, "unit"),
     memo: pickString(formData, "memo"),
+    category_id: pickString(formData, "category_id"),
   };
+}
+
+// カテゴリ紐付けの安全化: 送られてきた category_id が「このユーザーが所有する存在するカテゴリ」の
+// ときだけ採用する。他テナントの id・存在しない id（保存中に削除された等）は null（未分類）に丸める。
+// DB の FK はテナントを見ないため、ここでクロステナント参照を防ぐ。ON DELETE SET NULL の思想に沿って
+// 不正・消滅カテゴリは「未分類」に落とすだけで、保存自体は失敗させない。
+async function resolveCategoryId(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  raw: string | null,
+): Promise<string | null> {
+  if (!raw) return null;
+  const { data } = await supabase
+    .from("part_categories")
+    .select("id")
+    .eq("id", raw)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data ? raw : null;
 }
 
 // 新規作成: 価格カード（VariantEditorFields）も編集画面と同じ card_keys / card_<key>_* で受け取り、
@@ -123,6 +146,13 @@ export async function createPart(
     .maybeSingle();
   const nextOrder =
     typeof minRow?.display_order === "number" ? minRow.display_order - 1 : 0;
+
+  // カテゴリは所有者検証を通してから保存（不正・消滅は未分類）。
+  result.category_id = await resolveCategoryId(
+    supabase,
+    user.id,
+    result.category_id,
+  );
 
   const { data: inserted, error } = await supabase
     .from("parts_inventory")
@@ -203,6 +233,12 @@ export async function updatePart(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  result.category_id = await resolveCategoryId(
+    supabase,
+    user.id,
+    result.category_id,
+  );
 
   const { error } = await supabase
     .from("parts_inventory")
@@ -298,6 +334,9 @@ export async function updatePartAndVariants(
     .eq("user_id", user.id)
     .maybeSingle();
   if (!parent) return { error: "対象の部品が見つかりません。" };
+
+  // カテゴリは所有者検証を通してから保存（不正・消滅は未分類）。
+  body.category_id = await resolveCategoryId(supabase, user.id, body.category_id);
 
   // ② 本体 update
   const { error: bodyErr } = await supabase
@@ -421,7 +460,7 @@ export async function duplicatePart(formData: FormData) {
   const { data: src } = await supabase
     .from("parts_inventory")
     .select(
-      "name, internal_code, external_code, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo",
+      "name, internal_code, external_code, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo, category_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)

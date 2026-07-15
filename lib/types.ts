@@ -327,6 +327,9 @@ export type PartsInventory = {
   unit: string | null;
   memo: string | null;
   display_order: number;
+  // 部品カテゴリ 段階2: 部品が属するカテゴリ(part_categories)の末端 id。null=未分類。
+  // ON DELETE SET NULL のため、カテゴリ削除で自動的に null（未分類）に戻る。
+  category_id: string | null;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;

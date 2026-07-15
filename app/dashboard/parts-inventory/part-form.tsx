@@ -3,12 +3,15 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { useActionState, useState } from "react";
-import type { PartsInventory } from "@/lib/types";
+import type { PartCategory, PartsInventory } from "@/lib/types";
+import CategorySelect from "./category-select";
 import type { FormState } from "./actions";
 
 type Props = {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   initial?: PartsInventory;
+  // 部品カテゴリ 段階2: 大→中→小のカスケード選択に使うテナントのカテゴリ一覧。
+  categories: PartCategory[];
   submitLabel: string;
   cancelHref: string;
   // 新規・編集とも、価格エディタ（VariantEditorFields）をここに渡し、本体と同じ <form> 内に
@@ -20,6 +23,7 @@ type Props = {
 export default function PartForm({
   action,
   initial,
+  categories,
   submitLabel,
   cancelHref,
   children,
@@ -99,6 +103,12 @@ export default function PartForm({
           </p>
         </div>
       </div>
+
+      {/* カテゴリ（部品カテゴリ 段階2）。部品本体(一階)の属性。二階建て価格には無関係。 */}
+      <CategorySelect
+        categories={categories}
+        initialCategoryId={initial?.category_id ?? null}
+      />
 
       {/* 二階＝売り方（価格カード）は新規・編集とも下部の VariantEditorFields（children）で入力する。
           社内品番・定価・掛率は売り方ごとの値。車種空（全車種共通）は1枚まで。売価(sale_price)は廃止。 */}

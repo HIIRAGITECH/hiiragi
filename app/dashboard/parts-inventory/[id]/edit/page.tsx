@@ -2,7 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
+import type {
+  PartCategory,
+  PartsInventory,
+  PartsInventoryVariant,
+} from "@/lib/types";
 import PartForm from "../../part-form";
 import { VariantEditorFields } from "../../variants-section";
 import { updatePartAndVariants } from "../../actions";
@@ -20,26 +24,35 @@ export default async function EditPartPage(props: {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data }, { data: variantsData }] = await Promise.all([
-    supabase
-      .from("parts_inventory")
-      .select("*")
-      .eq("id", id)
-      .eq("user_id", user!.id)
-      .maybeSingle(),
-    supabase
-      .from("parts_inventory_variants")
-      .select("*")
-      .eq("part_id", id)
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
-  ]);
+  const [{ data }, { data: variantsData }, { data: categoriesData }] =
+    await Promise.all([
+      supabase
+        .from("parts_inventory")
+        .select("*")
+        .eq("id", id)
+        .eq("user_id", user!.id)
+        .maybeSingle(),
+      supabase
+        .from("parts_inventory_variants")
+        .select("*")
+        .eq("part_id", id)
+        .eq("user_id", user!.id)
+        .is("deleted_at", null)
+        .order("display_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("part_categories")
+        .select("*")
+        .eq("user_id", user!.id)
+        .order("level", { ascending: true })
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true }),
+    ]);
 
   if (!data) notFound();
   const initial = data as PartsInventory;
   const variants = (variantsData ?? []) as PartsInventoryVariant[];
+  const categories = (categoriesData ?? []) as PartCategory[];
 
   const action = updatePartAndVariants.bind(null, initial.id);
 
@@ -61,6 +74,7 @@ export default async function EditPartPage(props: {
           <PartForm
             action={action}
             initial={initial}
+            categories={categories}
             submitLabel="更新する"
             cancelHref="/dashboard/parts-inventory"
           >
