@@ -27,7 +27,12 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatYen } from "@/lib/format";
-import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
+import type {
+  PartCategory,
+  PartsInventory,
+  PartsInventoryVariant,
+} from "@/lib/types";
+import CategoryFilterTree, { UNCATEGORIZED } from "./category-filter-tree";
 import {
   adjustStock,
   duplicatePart,
@@ -53,6 +58,10 @@ type Props = {
   includeDeleted?: boolean;
   // 二階建て化: 各部品にぶら下がる価格バリアント（全車種共通→車種別の順）。表示・検索に使う。
   variantsByPart?: Record<string, PartsInventoryVariant[]>;
+  // 部品カテゴリ 段階3: テナントの全カテゴリ（左ツリー描画＋子孫解決用）。
+  categories?: PartCategory[];
+  // 選択中カテゴリ（URL ?category）。null=すべて表示 / "none"=未分類 / uuid=カテゴリ。
+  selectedCategory?: string | null;
 };
 
 type StockDialog =
@@ -63,6 +72,8 @@ export default function PartsInventoryTable({
   rows,
   includeDeleted,
   variantsByPart = {},
+  categories = [],
+  selectedCategory = null,
 }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -95,9 +106,59 @@ export default function PartsInventoryTable({
     [rows],
   );
 
+  // 部品カテゴリ 段階3: 親→子のマップ（子孫解決＝方式② と件数バッジの共通土台）。
+  const childrenOf = useMemo(() => {
+    const map = new Map<string | null, PartCategory[]>();
+    for (const c of categories) {
+      const arr = map.get(c.parent_id) ?? [];
+      arr.push(c);
+      map.set(c.parent_id, arr);
+    }
+    return map;
+  }, [categories]);
+
+  // 選択カテゴリの「子孫id集合（自ノード含む）」。大分類を選ぶと配下の中・小すべてを含む。
+  // すべて表示(null)・未分類("none")のときは集合を使わないので null。
+  const descendantSet = useMemo(() => {
+    if (!selectedCategory || selectedCategory === UNCATEGORIZED) return null;
+    const set = new Set<string>();
+    const walk = (id: string) => {
+      set.add(id);
+      for (const child of childrenOf.get(id) ?? []) walk(child.id);
+    };
+    walk(selectedCategory);
+    return set;
+  }, [selectedCategory, childrenOf]);
+
+  // 件数バッジ（子孫含む）。母集合は表示中の行セット(rows=include_deleted 状態を尊重)。
+  // 検索・発注フィルタには連動させない（登録件数の意味を保ち、クリックでちらつかせない）。
+  const { countOf, noneCount } = useMemo(() => {
+    const direct = new Map<string, number>();
+    let noneCount = 0;
+    for (const r of rows) {
+      if (r.category_id) direct.set(r.category_id, (direct.get(r.category_id) ?? 0) + 1);
+      else noneCount += 1;
+    }
+    const countOf = new Map<string, number>();
+    const calc = (id: string): number => {
+      let n = direct.get(id) ?? 0;
+      for (const child of childrenOf.get(id) ?? []) n += calc(child.id);
+      countOf.set(id, n);
+      return n;
+    };
+    for (const root of childrenOf.get(null) ?? []) calc(root.id);
+    return { countOf, noneCount };
+  }, [rows, childrenOf]);
+
   const filtered = useMemo(() => {
     let list = rows;
     if (onlyReorder) list = list.filter((r) => stockStatus(r) !== "ok");
+    // カテゴリ絞り込み（方式②の述語）。未分類は category_id IS NULL、それ以外は子孫集合に含む部品。
+    if (selectedCategory === UNCATEGORIZED) {
+      list = list.filter((r) => r.category_id === null);
+    } else if (descendantSet) {
+      list = list.filter((r) => r.category_id !== null && descendantSet.has(r.category_id));
+    }
     const q = query.trim();
     if (q) {
       const needle = normalize(q);
@@ -109,9 +170,11 @@ export default function PartsInventoryTable({
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, query, onlyReorder, variantsByPart]);
+  }, [rows, query, onlyReorder, variantsByPart, selectedCategory, descendantSet]);
 
-  const isFiltering = onlyReorder || query.trim().length > 0;
+  // カテゴリ選択も「フィルタ中」に含める → 既存の「フィルタ中はDnD無効」「件数テキスト」判定が自動一致。
+  const isFiltering =
+    onlyReorder || query.trim().length > 0 || selectedCategory !== null;
   // 並べ替えはフィルタ解除かつ非表示を含めない通常表示のときのみ（保存中も一時無効）。
   const dndEnabled = !isFiltering && !includeDeleted;
   const canDrag = dndEnabled && !pending;
@@ -156,8 +219,24 @@ export default function PartsInventoryTable({
 
   return (
     <>
-      {/* 検索 + フィルタ */}
-      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+      <div className="flex flex-1 min-h-0">
+        {/* 左: カテゴリツリー（カテゴリ未登録テナントは非表示＝従来どおり右一覧のみ）。 */}
+        {categories.length > 0 && (
+          <aside className="w-56 shrink-0 overflow-auto border-r border-[var(--color-line)] bg-[var(--color-paper)] px-4 py-4">
+            <CategoryFilterTree
+              categories={categories}
+              selected={selectedCategory}
+              countOf={countOf}
+              allCount={rows.length}
+              noneCount={noneCount}
+            />
+          </aside>
+        )}
+
+        {/* 右: 検索/フィルタ＋一覧（既存構造そのまま）。 */}
+        <div className="flex flex-1 min-w-0 flex-col min-h-0">
+          {/* 検索 + フィルタ */}
+          <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
         <div className="wos-search max-w-[480px]">
           <span className="wos-ico">⌕</span>
           <input
@@ -246,6 +325,8 @@ export default function PartsInventoryTable({
               </DndContext>
             </table>
           )}
+        </div>
+        </div>
         </div>
       </div>
 

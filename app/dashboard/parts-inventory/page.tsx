@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { PartsInventory, PartsInventoryVariant } from "@/lib/types";
+import type {
+  PartCategory,
+  PartsInventory,
+  PartsInventoryVariant,
+} from "@/lib/types";
 import PartsInventoryTable from "./parts-inventory-table";
 
 export const metadata: Metadata = {
@@ -9,10 +13,14 @@ export const metadata: Metadata = {
 };
 
 export default async function PartsInventoryPage(props: {
-  searchParams: Promise<{ include_deleted?: string }>;
+  searchParams: Promise<{ include_deleted?: string; category?: string }>;
 }) {
   const sp = await props.searchParams;
   const includeDeleted = sp.include_deleted === "1";
+  // 部品カテゴリ 段階3: 選択カテゴリを URL で保持（include_deleted と同じ流儀）。
+  //   未指定=すべて表示 / "none"=未分類(category_id IS NULL) / それ以外=カテゴリid。
+  //   絞り込み自体はクライアント(parts-inventory-table)側で行うためサーバー再フェッチはしない。
+  const selectedCategory = sp.category ?? null;
 
   const supabase = await createClient();
   const {
@@ -54,6 +62,18 @@ export default async function PartsInventoryPage(props: {
     });
   }
 
+  // 部品カテゴリ 段階3: 左のカテゴリツリー＋子孫解決(方式②)用に、テナントの全カテゴリを取得する。
+  // 件数バッジ・子孫id集合の算出はクライアント側（parts-inventory-table）で行う。
+  const { data: categoriesData } = await supabase
+    .from("part_categories")
+    .select("*")
+    .eq("user_id", user!.id)
+    .order("level", { ascending: true })
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+
+  const categories = (categoriesData ?? []) as PartCategory[];
+
   return (
     <>
       <div className="wos-pagehead">
@@ -86,6 +106,8 @@ export default async function PartsInventoryPage(props: {
         rows={rows}
         includeDeleted={includeDeleted}
         variantsByPart={variantsByPart}
+        categories={categories}
+        selectedCategory={selectedCategory}
       />
     </>
   );
