@@ -1,33 +1,22 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import DeleteButton from "@/lib/components/delete-button";
-import type {
-  Customer,
-  IndirectMaterialEntry,
-  Order,
-  PartsInventory,
-  PartsInventoryVariant,
-  Vehicle,
-  WorkItemCategory,
-  WorkMenuItem,
-  WorkMenuSet,
-} from "@/lib/types";
+import type { Customer, Order, Vehicle } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 import { getSiteUrl } from "@/lib/site-url";
 import { canUseMypage } from "@/lib/entitlements";
 import {
   archiveOrderFormAction,
-  createOrderPhotoFolder,
   deleteOrder,
   openEstimate,
   restoreOrderFormAction,
-  updateOrderItems,
 } from "../actions";
 import DocumentOutput from "./document-output";
-import ItemsForm from "./items-form";
 import MypageSection from "./mypage-section";
+import OrderItemsSection from "./order-items-section";
 import OrderStatusBar from "./order-status-bar";
 import SaveAsSetButton from "./save-as-set-button";
 // 在庫はステータス連動（了承済=確保 / 完了=消費）に一本化したため、手動在庫引きUI
@@ -56,19 +45,15 @@ export default async function OrderDetailPage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
-  // 高速化: 直列でぶら下がっていた getSiteUrl / canUseMypage も Promise.all に合流し、直列の尾を消す。
-  //   canUseMypage(user) には先頭で取得済みの user を渡し、getUser() の追加往復を発生させない。
+  // 受注ページ高速化 その2: シェル（受注行由来の軽い部分）は、明細ピッカー用の重いカタログ
+  //   （parts/variants/menus/sets/set_items/set_parts/categories/indirect ＝ 8本）を待たない。
+  //   ここで取得するのは「シェルに必要な軽いもの」だけ：顧客・車両・Drive連携・マイページ可否・baseUrl。
+  //   重いカタログは <Suspense> 内の OrderItemsSection が別途取得する（ステータス変更後の再レンダーで
+  //   カタログ取得がステータスバー等の描画をブロックしないようにするため）。
+  //   canUseMypage(user) には先頭で取得済みの user を渡し、getUser() の追加往復を省く。
   const [
     { data: customerData },
     vehicleResult,
-    menusRes,
-    setsRes,
-    setItemsRes,
-    setPartsRes,
-    catsRes,
-    allPartsRes,
-    indirectRes,
-    variantsRes,
     integrationRes,
     baseUrl,
     mypageEnabled,
@@ -87,55 +72,6 @@ export default async function OrderDetailPage(
           .eq("user_id", user!.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    supabase
-      .from("work_menu_items")
-      .select("*")
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("work_menu_sets")
-      .select("*")
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("work_menu_set_items")
-      .select("set_id, menu_item_id, position")
-      .order("position", { ascending: true }),
-    // 作業セットに含まれる部品（案2）。展開時にその受注の車種で価格解決する。
-    supabase
-      .from("work_menu_set_parts")
-      .select("set_id, part_id, quantity, position")
-      .order("position", { ascending: true }),
-    supabase
-      .from("work_item_categories")
-      .select("*")
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
-    // 高速化: 従来は parts_inventory を2回引いていた（原価マップ用 id,cost_price 全件 ＋ ピッカー用 * の
-    //   アクティブ表示可のみ）。全件を1回だけ取得し、原価マップとピッカー一覧を JS 側で導出して往復を1本減らす。
-    supabase
-      .from("parts_inventory")
-      .select("*")
-      .eq("user_id", user!.id),
-    supabase
-      .from("work_menu_indirect_materials")
-      .select("menu_item_id, part_id, quantity"),
-    // Step 3-2b: 車種別定価ピッカー用の variant 一覧（全アクティブ）。
-    // PartPickerModal 内で part_id ごとに「先頭1件の一致 variant」を採用するため
-    // display_order 順で渡す（display_order 同順は created_at で安定化）。
-    supabase
-      .from("parts_inventory_variants")
-      .select("*")
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
     // Googleドライブ連携 段階4: 連携済みか（refresh_token の有無）を判定するための1行。
     supabase
       .from("google_integrations")
@@ -152,92 +88,13 @@ export default async function OrderDetailPage(
 
   const customer = customerData as Customer | null;
   const vehicle = vehicleResult.data as Vehicle | null;
-  const allMenus = (menusRes.data ?? []) as WorkMenuItem[];
-  const allSets = (setsRes.data ?? []) as WorkMenuSet[];
-  const allSetItems = (setItemsRes.data ?? []) as {
-    set_id: string;
-    menu_item_id: string;
-    position: number;
-  }[];
-  const allSetParts = (setPartsRes.data ?? []) as {
-    set_id: string;
-    part_id: string;
-    quantity: number;
-    position: number;
-  }[];
-  const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
 
-  // 統合した parts_inventory 全件から、原価マップ（全部品）とピッカー一覧（アクティブ＋明細表示可）を導出。
-  //   ピッカーは従来の DB フィルタ／並び（deleted_at IS NULL・show_in_detail・display_order→created_at）を JS で再現。
-  const allPartsRows = (allPartsRes.data ?? []) as PartsInventory[];
-  const allParts = allPartsRows
-    .filter((p) => p.deleted_at === null && p.show_in_detail === true)
-    .sort(
-      (a, b) =>
-        a.display_order - b.display_order ||
-        a.created_at.localeCompare(b.created_at),
-    );
-  const allVariants = (variantsRes.data ?? []) as PartsInventoryVariant[];
-
-  const partsCostMap = new Map<string, number>();
-  for (const p of allPartsRows) {
-    partsCostMap.set(p.id, Number(p.cost_price ?? 0));
-  }
-  const indirectByMenu: Record<string, IndirectMaterialEntry[]> = {};
-  for (const e of (indirectRes.data ?? []) as {
-    menu_item_id: string;
-    part_id: string;
-    quantity: number;
-  }[]) {
-    const mid = e.menu_item_id;
-    if (!indirectByMenu[mid]) indirectByMenu[mid] = [];
-    indirectByMenu[mid].push({
-      part_id: e.part_id,
-      quantity: Number(e.quantity ?? 0),
-      cost_price: partsCostMap.get(e.part_id) ?? 0,
-    });
-  }
-
-  const menuMap = new Map(allMenus.map((m) => [m.id, m]));
-  const partMap = new Map(allParts.map((p) => [p.id, p]));
-  const allSetsWithItems = allSets.map((s) => ({
-    set: s,
-    items: allSetItems
-      .filter((l) => l.set_id === s.id)
-      .map((l) => {
-        const menu = menuMap.get(l.menu_item_id);
-        return menu ? { menu, position: l.position } : null;
-      })
-      .filter((x): x is { menu: WorkMenuItem; position: number } => !!x)
-      .sort((a, b) => a.position - b.position),
-    // 部品は allParts（アクティブ・明細表示可）に無い（＝ソフト削除/非表示）ものは
-    // メニュー同様スキップする。価格は展開時に items-form 側で車種解決する。
-    parts: allSetParts
-      .filter((l) => l.set_id === s.id)
-      .map((l) => {
-        const part = partMap.get(l.part_id);
-        return part
-          ? { part, quantity: Number(l.quantity ?? 1), position: l.position }
-          : null;
-      })
-      .filter(
-        (
-          x,
-        ): x is { part: PartsInventory; quantity: number; position: number } =>
-          !!x,
-      )
-      .sort((a, b) => a.position - b.position),
-  }));
-
-  // Googleドライブ連携 段階4: 連携状態と子フォルダ作成アクション。
+  // Googleドライブ連携 段階4: 連携状態（子フォルダ作成アクションは OrderItemsSection 側で bind）。
   const googleConnected = !!(
     integrationRes.data as { refresh_token: string | null } | null
   )?.refresh_token;
-  const createFolderAction = createOrderPhotoFolder.bind(null, order.id);
 
-  const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
-  // baseUrl / mypageEnabled は上の Promise.all に合流済み（直列の尾を排除）。
 
   return (
     <>
@@ -386,28 +243,19 @@ export default async function OrderDetailPage(
           <section>
             <div className="wos-sec-label mb-3">明細</div>
             <div className="wos-card">
-              <ItemsForm
-                action={itemsAction}
-                initialItems={order.items ?? []}
-                initialDiscount={order.discount_amount}
-                initialDeposit={order.deposit_amount}
-                initialEstimateNotes={order.estimate_notes}
-                initialInvoiceNotes={order.invoice_notes}
-                initialPhotoFolderUrl={order.photo_folder_url}
-                googleConnected={googleConnected}
-                initialDriveFolderId={order.drive_folder_id}
-                createFolderAction={createFolderAction}
-                allMenus={allMenus}
-                allSetsWithItems={allSetsWithItems}
-                allCategories={allCategories}
-                allParts={allParts}
-                allVariants={allVariants}
-                vehicle={vehicle}
-                customer={customer}
-                reservedAt={order.reserved_at}
-                consumedAt={order.consumed_at}
-                indirectByMenu={indirectByMenu}
-              />
+              {/* 受注ページ高速化 その2: 明細ピッカー用の重いカタログ取得は Suspense 境界の
+                  OrderItemsSection に分離。シェル（ステータスバー・顧客/車両・帳票メタ）はカタログを
+                  待たずに描画され、ステータス変更後の再レンダーでもカタログ取得がブロックしない。
+                  ItemsForm 内部・保存・明細計算・在庫バナー・在庫は不変。 */}
+              <Suspense fallback={<ItemsSectionSkeleton />}>
+                <OrderItemsSection
+                  userId={user!.id}
+                  order={order}
+                  vehicle={vehicle}
+                  customer={customer}
+                  googleConnected={googleConnected}
+                />
+              </Suspense>
             </div>
           </section>
 
@@ -456,6 +304,19 @@ export default async function OrderDetailPage(
         </div>
       </div>
     </>
+  );
+}
+
+// 明細（カタログ取得中）のスケルトン。高さを確保してレイアウトシフトを抑える。
+// カタログはピッカー用マスターなので、明細の表示・保存・在庫の正しさには影響しない。
+function ItemsSectionSkeleton() {
+  return (
+    <div className="animate-pulse space-y-3 py-2" aria-hidden>
+      <div className="h-5 w-32 rounded bg-[var(--color-line)]" />
+      <div className="h-10 w-full rounded bg-[var(--color-line)]" />
+      <div className="h-10 w-full rounded bg-[var(--color-line)]" />
+      <div className="h-10 w-2/3 rounded bg-[var(--color-line)]" />
+    </div>
   );
 }
 
