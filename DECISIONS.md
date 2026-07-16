@@ -145,6 +145,44 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-07-16 ── 受注ページ高速化 その1：認証(getUser)の重複集約（挙動不変・往復削減・本番反映）
+
+> 受注詳細を開くのが1〜2秒かかる件の調査で、**同一リクエスト内で `supabase.auth.getUser()`
+> （GoTrueへのネットワーク往復・ローカルデコードではない）が3〜4回・一部直列**で呼ばれているのが主因の一つと判明
+> （prod実データは極小＝受注11/部品16/variants20、受注取得は orders_pkey Index Scan 1.5ms＝**DBは無罪**、
+> 犯人はアプリ層の往復回数と認証検証の直列化）。今回は「1回取得して使い回す」に集約する純粋な高速化。
+> commit `7e9a7f4`（main ff・push済）。**DB変更なし・挙動不変。**
+
+**getUser の集約（詳細ページ：実質 3〜4回 → 1回）**
+- 従来：proxy(middleware)で1回 → ページ先頭で1回 → `Promise.all` の後に **`canUseMypage()`（内部 `isAdmin()`→getUser、
+  非管理者はさらに getUser＋subscriptions）が直列**でぶら下がる、で計3〜4回。うち後半は Promise.all の尾に直列。
+- `isAdmin(user?)` / `canUseMypage(user?)` を**後方互換で拡張**：呼び出し側が取得済み user を渡せば getUser を
+  再実行しない。**引数なし（undefined）の既存呼び出しは従来どおり自前取得**（admin画面・`dashboard/layout`・
+  `mypage-actions` 等は無改修で不変動作）。`user===undefined` を「未指定」の番兵にし、`null` 明示は「未ログイン」として扱う。
+- 受注詳細ページは**先頭で1回だけ getUser**し、その user を `canUseMypage(user)` に渡す。
+- proxy（middleware）の認証は**今回触らない**（セキュリティ境界の変更は別途・慎重に）。
+
+**直列の尾を排除（Promise.all へ合流）**
+- 詳細ページ：直列でぶら下がっていた `getSiteUrl()`（headers のみ・DBなし）と `canUseMypage(user)` を、
+  既存の12本 `Promise.all` に**合流**（尾レイテンシを消す）。両者とも order に依存しないので安全に並列化できる。
+- 一覧ページ（`orders/page.tsx`）：同パターンで `getSiteUrl` / `canUseMypage(user)` を `Promise.all` 並列化＋user 手渡し。
+
+**parts_inventory の二重取得を統合（往復−1）**
+- 従来は詳細ページで parts_inventory を**2回**取得：①原価マップ用 `id,cost_price` 全件、②ピッカー用 `*` の
+  アクティブ表示可（`deleted_at IS NULL`＋`show_in_detail`＋`display_order→created_at`）。
+- **全件 `*` を1回**取得し、原価マップ（全部品）とピッカー一覧を **JS 側で導出**。ピッカーの DB フィルタ・並びは
+  JS で厳密に再現（`filter(deleted_at===null && show_in_detail)`→`sort(display_order || created_at.localeCompare)`）。
+  原価マップは間接材料が非表示/削除部品を参照しうるため**全部品を母集合**にする点も従来どおり維持。
+
+**挙動不変・無影響**
+- 認証判定・権限・マイページ可否・明細・ステータス・在庫・PDF・表示は従来どおり。管理者/非管理者いずれも不変。
+- `tsc --noEmit`・`next build`・eslint 通過。**本番反映済み。体感速度は小野寺氏が本番で確認。**
+
+**見込み・次段階**
+- 見込み：詳細ページの getUser 往復 3〜4回→1回＋直列の尾の並列化＋parts 往復−1で、**開く体感が短縮**する見込み
+  （認証往復が直列で効いていたため）。**ステータス変更の遅さ（現在パスrevalidateによるページ丸ごと再レンダー）は
+  本件の範囲外**＝別途「その2」で楽観的更新/再レンダー回避を検討（§2.5 TODO・調査レポート参照）。
+
 ### 2026-07-16 ── 部品カテゴリ 段階3：一覧のカテゴリ絞り込み（左ツリー＋右一覧・件数バッジ・DB変更なし・本番反映）
 
 > 段階1・2で作った `part_categories`（最大3階層）と `parts_inventory.category_id` を使い、部品在庫一覧を
