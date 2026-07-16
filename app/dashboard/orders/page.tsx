@@ -63,10 +63,14 @@ export default async function OrdersPage() {
     };
   });
 
-  // マイページURL コピー/発行 導線のベースURL（NEXT_PUBLIC_SITE_URL 優先、無ければヘッダ推測）。
-  const baseUrl = await getSiteUrl();
-  // 段階4: マイページ機能の使用権（未発行の発行ボタンの出し分けに使う）。
-  const mypageEnabled = await canUseMypage();
+  // 高速化: 直列だった getSiteUrl / canUseMypage を並列化し、canUseMypage には取得済み user を渡して
+  //   getUser() の追加往復を省く（挙動不変）。
+  const [baseUrl, mypageEnabled] = await Promise.all([
+    // マイページURL コピー/発行 導線のベースURL（NEXT_PUBLIC_SITE_URL 優先、無ければヘッダ推測）。
+    getSiteUrl(),
+    // 段階4: マイページ機能の使用権（未発行の発行ボタンの出し分けに使う）。
+    canUseMypage(user),
+  ]);
 
   return (
     <>

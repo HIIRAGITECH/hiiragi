@@ -56,6 +56,8 @@ export default async function OrderDetailPage(
   if (!orderData) notFound();
   const order = orderData as Order;
 
+  // 高速化: 直列でぶら下がっていた getSiteUrl / canUseMypage も Promise.all に合流し、直列の尾を消す。
+  //   canUseMypage(user) には先頭で取得済みの user を渡し、getUser() の追加往復を発生させない。
   const [
     { data: customerData },
     vehicleResult,
@@ -64,11 +66,12 @@ export default async function OrderDetailPage(
     setItemsRes,
     setPartsRes,
     catsRes,
-    partsRes,
+    allPartsRes,
     indirectRes,
-    pickerPartsRes,
     variantsRes,
     integrationRes,
+    baseUrl,
+    mypageEnabled,
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -114,22 +117,15 @@ export default async function OrderDetailPage(
       .is("deleted_at", null)
       .order("display_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    // 高速化: 従来は parts_inventory を2回引いていた（原価マップ用 id,cost_price 全件 ＋ ピッカー用 * の
+    //   アクティブ表示可のみ）。全件を1回だけ取得し、原価マップとピッカー一覧を JS 側で導出して往復を1本減らす。
     supabase
       .from("parts_inventory")
-      .select("id, cost_price")
+      .select("*")
       .eq("user_id", user!.id),
     supabase
       .from("work_menu_indirect_materials")
       .select("menu_item_id, part_id, quantity"),
-    // 「部品在庫から追加」ピッカー用: 明細に出せるアクティブ部品のみ（間接材料は除外）。
-    supabase
-      .from("parts_inventory")
-      .select("*")
-      .eq("user_id", user!.id)
-      .is("deleted_at", null)
-      .eq("show_in_detail", true)
-      .order("display_order", { ascending: true })
-      .order("created_at", { ascending: true }),
     // Step 3-2b: 車種別定価ピッカー用の variant 一覧（全アクティブ）。
     // PartPickerModal 内で part_id ごとに「先頭1件の一致 variant」を採用するため
     // display_order 順で渡す（display_order 同順は created_at で安定化）。
@@ -147,6 +143,11 @@ export default async function OrderDetailPage(
       .eq("user_id", user!.id)
       .is("deleted_at", null)
       .maybeSingle(),
+    // お客様マイページ 段階2: 発行 UI のベースURL（headers のみ・DBなし）。
+    getSiteUrl(),
+    // 段階4: マイページ機能の使用権（管理者は無制限 / それ以外は options.mypage）。
+    //   先頭で取得済みの user を渡し、getUser() の追加往復を省く。
+    canUseMypage(user),
   ]);
 
   const customer = customerData as Customer | null;
@@ -165,14 +166,21 @@ export default async function OrderDetailPage(
     position: number;
   }[];
   const allCategories = (catsRes.data ?? []) as WorkItemCategory[];
-  const allParts = (pickerPartsRes.data ?? []) as PartsInventory[];
+
+  // 統合した parts_inventory 全件から、原価マップ（全部品）とピッカー一覧（アクティブ＋明細表示可）を導出。
+  //   ピッカーは従来の DB フィルタ／並び（deleted_at IS NULL・show_in_detail・display_order→created_at）を JS で再現。
+  const allPartsRows = (allPartsRes.data ?? []) as PartsInventory[];
+  const allParts = allPartsRows
+    .filter((p) => p.deleted_at === null && p.show_in_detail === true)
+    .sort(
+      (a, b) =>
+        a.display_order - b.display_order ||
+        a.created_at.localeCompare(b.created_at),
+    );
   const allVariants = (variantsRes.data ?? []) as PartsInventoryVariant[];
 
   const partsCostMap = new Map<string, number>();
-  for (const p of (partsRes.data ?? []) as Pick<
-    PartsInventory,
-    "id" | "cost_price"
-  >[]) {
+  for (const p of allPartsRows) {
     partsCostMap.set(p.id, Number(p.cost_price ?? 0));
   }
   const indirectByMenu: Record<string, IndirectMaterialEntry[]> = {};
@@ -229,12 +237,7 @@ export default async function OrderDetailPage(
 
   const itemsAction = updateOrderItems.bind(null, order.id);
   const openEstimateAction = openEstimate.bind(null, order.id);
-
-  // お客様マイページ 段階2: 発行 UI のベースURL。NEXT_PUBLIC_SITE_URL 優先、無ければ
-  // リクエストヘッダから推測（dev/localhost でも動く）。
-  const baseUrl = await getSiteUrl();
-  // 段階4: マイページ機能の使用権（管理者は無制限 / それ以外は options.mypage）。
-  const mypageEnabled = await canUseMypage();
+  // baseUrl / mypageEnabled は上の Promise.all に合流済み（直列の尾を排除）。
 
   return (
     <>

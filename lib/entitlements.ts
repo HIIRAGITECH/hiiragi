@@ -1,3 +1,4 @@
+import type { User } from "@supabase/supabase-js";
 import { isAdmin } from "@/lib/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { SubscriptionOptions } from "@/lib/types";
@@ -12,20 +13,25 @@ import type { SubscriptionOptions } from "@/lib/types";
 //   1. 管理者(ADMIN_EMAIL)なら無制限で true
 //   2. それ以外は subscriptions.options.mypage === true なら true
 //   3. それ以外は false
-export async function canUseMypage(): Promise<boolean> {
-  if (await isAdmin()) return true;
+// 高速化: 呼び出し側が既に取得済みの user を渡せば、isAdmin 判定・subscriptions 取得ともに
+// その user を使い、getUser() のネットワーク往復（従来 isAdmin＋本体で最大2回）を省く。
+//   - user を渡した場合＝getUser しない。渡さなければ（undefined）従来どおり取得（既存呼び出しは無改修で動く）。
+export async function canUseMypage(user?: User | null): Promise<boolean> {
+  if (await isAdmin(user)) return true;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return false;
+  let resolved = user;
+  if (resolved === undefined) {
+    const { data } = await supabase.auth.getUser();
+    resolved = data.user;
+  }
+  if (!resolved) return false;
 
   // subscriptions は RLS でオーナー限定。authenticated クライアントで自テナント1行を読む。
   const { data } = await supabase
     .from("subscriptions")
     .select("options")
-    .eq("user_id", user.id)
+    .eq("user_id", resolved.id)
     .maybeSingle();
 
   const options = (data?.options ?? {}) as SubscriptionOptions;
