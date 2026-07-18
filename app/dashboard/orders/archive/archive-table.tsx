@@ -181,7 +181,10 @@ export default function ArchiveTable({ rows, year }: Props) {
                 </span>
               </header>
               <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-                <table className="w-full text-sm">
+                {/* 外枠で角丸＋境界を保ちつつ、内側で横スクロール可能に（md未満のみ min-w で溢れさせる）。
+                    md以上は min-w-0 で従来どおり w-full に収まり、見た目は不変。 */}
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm md:min-w-0">
                   <thead className="bg-zinc-50 text-left text-xs uppercase tracking-wider text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
                     <tr>
                       <th className="px-4 py-3 font-medium">管理番号</th>
@@ -297,6 +300,7 @@ export default function ArchiveTable({ rows, year }: Props) {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </section>
           ))}

@@ -733,4 +733,10 @@ body {
   .wos-pagehead .wos-actions {
     flex-wrap: wrap;
   }
+  /* 受注明細行（items-form）: md未満は固定px6列グリッドをやめ1列に縦積み。
+     各セル（ラベル付き input）が全幅になり狭幅でも読める。md以上は Tailwind の
+     grid-cols-[...] がそのまま効く（このルールは非レイヤーなので 767px以下でのみ上書き）。 */
+  .wos-item-row {
+    grid-template-columns: 1fr;
+  }
 }

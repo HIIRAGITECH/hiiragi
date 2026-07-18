@@ -109,7 +109,7 @@ export default async function OrderDetailPage(
           <h1 className="flex items-center gap-3 flex-wrap">
             {/* 受注番号は管理番号（YYMB-0000 形式・9桁）。以前は UUID 前提の slice(0,8) で
                 末尾1桁が欠けていた（例: 26MB-0006 → 26MB-000）。全桁表示する。 */}
-            <span className="wos-serif-num text-2xl whitespace-nowrap">No. {order.id}</span>
+            <span className="wos-serif-num text-xl md:text-2xl md:whitespace-nowrap">No. {order.id}</span>
             <span className="text-base text-[var(--color-ink-mid)] font-normal">
               受付 {formatDate(order.reception_date)}
             </span>

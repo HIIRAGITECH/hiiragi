@@ -157,7 +157,7 @@ export default function StatusDropdown<T extends string>({
               role="option"
               aria-selected={selected}
               onClick={() => handleSelect(o)}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
+              className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-100 md:min-h-0 dark:hover:bg-zinc-700 ${
                 selected
                   ? "bg-zinc-50 font-semibold text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50"
                   : "text-zinc-700 dark:text-zinc-300"
@@ -189,7 +189,7 @@ export default function StatusDropdown<T extends string>({
         aria-label={ariaLabel ?? "ステータスを変更"}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`${base} ${classMap[value]} cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60`}
+        className={`${base} ${classMap[value]} min-h-11 cursor-pointer transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-60 md:min-h-0`}
       >
         <span>{value}</span>
         <span aria-hidden className="text-[8px] leading-none opacity-70">

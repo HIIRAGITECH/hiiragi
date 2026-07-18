@@ -1578,7 +1578,7 @@ function ItemTableEditor({
                       <>
                         {/* 段階3: 結合行（他店式）: [#][作業内容][部品名][工賃][部品代][詳細/×]、小計は下段。
                             作業名・部品名を両方表示する。 */}
-                        <div className="grid items-end gap-x-2 gap-y-1 grid-cols-[24px_minmax(0,1fr)_minmax(0,1fr)_60px_60px_auto] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_82px_82px_auto]">
+                        <div className="wos-item-row grid items-end gap-x-2 gap-y-1 grid-cols-[24px_minmax(0,1fr)_minmax(0,1fr)_60px_60px_auto] sm:grid-cols-[28px_minmax(0,1fr)_minmax(0,1fr)_82px_82px_auto]">
                           <div className="mb-0.5 flex flex-col items-center gap-0.5">
                             <button
                               type="button"
@@ -1690,7 +1690,7 @@ function ItemTableEditor({
                               type="button"
                               onClick={() => removeMerged(workIndex, partIndex)}
                               aria-label="この結合行を削除"
-                              className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                              className="flex h-11 w-11 md:h-9 md:w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
                             >
                               ×
                             </button>
@@ -1852,7 +1852,7 @@ function ItemTableEditor({
               {/* 段階2: 簡易入力行 = [#] [種別] [名前] [数量] [金額+バッジ] [詳細/×]。
                   原価・定価・業販・マスター登録・補足は下の「詳細」パネルに格納し、普段はすっきり保つ。
                   items-end で各セルを下端揃え（ラベル付きセルの入力底辺を一致）。 */}
-              <div className="grid items-end gap-x-2 gap-y-1 grid-cols-[24px_72px_minmax(0,1fr)_52px_100px_auto] sm:grid-cols-[28px_84px_minmax(0,1fr)_60px_116px_auto]">
+              <div className="wos-item-row grid items-end gap-x-2 gap-y-1 grid-cols-[24px_72px_minmax(0,1fr)_52px_100px_auto] sm:grid-cols-[28px_84px_minmax(0,1fr)_60px_116px_auto]">
                 {/* # バッジ＝ドラッグハンドル。ハンドルだけに listeners を付け、行内 input は掴まず編集可。 */}
                 <button
                   type="button"
@@ -1959,7 +1959,7 @@ function ItemTableEditor({
                     type="button"
                     onClick={() => remove(i)}
                     aria-label="行を削除"
-                    className="flex h-9 w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+                    className="flex h-11 w-11 md:h-9 md:w-9 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-red-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-red-400"
                   >
                     ×
                   </button>
@@ -2050,7 +2050,7 @@ function ItemTableEditor({
 
                   {/* 段階3: 作業行は「1行にまとめる」で部品を1つ付随して1行表示できる。 */}
                   {canMerge && (
-                    <label className="flex items-center gap-2 border-t border-zinc-200 pt-2 text-xs text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+                    <label className="flex min-h-11 items-center gap-2 border-t border-zinc-200 pt-2 text-xs text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 md:min-h-0">
                       <input
                         type="checkbox"
                         checked={false}

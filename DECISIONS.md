@@ -1530,3 +1530,25 @@ DB変更は②のみ。②を prod 適用してから③④のコードを push�
 **検証**：`tsc --noEmit` / `eslint`（sidebar・layout）/ `next build` いずれもクリーン（exit 0）。実機/レスポンシブの目視（375 / 768 / PC）は未自動化（ブラウザ自動化ツール未導入＋ダッシュボードは認証セッション必須のため）。PC不変はCSS構造上（全上書きが max-width:767px か display:none 配下）で担保。
 
 **Phase 2以降の残件**：明細フォームのスマホ縦積み・タップ標的44px化・D&Dのスマホ↑↓代替、archive の `overflow-hidden` 解除、parts-inventory カテゴリツリー折りたたみ。**PDFプレビューの狭幅溢れは対応不要と判断**（実出力はサーバー生成PDF/印刷で、画面プレビューは参考用途・事務所PC前提）。
+
+
+---
+
+## Phase 2：受注詳細をスマホで読める状態にする（2026-07-19）
+
+**背景**：Phase 1 でサイドバーは解消済み。受注詳細 `/dashboard/orders/[id]`（`page.tsx`→`OrderItemsSection`→`ItemsForm` のインライン編集）の**明細が狭幅で固定px6列に詰められ読めない**問題を解消。**閲覧できること**が目的で、スマホ入力最適化・D&Dの↑↓代替は対象外（現場スマホは「見る＋軽い更新」まで＝確定方針を踏襲）。境界は Phase 1 と同じ **md(768px)**。
+
+**確定方針の踏襲**：DBスキーマ・数値ロジック・`show_in_detail` は無改修（表示のみ）。原価（`labor_cost_price`/`parts_cost_price`）・定価・間接材料は編集UIの「詳細」パネル内に留まり、顧客向け出力（printable-document / mypage / invoice-pdf）には一切出さない。作業後に grep で顧客向け出力に cost/margin が無いこと・`show_in_detail` 参照数が不変（17）であることを確認済み。
+
+**実装内容**：
+- **明細行の縦積み（本丸）**：結合行(1581行)・単独行(1855行)の grid コンテナに `wos-item-row` を付与し、`globals.css` の既存 `@media (max-width: 767px)`（Phase 1 で追加した非レイヤーのブロック）に `.wos-item-row { grid-template-columns: 1fr; }` を追加。md未満は1列縦積み（ラベル付き input が全幅で読める）、md以上は Tailwind の `grid-cols-[...]` / `sm:grid-cols-[...]` がそのまま効き**PC不変**。非レイヤーゆえ 640–767px の `sm:grid-cols` も上書きでき、狙いどおり md 境界で切り替わる。cellInputClass は元々 `w-full` なので追加変更不要。
+- **タップ標的44px化**（md未満のみ・md以上は現状維持）：明細の行削除「×」を `h-9 w-9` → `h-11 w-11 md:h-9 md:w-9`（結合・単独の2箇所）。「まとめる」チェックボックスは見た目14pxのままラベルに `min-h-11 md:min-h-0` を付与しタップ領域を44px確保。`StatusDropdown`（共有コンポーネント）のトリガー・メニュー項目に `min-h-11 md:min-h-0`（ステータス更新は現場の軽い更新に該当するため確実に押せるように）。**ドラッグハンドルは対象外**（スマホでは使わない前提）。
+- **受注番号の折り返し**（`page.tsx:112`）：`text-2xl whitespace-nowrap` → `text-xl md:text-2xl md:whitespace-nowrap`（md未満は縮小＋折返し可、md以上は不変）。
+- **archive の情報欠け解消**（`archive-table.tsx`）：7列テーブルの `overflow-hidden rounded-lg` 外枠はそのままに、内側へ `overflow-x-auto` のラッパを追加し table を `w-full min-w-[720px] md:min-w-0` に。md未満のみ横スクロール可、md以上は `min-w-0` で従来どおり `w-full` に収まり**見た目不変**（角丸・境界も保持）。
+
+**検証**：`tsc --noEmit` / `eslint`（items-form・page・archive-table・status-dropdown）/ `next build` いずれもクリーン（exit 0）。顧客向け出力への原価・間接材料の混入なし（grep 確認済み）。実機/レスポンシブの目視（375 / PC）は未自動化（ブラウザ自動化ツール未導入＋認証セッション必須のため）。PC不変はCSS構造上（全上書きが `max-width:767px` か `md:` プレフィックス配下）で担保。
+
+**残件**：
+- **payments の `min-w-[760px]`**：横スクロールで読めるため後回し（対応せず）。
+- **parts-inventory カテゴリツリー折りたたみ**：サイドバー解消（Phase 1）で致命→中に格下がり。未対応。
+- **明細D&Dの↑↓代替**：PC作業と割り切り済み・**実施しない**。
