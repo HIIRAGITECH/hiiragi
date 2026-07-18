@@ -61,7 +61,7 @@ export default async function NewOrderPage() {
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-3xl">
+        <div className="px-4 sm:px-8 py-6 max-w-3xl">
           {customers.length === 0 ? (
             <div className="wos-card">
               <p className="text-sm text-[var(--color-ink-soft)]">

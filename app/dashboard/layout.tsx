@@ -45,9 +45,9 @@ export default async function DashboardLayout({
         counts={counts}
         signOutAction={signOut}
       />
-      <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+      <main className="wos-dash-main flex-1 min-w-0 flex flex-col overflow-hidden">
         {showTrialWarning ? (
-          <div className="px-8 pt-4">
+          <div className="px-4 sm:px-8 pt-4">
             <p className="wos-alert warn flex flex-wrap items-center gap-x-2">
               <span>
                 無料トライアルはあと {access.trialDaysLeft} 日で終了します。

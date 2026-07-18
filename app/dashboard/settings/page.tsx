@@ -61,7 +61,7 @@ export default async function SettingsPage({
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-4xl">
+        <div className="px-4 sm:px-8 py-6 max-w-4xl">
           <SettingsForm initial={shop} userId={user!.id} />
 
           {/* 段階5-A: Googleドライブ連携カード。連携状態で出し分け。 */}

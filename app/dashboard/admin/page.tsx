@@ -87,7 +87,7 @@ export default async function AdminPage() {
       </div>
 
       {errorMessage && (
-        <div className="px-8 pt-4">
+        <div className="px-4 sm:px-8 pt-4">
           <p className="wos-alert warn">
             ユーザ一覧の取得に失敗しました: {errorMessage}
           </p>
@@ -95,7 +95,7 @@ export default async function AdminPage() {
       )}
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6">
+        <div className="px-4 sm:px-8 py-6">
           {users.length === 0 ? (
             <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
               ユーザがいません。

@@ -474,7 +474,7 @@ export default async function DashboardPage() {
 
       {/* 2ペイン: 要対応 / 未回収 */}
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-8 px-8 py-6 min-h-full">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-8 px-4 sm:px-8 py-6 min-h-full">
           {/* 要対応 */}
           <div className="min-w-0 flex flex-col gap-3">
             <div className="wos-sec-label">

@@ -1506,3 +1506,27 @@ DB変更は②のみ。②を prod 適用してから③④のコードを push�
 **受注展開への無影響**：items-form / saveOrderAsSet / effectiveByPart は不変。今回は一覧表示コンポーネントとその data 取得のみ変更。メニューのみセットは従来どおり（parts 空なら部品セクション非表示）。
 
 **判断した点**：削除済み部品名も出せるよう parts_inventory は deleted_at で絞らず取得（見つからなければ「（削除された部品）」）。参考単価が不明な部品行は合計から除外（0扱い）し行は「—」表示。
+
+
+---
+
+## Phase 1：ダッシュボードのスマホ骨格対応（サイドバーのドロワー化）（2026-07-19）
+
+**背景**：スマホ表示の棚卸しで判明した根本原因は「サイドバー232px固定・ハンバーガー無し・globals.css にレスポンシブ @media が印刷用しか無い」こと。375px端末でダークなサイドバーが画面の約62%を占有し、全ダッシュボード本文が潰れていた。個別ページのテーブル・明細フォームは Phase 2以降とし、今回は**骨格のみ**を対応。
+
+**採用した境界**：**md（768px）**。`@media (max-width: 767px)` を「アプリ初のレスポンシブ指定」として追加。既存の印刷用 @media（globals.css）は無改修。
+
+**絶対条件＝PCの見た目を1pxも変えない**：新規CSSはすべて `@media (max-width: 767px)` 配下、または mobile専用要素の `display:none` 基底ルールに限定。`.wos-navbtn` / `.wos-overlay` は既定 `display:none` で md以上は不可視。`px-8` は `px-4 sm:px-8` 化（sm=640px で px-8 に戻るため md以上は不変）。**新規 @media ルールは @layer components の外（非レイヤー）に置き**、レイヤー内の `.wos-*` 基底より優先させて md未満のみ上書きが効くようにした。
+
+**実装内容**：
+- **サイドバーのドロワー化**（`app/dashboard/sidebar.tsx` / `globals.css`）：md未満で `.wos-sidebar` を `position:fixed` + `translateX(-100%)`（画面外）にし、`.open` で左からスライド表示（本文を押し出さず上に重ねる）。`sidebar.tsx` は既に client component のため `useState` で開閉を保持。ハンバーガーボタン（`.wos-navbtn`・44px四方・`aria-label`/`aria-expanded`/`aria-controls`）とオーバーレイ（`.wos-overlay`・タップで閉じる）を追加。**ナビリンク・ブランドリンクのタップで自動的に閉じる**（`onClick={close}`）。開閉アイコンはハンバーガー↔×で切替。
+- **固定ボタンのクリアランス**：`app/dashboard/layout.tsx` の `<main>` に `wos-dash-main` を付与し、md未満で `padding-top:56px`（固定ボタンに本文が潜り込まないように）。
+- **本文パディングの狭幅対応**：ダッシュボード配下の**独立 `px-8` を一括で `px-4 sm:px-8` に置換（38ファイル・48箇所）**。`sm:px-8` 等の既存プレフィックス付きは非対象。
+- **ページヘッダーの狭幅対応**：`.wos-pagehead`（`flex justify-between` 固定）を md未満で `flex-direction:column` + `align-items:flex-start` + `padding:16px 16px` にし、タイトル群と操作ボタン群を縦積み化（`.wos-actions` は `flex-wrap:wrap`）。
+
+**今回確定した方針**：**現場スマホは「見る＋軽い更新」までと割り切る。明細の入力・並べ替えはPC作業とする。**
+- **parts-inventory / work-menus の並べ替えD&D（@dnd-kit）はスマホ非対応（PC作業）を既知事項として確定**。両者とも `PointerSensor + KeyboardSensor` のみで `TouchSensor` 無し・`touch-action` 指定無し。閲覧・検索・編集はスマホ可、並べ替えのみPC。
+
+**検証**：`tsc --noEmit` / `eslint`（sidebar・layout）/ `next build` いずれもクリーン（exit 0）。実機/レスポンシブの目視（375 / 768 / PC）は未自動化（ブラウザ自動化ツール未導入＋ダッシュボードは認証セッション必須のため）。PC不変はCSS構造上（全上書きが max-width:767px か display:none 配下）で担保。
+
+**Phase 2以降の残件**：明細フォームのスマホ縦積み・タップ標的44px化・D&Dのスマホ↑↓代替、archive の `overflow-hidden` 解除、parts-inventory カテゴリツリー折りたたみ。**PDFプレビューの狭幅溢れは対応不要と判断**（実出力はサーバー生成PDF/印刷で、画面プレビューは参考用途・事務所PC前提）。

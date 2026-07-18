@@ -175,7 +175,7 @@ export default async function OrderDetailPage(
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 flex flex-col gap-6">
+        <div className="px-4 sm:px-8 py-6 flex flex-col gap-6">
           {/* 顧客・車両情報 */}
           <section className="grid gap-4 sm:grid-cols-2">
             <div className="wos-card">

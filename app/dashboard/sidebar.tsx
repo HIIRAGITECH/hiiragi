@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 type NavItem = {
   jp: string;
@@ -31,6 +32,9 @@ export default function Sidebar({
   signOutAction,
 }: Props) {
   const pathname = usePathname();
+  // md未満（スマホ）のドロワー開閉。md以上は CSS 側でこの状態を無視するため PC は不変。
+  const [open, setOpen] = useState(false);
+  const close = () => setOpen(false);
 
   const groups: NavGroup[] = [
     {
@@ -114,50 +118,98 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="wos-sidebar no-print">
-      <div className="wos-sidebar-brand">
-        <Link
-          href="/dashboard"
-          className="wos-wm block no-underline"
-          style={{ color: "inherit" }}
+    <>
+      {/* ハンバーガー（md未満のみ表示・44px四方）。md以上は CSS で display:none。 */}
+      <button
+        type="button"
+        className="wos-navbtn no-print"
+        aria-label={open ? "メニューを閉じる" : "メニューを開く"}
+        aria-expanded={open}
+        aria-controls="dashboard-sidebar"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          aria-hidden="true"
         >
-          HIIRAGI <em>TECH</em>
-        </Link>
-        <span className="wos-sub">工房管理システム</span>
-      </div>
-      <nav className="wos-sidebar-nav">
-        {groups.map((g) => (
-          <div key={g.group}>
-            <div className="wos-sidebar-grp">{g.group}</div>
-            {g.items.map((it) => (
-              <Link
-                key={it.href}
-                href={it.href}
-                className={`wos-sidebar-link ${isActive(it) ? "active" : ""}`}
-              >
-                <span>{it.jp}</span>
-                {it.ct != null && <span className="wos-ct">{it.ct}</span>}
-              </Link>
-            ))}
-          </div>
-        ))}
-      </nav>
-      <div className="wos-sidebar-foot">
-        {userEmail && (
-          <>
-            <span className="wos-user-sub" title={userEmail}>
-              {userEmail.length > 22
-                ? `${userEmail.slice(0, 20)}…`
-                : userEmail}
-            </span>
-          </>
-        )}
-        <form action={signOutAction}>
-          <button type="submit" className="wos-signout w-full">
-            ログアウト
-          </button>
-        </form>
-      </div>
-    </aside>
+          {open ? (
+            <>
+              <line x1="6" y1="6" x2="18" y2="18" />
+              <line x1="6" y1="18" x2="18" y2="6" />
+            </>
+          ) : (
+            <>
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </>
+          )}
+        </svg>
+      </button>
+      {/* オーバーレイ（開いている間のみ）。タップで閉じる。 */}
+      {open ? (
+        <div
+          className="wos-overlay no-print"
+          aria-hidden="true"
+          onClick={close}
+        />
+      ) : null}
+      <aside
+        id="dashboard-sidebar"
+        className={`wos-sidebar no-print ${open ? "open" : ""}`}
+      >
+        <div className="wos-sidebar-brand">
+          <Link
+            href="/dashboard"
+            className="wos-wm block no-underline"
+            style={{ color: "inherit" }}
+            onClick={close}
+          >
+            HIIRAGI <em>TECH</em>
+          </Link>
+          <span className="wos-sub">工房管理システム</span>
+        </div>
+        <nav className="wos-sidebar-nav">
+          {groups.map((g) => (
+            <div key={g.group}>
+              <div className="wos-sidebar-grp">{g.group}</div>
+              {g.items.map((it) => (
+                <Link
+                  key={it.href}
+                  href={it.href}
+                  className={`wos-sidebar-link ${isActive(it) ? "active" : ""}`}
+                  onClick={close}
+                >
+                  <span>{it.jp}</span>
+                  {it.ct != null && <span className="wos-ct">{it.ct}</span>}
+                </Link>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="wos-sidebar-foot">
+          {userEmail && (
+            <>
+              <span className="wos-user-sub" title={userEmail}>
+                {userEmail.length > 22
+                  ? `${userEmail.slice(0, 20)}…`
+                  : userEmail}
+              </span>
+            </>
+          )}
+          <form action={signOutAction}>
+            <button type="submit" className="wos-signout w-full">
+              ログアウト
+            </button>
+          </form>
+        </div>
+      </aside>
+    </>
   );
 }

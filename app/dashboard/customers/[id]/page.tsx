@@ -75,7 +75,7 @@ export default async function CustomerDetailPage(
       <TabNav active={tab} customerId={customer.id} />
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6">
+        <div className="px-4 sm:px-8 py-6">
           {tab === "history" ? (
             <HistoryTab customerId={customer.id} userId={user!.id} />
           ) : (
@@ -102,7 +102,7 @@ function TabNav({
     "border-transparent text-[var(--color-ink-mid)] hover:text-[var(--color-ink)]";
 
   return (
-    <nav className="flex border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8">
+    <nav className="flex border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 sm:px-8">
       <Link
         href={`/dashboard/customers/${customerId}`}
         className={`${base} ${active === "info" ? activeCls : inactiveCls}`}

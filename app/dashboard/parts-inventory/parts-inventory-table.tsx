@@ -236,7 +236,7 @@ export default function PartsInventoryTable({
         {/* 右: 検索/フィルタ＋一覧（既存構造そのまま）。 */}
         <div className="flex flex-1 min-w-0 flex-col min-h-0">
           {/* 検索 + フィルタ */}
-          <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+          <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 sm:px-8 py-4 flex flex-wrap items-center gap-4">
         <div className="wos-search max-w-[480px]">
           <span className="wos-ico">⌕</span>
           <input
@@ -274,13 +274,13 @@ export default function PartsInventoryTable({
       </div>
 
       {reorderCount > 0 && !includeDeleted && (
-        <div className="px-8 pt-4">
+        <div className="px-4 sm:px-8 pt-4">
           <p className="wos-alert warn">⚠ 発注が必要: {reorderCount} 件</p>
         </div>
       )}
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6">
+        <div className="px-4 sm:px-8 py-6">
           {displayRows.length === 0 ? (
             <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
               {isFiltering

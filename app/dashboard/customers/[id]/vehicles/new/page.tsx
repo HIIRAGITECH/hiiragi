@@ -51,7 +51,7 @@ export default async function NewVehiclePage(
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-3xl">
+        <div className="px-4 sm:px-8 py-6 max-w-3xl">
           <VehicleForm
             action={action}
             submitLabel="登録する"

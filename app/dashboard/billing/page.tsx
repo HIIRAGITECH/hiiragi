@@ -81,7 +81,7 @@ export default async function BillingPage({
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-3xl space-y-6">
+        <div className="px-4 sm:px-8 py-6 max-w-3xl space-y-6">
           {status === "success" && (
             <p className="wos-alert info">
               申し込みを受け付けました。Stripe からの確認が完了次第、プランが反映されます（数秒〜数十秒）。

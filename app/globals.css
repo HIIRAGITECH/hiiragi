@@ -665,3 +665,72 @@ body {
   font-family: "IPAex Gothic", "Yu Gothic", "Hiragino Kaku Gothic ProN",
     "Noto Sans JP", system-ui, sans-serif !important;
 }
+
+/* ===== スマホ骨格（Phase 1・md=768px 境界） =====
+   これがアプリ初のレスポンシブ @media。@layer components 外（非レイヤー）に置くことで、
+   レイヤー内の .wos-* 基底ルールより優先され、md未満のときだけ上書きが効く。
+   md以上（PC）はこのブロックが一切適用されないため、既存の見た目は 1px も変わらない。
+   ハンバーガー(.wos-navbtn)とオーバーレイ(.wos-overlay)は既定で非表示、md未満でのみ表示。 */
+.wos-navbtn {
+  display: none;
+}
+.wos-overlay {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  /* サイドバーを画面外へ隠し、.open で左からドロワー表示（本文は押し出さず上に重ねる）。 */
+  .wos-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 80;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 2px 0 16px rgba(0, 0, 0, 0.25);
+    overflow-y: auto;
+  }
+  .wos-sidebar.open {
+    transform: translateX(0);
+  }
+  /* ドロワー背後のオーバーレイ（タップで閉じるのは sidebar.tsx 側で処理）。 */
+  .wos-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  /* ハンバーガーボタン（44px四方確保）。 */
+  .wos-navbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 60;
+    width: 44px;
+    height: 44px;
+    background: var(--color-ink);
+    color: var(--color-on-ink-fg);
+    border: 1px solid var(--color-on-ink-line);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  /* 固定ボタンの下に本文が潜り込まないよう、本文上部に余白を確保。 */
+  .wos-dash-main {
+    padding-top: 56px;
+  }
+  /* ページヘッダーはタイトル群と操作ボタン群を縦積みにし、左右パディングを詰める。 */
+  .wos-pagehead {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 16px;
+  }
+  .wos-pagehead .wos-actions {
+    flex-wrap: wrap;
+  }
+}

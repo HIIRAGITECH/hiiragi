@@ -172,7 +172,7 @@ export default function WorkMenusTable({
 
   return (
     <>
-      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 sm:px-8 py-4 flex flex-wrap items-center gap-4">
         <div className="wos-search max-w-[480px]">
           <span className="wos-ico">⌕</span>
           <input
@@ -202,7 +202,7 @@ export default function WorkMenusTable({
         </label>
       </div>
 
-      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-3 flex flex-wrap items-center gap-2">
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 sm:px-8 py-3 flex flex-wrap items-center gap-2">
         {[
           { value: "all" as Filter, label: "すべて" },
           ...allCategories.map((c) => ({
@@ -222,7 +222,7 @@ export default function WorkMenusTable({
       </div>
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6">
+        <div className="px-4 sm:px-8 py-6">
           {displayRows.length === 0 ? (
             <div className="wos-card text-center py-12 text-sm text-[var(--color-ink-light)]">
               {isFiltering

@@ -25,7 +25,7 @@ export default function NewWorkItemCategoryPage() {
         </div>
       </div>
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6 max-w-xl">
+        <div className="px-4 sm:px-8 py-6 max-w-xl">
           <WorkItemCategoryForm
             action={createWorkItemCategory}
             submitLabel="登録する"

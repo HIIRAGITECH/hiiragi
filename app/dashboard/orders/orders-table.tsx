@@ -91,7 +91,7 @@ export default function OrdersTable({ rows, baseUrl, mypageEnabled }: Props) {
   return (
     <>
       {/* 検索バー */}
-      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-8 py-4 flex flex-wrap items-center gap-4">
+      <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)] px-4 sm:px-8 py-4 flex flex-wrap items-center gap-4">
         <div className="wos-search max-w-[480px]">
           <span className="wos-ico">⌕</span>
           <input

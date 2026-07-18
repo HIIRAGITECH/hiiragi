@@ -72,7 +72,7 @@ export default async function ArchivePage({
       </div>
 
       {error && (
-        <div className="px-8 pt-4">
+        <div className="px-4 sm:px-8 pt-4">
           <p className="wos-alert warn">
             アーカイブ一覧の取得に失敗しました: {error.message}
           </p>
@@ -80,7 +80,7 @@ export default async function ArchivePage({
       )}
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
-        <div className="px-8 py-6">
+        <div className="px-4 sm:px-8 py-6">
           <ArchiveTable rows={orders} year={year} />
         </div>
       </div>

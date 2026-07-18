@@ -94,7 +94,7 @@ export default async function PaymentsPage() {
       </div>
 
       {error && (
-        <div className="px-8 pt-4">
+        <div className="px-4 sm:px-8 pt-4">
           <p className="wos-alert warn">
             未回収一覧の取得に失敗しました: {error.message}
           </p>
