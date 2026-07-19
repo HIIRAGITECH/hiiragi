@@ -178,7 +178,12 @@
   → マイページ同期は plan/status を触らない前提なので **upsert を update に変更**（行はサインアップ時トリガーで必ず存在）。
   再送で再同期し、`options.mypage=true`/`stripe_mypage_subscription_id`/`stripe_customer_id` 同期・base不可侵をdev実データで確認。
   Stripe側は当初から正常（別sub `sub_...`・trial_end=null・invoice amount_paid=980 paid）。
-- **残タスク**：Phase3解約テスト → prod migration（`stripe_mypage_subscription_id`列）→ 本番price(¥980)・liveキー・本番Webhook。`npm run build`/`tsc --noEmit` 通過。
+- **dev一気通貫テスト（2026-07-20）全経路グリーン**：追加(別sub・trialなし・¥980即paid)／解約予約(`mypage_cancel_at`セット・`mypage=true`継続)／
+  解約取消／期間末失効(`subscription.deleted`→`mypage=false`・id消去)、いずれもbase(plan/status/基本sub)不可侵をStripe実データ＋dev DBで確認。
+- **【解消済・2026-07-20】prod migration 適用済み**：`stripe_mypage_subscription_id` 列＋部分unique index を prod SQL Editor で
+  BEGIN/COMMIT 適用・台帳(`20260720120000`)登録。検証 `columns_ok/indexes_ok/ledger_ok` すべて1。既存3行(special_free)無傷。
+- **残タスク（本番go-live）**：② Stripe本番モードで ¥980/¥1,980 price 作成＋本番Webhook登録(`/api/stripe/webhook`・4イベント)、
+  ③ Vercel本番env(`sk_live`/`pk_live`/本番`STRIPE_WEBHOOK_SECRET`/本番price ID×2)、④再デプロイ、⑤本番スモーク(実カード→即返金)。`npm run build`/`tsc --noEmit` 通過。
 
 ### 2026-07-16 ── 受注ページ高速化 その2：ステータス変更後の再取得から重いカタログを外す（在庫ロジック無改修・本番反映）
 
