@@ -202,6 +202,16 @@
 - **ロールバック手順**：機能を戻すなら `git revert 49fe817 ab91f95 d3d53da`（webhook/billing/型が撤去され、billingは基本プラン申込のみに戻る）。
   prod の追加列 `stripe_mypage_subscription_id` は nullable 追加のみ＝**残置して無害**（旧コードは参照しない）。Vercelのlive env は削除で即無効化可。
 - `npm run build`/`tsc --noEmit` 通過。
+- **本番前 読み取り監査（2026-07-20・実課金なし）でグリーン確認した項目**：
+  - prod：サインアップトリガー `auth_users_create_subscription` 有効(O)・無条件・`create_default_subscription`=SECURITY DEFINER＝新規サインアップで trial 行が確実に作成される。
+  - prod権限：`has_table_privilege` で service_role の INSERT/UPDATE/SELECT=true＝**webhook書き込みが本番でも通る**（relacl=全ロールarwdDxtm）。authenticated SELECT=true＝billing/middleware読取OK。RLSは `subscriptions_owner_select`(authenticated・user_id=auth.uid) の1本。
+  - prod制約：plan CHECK(free/paid/trial/special_free)・status CHECK(active/suspended) は webhook が書く値(paid/free・active/suspended)と整合。`user_id` UNIQUE index 有＝upsert onConflict機能。id/options/status に default 有。
+  - Stripe live：Webhook `we_1TuxWy…`=enabled・livemode・URL正・4処理イベント+`invoice.payment_failed`。live price 基本`price_1Tcpnq…`(¥1,980)・マイページ`price_1Tcpo…`(¥980)。
+  - アドバイザ：subscriptions/Stripe関連の指摘ゼロ。
+- **監査で残った留意点（launchブロッカーではない）**：
+  - 【中】**基本プラン(¥1,980)のcheckout→webhook→plan=paid はdev/prodとも未実行**（devで検証したのはオプション経路のみ）。構造は健全だがe2e未証明→サインアップ試験で基本もCheckout到達まで確認推奨。
+  - 【低】addMypageOption は「オプションsub未存在」時に毎回Checkout生成＝超高速二重完了で二重契約の理論リスク（UIは単一ボタン+リダイレクトで実際には起きにくい）。将来idempotency追加余地。
+  - 【低】`invoice.payment_failed` はコード未処理（default無視）。失効自体は subscription.updated 経由で成立するが、督促メールはStripe側の自動メール設定に依存→Stripeダッシュボードで失敗時顧客メールをON推奨。
 
 ### 2026-07-16 ── 受注ページ高速化 その2：ステータス変更後の再取得から重いカタログを外す（在庫ロジック無改修・本番反映）
 
