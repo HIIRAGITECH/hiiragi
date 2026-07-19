@@ -182,8 +182,26 @@
   解約取消／期間末失効(`subscription.deleted`→`mypage=false`・id消去)、いずれもbase(plan/status/基本sub)不可侵をStripe実データ＋dev DBで確認。
 - **【解消済・2026-07-20】prod migration 適用済み**：`stripe_mypage_subscription_id` 列＋部分unique index を prod SQL Editor で
   BEGIN/COMMIT 適用・台帳(`20260720120000`)登録。検証 `columns_ok/indexes_ok/ledger_ok` すべて1。既存3行(special_free)無傷。
-- **残タスク（本番go-live）**：② Stripe本番モードで ¥980/¥1,980 price 作成＋本番Webhook登録(`/api/stripe/webhook`・4イベント)、
-  ③ Vercel本番env(`sk_live`/`pk_live`/本番`STRIPE_WEBHOOK_SECRET`/本番price ID×2)、④再デプロイ、⑤本番スモーク(実カード→即返金)。`npm run build`/`tsc --noEmit` 通過。
+- **本番go-live作業（2026-07-20 夜・実施済み）**：
+  - コード：`d3d53da`(feat) → `ab91f95`(webhook fix) → `49fe817`(docs)。main へ push 済み・Vercel デプロイ済み。
+  - prod DB：`stripe_mypage_subscription_id` 列＋index 適用・台帳登録済み（上記）。
+  - Stripe本番Webhook：`hiiragi-workshop-os-prod`（`we_1TuxWyHPj20V4ytKbZfyTpBN`）／URL `https://app.hiiragi-tech.app/api/stripe/webhook`／
+    5イベント（`checkout.session.completed`・`customer.subscription.created|updated|deleted`＋`invoice.payment_failed`。後者はコード未処理=default無視で無害）。
+  - Vercel本番env：`STRIPE_SECRET_KEY`(sk_live)・`STRIPE_WEBHOOK_SECRET`(本番whsec)・`STRIPE_PRICE_MYPAGE`=`price_1TcpoEHPj20V4ytKdWL49KE0`
+    （CLIでlive照合済：livemode=true・¥980・active）。`STRIPE_PUBLISHABLE_KEY`/`NEXT_PUBLIC_APP_URL` も追加されたが**コード未参照**（無害）。
+    ※ Onoderaさんの決済導線URLは `NEXT_PUBLIC_SITE_URL`＋ヘッダfallbackで動く（`NEXT_PUBLIC_APP_URL`は使われない）。
+  - 動作確認：Onoderaさんテナント（**Special Free**）で `/dashboard/billing` が special_free 表示（課金導線・オプション欄とも非表示）＝**設計どおり**。
+    既存 special_free 3名に影響なしを確認。
+- **🔴 未解決（次回最優先）：Vercel の基本プラン価格の変数名が誤り**。設定値は `STRIPE_PRICE_STANDARD` だが、
+  コードが読むのは **`STRIPE_PRICE_BASIC`**（`lib/stripe.ts:30`）。このままだと**本番で新規契約者が「プランに申し込む」を押すと
+  `STRIPE_PRICE_BASIC が設定されていません` で落ちる**。→ Vercelで `STRIPE_PRICE_STANDARD`→`STRIPE_PRICE_BASIC` にリネーム＋再デプロイが必要。
+  （¥980オプションは `STRIPE_PRICE_MYPAGE` のみ使用のため、この不整合の影響を受けず動く。）
+- **⚠️ 未検証：本番live決済フローは一度も実行していない**。Onoderaさんが Special Free で課金導線が出ないため、`¥980追加`/`¥1,980申込` の
+  実課金は未証明。→ **新規テナント（DBトライアル）で ¥980 を1回通し、prod DB の `options.mypage=true`/`stripe_mypage_subscription_id` を
+  確認する**のが本番稼働の最終ゲート（後日）。dev では全経路グリーン（上記）だが本番liveは別物として必ず1回検証。
+- **ロールバック手順**：機能を戻すなら `git revert 49fe817 ab91f95 d3d53da`（webhook/billing/型が撤去され、billingは基本プラン申込のみに戻る）。
+  prod の追加列 `stripe_mypage_subscription_id` は nullable 追加のみ＝**残置して無害**（旧コードは参照しない）。Vercelのlive env は削除で即無効化可。
+- `npm run build`/`tsc --noEmit` 通過。
 
 ### 2026-07-16 ── 受注ページ高速化 その2：ステータス変更後の再取得から重いカタログを外す（在庫ロジック無改修・本番反映）
 
