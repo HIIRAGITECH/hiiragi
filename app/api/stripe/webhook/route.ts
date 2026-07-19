@@ -166,19 +166,21 @@ async function applyMypageSubscription(
     mypage_cancel_at: cancelAtIso,
   };
 
-  const { error } = await admin.from("subscriptions").upsert(
-    {
-      user_id: userId,
+  // plan/status は base 側の担当なので触らない。subscriptions 行はサインアップ時の
+  // トリガーで必ず存在するため upsert ではなく update（upsert だと NOT NULL の plan を
+  // 渡さない INSERT 行が組み立てられ not-null 違反で落ちる）。
+  const { error } = await admin
+    .from("subscriptions")
+    .update({
       // 顧客IDは基本プラン契約前でも埋めておく（オプション先行契約に対応）。
       stripe_customer_id: customerId,
       stripe_mypage_subscription_id: isActive ? sub.id : null,
       options: mergedOptions,
-    },
-    { onConflict: "user_id" },
-  );
+    })
+    .eq("user_id", userId);
 
   if (error) {
-    throw new Error(`subscriptions upsert (mypage) failed: ${error.message}`);
+    throw new Error(`subscriptions update (mypage) failed: ${error.message}`);
   }
 }
 

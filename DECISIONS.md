@@ -172,7 +172,13 @@
 - **変更ファイル**：`supabase/migrations/20260720120000_add_mypage_subscription_to_subscriptions.sql`（`stripe_mypage_subscription_id`列＋部分ユニークindex・dev適用済）、
   `lib/types.ts`（`SubscriptionOptions.mypage_cancel_at`・`Subscription.stripe_mypage_subscription_id`）、`lib/stripe.ts`（`classifyPriceIds`）、
   `lib/billing/options.ts`（`getMypageOptionState` 新規）、`app/dashboard/billing/{actions.ts,billing-form.tsx,page.tsx}`、`app/api/stripe/webhook/route.ts`。
-- **残タスク**：dev実機テスト（4242）→ prod migration（`stripe_mypage_subscription_id`列）→ 本番price(¥980)・liveキー・本番Webhook。`npm run build`/`tsc --noEmit` 通過。
+- **dev実機テスト（2026-07-20・4242）で判明・修正したバグ**：`applyMypageSubscription` を `upsert(onConflict:user_id)` で
+  書いていたが、`subscriptions.plan` は NOT NULL かつ default 無しのため、行が既存でも upsert が組み立てる INSERT 行で
+  `null value in column "plan"` 違反 → webhook 500 → **Stripeで¥980課金成功なのにアプリ側 options.mypage が立たない**最悪ケースになった。
+  → マイページ同期は plan/status を触らない前提なので **upsert を update に変更**（行はサインアップ時トリガーで必ず存在）。
+  再送で再同期し、`options.mypage=true`/`stripe_mypage_subscription_id`/`stripe_customer_id` 同期・base不可侵をdev実データで確認。
+  Stripe側は当初から正常（別sub `sub_...`・trial_end=null・invoice amount_paid=980 paid）。
+- **残タスク**：Phase3解約テスト → prod migration（`stripe_mypage_subscription_id`列）→ 本番price(¥980)・liveキー・本番Webhook。`npm run build`/`tsc --noEmit` 通過。
 
 ### 2026-07-16 ── 受注ページ高速化 その2：ステータス変更後の再取得から重いカタログを外す（在庫ロジック無改修・本番反映）
 
