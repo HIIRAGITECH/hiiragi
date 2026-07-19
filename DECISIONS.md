@@ -192,10 +192,10 @@
     ※ Onoderaさんの決済導線URLは `NEXT_PUBLIC_SITE_URL`＋ヘッダfallbackで動く（`NEXT_PUBLIC_APP_URL`は使われない）。
   - 動作確認：Onoderaさんテナント（**Special Free**）で `/dashboard/billing` が special_free 表示（課金導線・オプション欄とも非表示）＝**設計どおり**。
     既存 special_free 3名に影響なしを確認。
-- **🔴 未解決（次回最優先）：Vercel の基本プラン価格の変数名が誤り**。設定値は `STRIPE_PRICE_STANDARD` だが、
-  コードが読むのは **`STRIPE_PRICE_BASIC`**（`lib/stripe.ts:30`）。このままだと**本番で新規契約者が「プランに申し込む」を押すと
-  `STRIPE_PRICE_BASIC が設定されていません` で落ちる**。→ Vercelで `STRIPE_PRICE_STANDARD`→`STRIPE_PRICE_BASIC` にリネーム＋再デプロイが必要。
-  （¥980オプションは `STRIPE_PRICE_MYPAGE` のみ使用のため、この不整合の影響を受けず動く。）
+- **【解消済・2026-07-20】基本プラン価格の変数名**：一時 `STRIPE_PRICE_STANDARD` で登録され誤り（コードは `STRIPE_PRICE_BASIC`）だったが、
+  Vercelで `STRIPE_PRICE_BASIC` にリネーム＋再デプロイ済み。本番の live price は CLI照合で
+  基本=`price_1TcpnqHPj20V4ytK7UN5zxH7`(¥1,980)・マイページ=`price_1TcpoEHPj20V4ytKdWL49KE0`(¥980) の2本が存在。
+  Vercel `STRIPE_PRICE_BASIC` の値が前者と一致することを目視確認する前提（env中身はコードから読めないため）。
 - **⚠️ 未検証：本番live決済フローは一度も実行していない**。Onoderaさんが Special Free で課金導線が出ないため、`¥980追加`/`¥1,980申込` の
   実課金は未証明。→ **新規テナント（DBトライアル）で ¥980 を1回通し、prod DB の `options.mypage=true`/`stripe_mypage_subscription_id` を
   確認する**のが本番稼働の最終ゲート（後日）。dev では全経路グリーン（上記）だが本番liveは別物として必ず1回検証。
