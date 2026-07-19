@@ -12,11 +12,9 @@ function SubmitButton() {
   );
 }
 
-export default function BillingForm({
-  defaultMypage,
-}: {
-  defaultMypage: boolean;
-}) {
+// 基本プランの申し込みフォーム。マイページオプションは別 subscription で管理するため
+// ここには含めない（契約後にプラン管理画面のオプションセクションから追加する）。
+export default function BillingForm() {
   return (
     <section className="wos-card space-y-4">
       <div className="wos-sec-label">プランに申し込む</div>
@@ -36,29 +34,6 @@ export default function BillingForm({
           </div>
         </div>
 
-        <label className="flex items-start gap-3 border border-[var(--color-line)] bg-[var(--color-paper)] p-3 cursor-pointer hover:border-[var(--color-line-strong)]">
-          <input
-            type="checkbox"
-            name="add_mypage"
-            defaultChecked={defaultMypage}
-            className="mt-1"
-          />
-          <div className="flex-1">
-            <div className="flex items-baseline justify-between">
-              <div className="text-sm font-medium">マイページオプション</div>
-              <div className="wos-yen text-base">
-                月額 ¥980
-                <span className="text-xs text-[var(--color-ink-light)] ml-1">
-                  税込
-                </span>
-              </div>
-            </div>
-            <div className="mt-1 text-xs text-[var(--color-ink-light)]">
-              顧客向けマイページ機能を有効化します。後からポータルでも追加・削除できます。
-            </div>
-          </div>
-        </label>
-
         <div className="flex items-center justify-between pt-2 border-t border-[var(--color-line)]">
           <div className="text-xs text-[var(--color-ink-mid)]">
             「申し込む」ボタンを押すと Stripe の決済ページへ遷移します。
@@ -66,6 +41,9 @@ export default function BillingForm({
           <SubmitButton />
         </div>
       </form>
+      <p className="text-xs text-[var(--color-ink-light)] pt-2 border-t border-[var(--color-line)]">
+        お客様マイページオプション（月額 ¥980）は、申し込み後にこの画面から追加できます。
+      </p>
     </section>
   );
 }

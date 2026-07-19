@@ -148,6 +148,32 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-07-20 ── お客様マイページオプションの Stripe 連携（独立subscription方式・dev実装）
+
+> 「基本プラン ¥1,980（30日トライアル）＋ マイページオプション ¥980（トライアル対象外・即課金）」を課金と紐付けた。
+> **コード変更のみ・dev(qajrjtdwmxgmvzxecqvg)にmigration適用済み。prod・本番Stripeは未着手（テストモードのまま）。**
+
+- **【最重要の技術判断】per-item trial は Stripe に存在しない**：SDK 22.2.0 の型で確認。`trial_end`/`trial_period_days`
+  は **subscription 単位**のみ（`SubscriptionCreateParams.Item` に `trial_end` は無い）。よって「1つの subscription 内で
+  base はトライアル・option は即課金」は**実装不可能**。→ **オプションを基本とは別の subscription として管理する方式**を採用（小野寺さん合意）。
+- **課金構造**：
+  - 基本プラン … 従来どおり。DBトリガーの30日トライアル → `/dashboard/billing` の Checkout で契約（即課金）。`stripe_subscription_id` に保存。
+  - マイページオプション … **独立した Stripe subscription**。追加した瞬間に即課金・トライアルなし。`stripe_mypage_subscription_id`（本migrationで追加）に保存。基本のトライアル状態に一切影響しない。**日割り(proration)は独立subのため不要**（当月分から丸ごと課金）。
+- **カード登録タイミング**：サインアップ時はカード不要（現状維持＝HP「クレカ登録不要で30日無料」を堅持）。オプション追加時に
+  Checkout でカード取得＋即課金。既存オプションsubが「解約予約中」なら Checkout せず予約解除（`cancel_at_period_end=false`）で継続。
+- **解約（removeMypageOption）**：期間末まで有効・返金なし（`cancel_at_period_end=true`）。最終利用日は `options.mypage_cancel_at`(jsonb)
+  に記録し UI に「解約予約中（○/○まで）」表示。実失効は期間末の `customer.subscription.deleted` で `options.mypage=false`。
+- **Webhook**：`checkout.session.completed` / `customer.subscription.created|updated|deleted` を price 構成（`classifyPriceIds`）で
+  base / mypage に振り分け、**担当列を厳密分離**（base=plan/status/stripe_subscription_id、mypage=options.mypage/stripe_mypage_subscription_id）。
+  片方のイベントで他方を上書きしない。
+- **アクセス制御は変更なし**：マイページ機能は既に `canUseMypage()`（`options.mypage===true` or 管理者）でサーバーガード済み
+  （発行/再発行 `mypage-actions.ts`）。今回のwebhook同期で `options.mypage` が正しく立つ/落ちることで課金連動が完成。
+  顧客閲覧ページ `/mypage/[token]` は従来どおり非ゲート（発行済みURLは解約後も顧客が開ける設計）。
+- **変更ファイル**：`supabase/migrations/20260720120000_add_mypage_subscription_to_subscriptions.sql`（`stripe_mypage_subscription_id`列＋部分ユニークindex・dev適用済）、
+  `lib/types.ts`（`SubscriptionOptions.mypage_cancel_at`・`Subscription.stripe_mypage_subscription_id`）、`lib/stripe.ts`（`classifyPriceIds`）、
+  `lib/billing/options.ts`（`getMypageOptionState` 新規）、`app/dashboard/billing/{actions.ts,billing-form.tsx,page.tsx}`、`app/api/stripe/webhook/route.ts`。
+- **残タスク**：dev実機テスト（4242）→ prod migration（`stripe_mypage_subscription_id`列）→ 本番price(¥980)・liveキー・本番Webhook。`npm run build`/`tsc --noEmit` 通過。
+
 ### 2026-07-16 ── 受注ページ高速化 その2：ステータス変更後の再取得から重いカタログを外す（在庫ロジック無改修・本番反映）
 
 > ステータス変更が遅い主因＝「変更後に受注詳細ページを丸ごと再レンダーする際、**連動表示に不要な重いカタログ**

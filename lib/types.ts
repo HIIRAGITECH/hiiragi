@@ -404,7 +404,14 @@ export const SUBSCRIPTION_OPTION_KEYS = [
   "hp_integration",
 ] as const;
 export type SubscriptionOptionKey = (typeof SUBSCRIPTION_OPTION_KEYS)[number];
-export type SubscriptionOptions = Partial<Record<SubscriptionOptionKey, boolean>>;
+export type SubscriptionOptions = Partial<
+  Record<SubscriptionOptionKey, boolean>
+> & {
+  // マイページオプションが「解約予約中」のとき、利用可能な最終日時（ISO・現在の請求期間末）。
+  //   期間末まで options.mypage=true のまま使え、subscription.deleted 到達で mypage=false + この値クリア。
+  //   未予約・未契約は undefined/null。
+  mypage_cancel_at?: string | null;
+};
 
 export type Subscription = {
   id: string;
@@ -416,7 +423,10 @@ export type Subscription = {
   memo: string | null;
   // Stripe 連携。未契約は null。
   stripe_customer_id: string | null;
+  // 基本プラン用の Stripe subscription。
   stripe_subscription_id: string | null;
+  // マイページオプション用の「独立した」Stripe subscription。基本とは別サイクル・別トライアル。
+  stripe_mypage_subscription_id: string | null;
   created_at: string;
   updated_at: string;
 };

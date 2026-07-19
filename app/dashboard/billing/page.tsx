@@ -2,9 +2,14 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { evaluateAccess } from "@/lib/subscription";
+import { getMypageOptionState } from "@/lib/billing/options";
 import type { Subscription } from "@/lib/types";
 import BillingForm from "./billing-form";
-import { openCustomerPortal } from "./actions";
+import {
+  addMypageOption,
+  openCustomerPortal,
+  removeMypageOption,
+} from "./actions";
 
 export const metadata: Metadata = {
   title: "プラン管理 | HIIRAGI",
@@ -23,6 +28,42 @@ function formatDateJp(iso: string | null): string {
   if (Number.isNaN(d.getTime())) return "—";
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}`;
 }
+
+const STATUS_ALERTS: Record<string, { tone: "info" | "warn"; text: string }> = {
+  success: {
+    tone: "info",
+    text: "申し込みを受け付けました。Stripe からの確認が完了次第、プランが反映されます（数秒〜数十秒）。",
+  },
+  cancel: { tone: "warn", text: "申し込みをキャンセルしました。" },
+  "no-customer": {
+    tone: "warn",
+    text: "まだ Stripe Customer が作成されていません。先に申し込みを完了してください。",
+  },
+  "option-added": {
+    tone: "info",
+    text: "お客様マイページオプションを追加しました。反映まで数秒〜数十秒かかることがあります。",
+  },
+  "option-cancel": {
+    tone: "warn",
+    text: "オプションの追加をキャンセルしました。",
+  },
+  "option-active": {
+    tone: "info",
+    text: "お客様マイページオプションは既に契約中です。",
+  },
+  "option-resumed": {
+    tone: "info",
+    text: "オプションの解約予約を取り消しました。引き続きご利用いただけます。",
+  },
+  "option-cancel-scheduled": {
+    tone: "warn",
+    text: "オプションの解約を予約しました。現在の請求期間末まではご利用いただけます。",
+  },
+  "no-option": {
+    tone: "warn",
+    text: "契約中のオプションが見つかりませんでした。",
+  },
+};
 
 export default async function BillingPage({
   searchParams,
@@ -45,9 +86,9 @@ export default async function BillingPage({
   const sub = (subRow as Subscription | null) ?? null;
 
   const isPaidActive = sub?.plan === "paid" && sub.status === "active";
-  // 特別無料（無料協力者）プラン。課金なしで恒久有効のため、申し込みフォームは出さない。
+  // 特別無料（無料協力者）プラン。課金なしで恒久有効のため、申し込み・オプションUIは出さない。
   const isSpecialFree = sub?.plan === "special_free";
-  const mypageOn = sub?.options?.mypage === true;
+  const mypageOption = getMypageOptionState(sub);
 
   // ステータス表示は middleware と同じ evaluateAccess で判定し、実態と一致させる
   //（trial は status=active のままでも期限切れなら「試用期間終了」と出す）。
@@ -68,6 +109,8 @@ export default async function BillingPage({
     sub.trial_ends_at != null &&
     new Date(sub.trial_ends_at).getTime() <= Date.now();
 
+  const alert = status ? STATUS_ALERTS[status] : undefined;
+
   return (
     <>
       <div className="wos-pagehead">
@@ -82,20 +125,8 @@ export default async function BillingPage({
 
       <div className="flex-1 overflow-auto bg-[var(--color-cream)]">
         <div className="px-4 sm:px-8 py-6 max-w-3xl space-y-6">
-          {status === "success" && (
-            <p className="wos-alert info">
-              申し込みを受け付けました。Stripe からの確認が完了次第、プランが反映されます（数秒〜数十秒）。
-            </p>
-          )}
-          {status === "cancel" && (
-            <p className="wos-alert warn">
-              申し込みをキャンセルしました。
-            </p>
-          )}
-          {status === "no-customer" && (
-            <p className="wos-alert warn">
-              まだ Stripe Customer が作成されていません。先に申し込みを完了してください。
-            </p>
+          {alert && (
+            <p className={`wos-alert ${alert.tone}`}>{alert.text}</p>
           )}
 
           {/* 現在のプラン */}
@@ -121,7 +152,13 @@ export default async function BillingPage({
                 </span>
               </dd>
               <dt className="text-[var(--color-ink-mid)]">マイページ</dt>
-              <dd>{mypageOn ? "ON" : "OFF"}</dd>
+              <dd>
+                {mypageOption.status === "active"
+                  ? "契約中"
+                  : mypageOption.status === "canceling"
+                    ? `解約予約中（${formatDateJp(mypageOption.cancelAt)}まで）`
+                    : "OFF"}
+              </dd>
               {sub?.plan === "trial" && sub.trial_ends_at && (
                 <>
                   <dt className="text-[var(--color-ink-mid)]">試用期限</dt>
@@ -146,25 +183,8 @@ export default async function BillingPage({
             </dl>
           </section>
 
-          {/* 申し込み or 管理 */}
-          {isPaidActive ? (
-            <section className="wos-card space-y-3">
-              <div className="wos-sec-label">プラン管理</div>
-              <p className="text-sm text-[var(--color-ink-mid)]">
-                請求書履歴の確認・支払い方法の変更・解約は Stripe のお客様ポータルから行えます。
-              </p>
-              <form action={openCustomerPortal}>
-                <button type="submit" className="wos-btn wos-btn-sm">
-                  お客様ポータルを開く
-                </button>
-              </form>
-              {!mypageOn && (
-                <p className="text-xs text-[var(--color-ink-light)] pt-2 border-t border-[var(--color-line)]">
-                  マイページオプションの追加もポータルから行えます。
-                </p>
-              )}
-            </section>
-          ) : isSpecialFree ? (
+          {/* 基本プラン: 申し込み or 管理 */}
+          {isSpecialFree ? (
             <section className="wos-card space-y-3">
               <div className="wos-sec-label">プラン管理</div>
               <p className="text-sm text-[var(--color-ink-mid)]">
@@ -181,11 +201,89 @@ export default async function BillingPage({
                 までお問い合わせください。
               </p>
             </section>
+          ) : isPaidActive ? (
+            <section className="wos-card space-y-3">
+              <div className="wos-sec-label">基本プラン</div>
+              <p className="text-sm text-[var(--color-ink-mid)]">
+                請求書履歴の確認・支払い方法の変更・解約は Stripe のお客様ポータルから行えます。
+              </p>
+              <form action={openCustomerPortal}>
+                <button type="submit" className="wos-btn wos-btn-sm">
+                  お客様ポータルを開く
+                </button>
+              </form>
+            </section>
           ) : (
-            <BillingForm defaultMypage={false} />
+            <BillingForm />
+          )}
+
+          {/* お客様マイページオプション（特別無料以外に常時表示。トライアル中でも追加可＝即課金） */}
+          {!isSpecialFree && (
+            <MypageOptionSection state={mypageOption} />
           )}
         </div>
       </div>
     </>
+  );
+}
+
+function MypageOptionSection({
+  state,
+}: {
+  state: ReturnType<typeof getMypageOptionState>;
+}) {
+  return (
+    <section className="wos-card space-y-3">
+      <div className="wos-sec-label">お客様マイページオプション</div>
+      <div className="flex items-baseline justify-between">
+        <div className="text-sm font-medium">お客様向けマイページ機能</div>
+        <div className="wos-yen text-base">
+          月額 ¥980
+          <span className="text-xs text-[var(--color-ink-light)] ml-1">
+            税込
+          </span>
+        </div>
+      </div>
+      <p className="text-xs text-[var(--color-ink-light)]">
+        受注ごとに顧客専用URLを発行し、作業状況を共有できる機能です。トライアル対象外で、追加した時点から課金されます（日割りなし・当月分から）。
+      </p>
+
+      {state.status === "active" ? (
+        <div className="pt-2 border-t border-[var(--color-line)] space-y-2">
+          <p className="text-sm text-[var(--color-go)]">契約中</p>
+          <form action={removeMypageOption}>
+            <button type="submit" className="wos-btn wos-btn-sm wos-btn-ghost">
+              オプションを解約する
+            </button>
+          </form>
+          <p className="text-xs text-[var(--color-ink-light)]">
+            解約しても現在の請求期間末までは利用でき、返金はありません。
+          </p>
+        </div>
+      ) : state.status === "canceling" ? (
+        <div className="pt-2 border-t border-[var(--color-line)] space-y-2">
+          <p className="text-sm text-[var(--color-warn)]">
+            解約予約中（{formatDateJp(state.cancelAt)}まで利用可）
+          </p>
+          <form action={addMypageOption}>
+            <button type="submit" className="wos-btn wos-btn-sm">
+              解約を取り消す
+            </button>
+          </form>
+        </div>
+      ) : (
+        <div className="pt-2 border-t border-[var(--color-line)] space-y-2">
+          <p className="text-sm text-[var(--color-ink-mid)]">未契約</p>
+          <form action={addMypageOption}>
+            <button type="submit" className="wos-btn wos-btn-sm">
+              ¥980/月で追加する
+            </button>
+          </form>
+          <p className="text-xs text-[var(--color-ink-light)]">
+            「追加」を押すと Stripe の決済ページへ遷移し、カード登録後すぐに有効化されます。
+          </p>
+        </div>
+      )}
+    </section>
   );
 }

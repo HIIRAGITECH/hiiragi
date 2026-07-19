@@ -29,3 +29,15 @@ export function getStripe(): Stripe {
 
 export const STRIPE_PRICE_BASIC = process.env.STRIPE_PRICE_BASIC ?? "";
 export const STRIPE_PRICE_MYPAGE = process.env.STRIPE_PRICE_MYPAGE ?? "";
+
+// subscription がどの商品のものかを price 構成から判定する。
+//   マイページオプションは基本プランとは「別の subscription」として管理するため、
+//   1つの subscription には base か mypage のどちらか一方の price しか入らない前提。
+export type StripeProductKind = "base" | "mypage" | "unknown";
+
+export function classifyPriceIds(priceIds: Iterable<string>): StripeProductKind {
+  const set = new Set(priceIds);
+  if (STRIPE_PRICE_MYPAGE && set.has(STRIPE_PRICE_MYPAGE)) return "mypage";
+  if (STRIPE_PRICE_BASIC && set.has(STRIPE_PRICE_BASIC)) return "base";
+  return "unknown";
+}
