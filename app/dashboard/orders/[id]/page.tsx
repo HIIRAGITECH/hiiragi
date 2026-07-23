@@ -18,6 +18,7 @@ import DocumentOutput from "./document-output";
 import MypageSection from "./mypage-section";
 import OrderItemsSection from "./order-items-section";
 import OrderStatusBar from "./order-status-bar";
+import SalesMonthSection from "./sales-month-section";
 import SaveAsSetButton from "./save-as-set-button";
 // 在庫はステータス連動（了承済=確保 / 完了=消費）に一本化したため、手動在庫引きUI
 // (StockDeductionSection) は引退（描画停止）。server action / RPC は保険として残置（UIからは到達不能）。
@@ -258,6 +259,21 @@ export default async function OrderDetailPage(
               </Suspense>
             </div>
           </section>
+
+          {/* 売上計上月（経営者判断の会計分類・内部管理用）。
+              請求済 / 入金済 のときだけ表示。null なら invoiced_at の月で集計する（従来動作）。
+              マイページ・PDF には出さない（この画面と売上集計にのみ効く）。 */}
+          {(order.invoice_status === "請求済" ||
+            order.invoice_status === "入金済") && (
+            <section className="wos-card">
+              <div className="wos-sec-label mb-3">売上計上月</div>
+              <SalesMonthSection
+                orderId={order.id}
+                invoicedAt={order.invoiced_at}
+                salesMonth={order.sales_month}
+              />
+            </section>
+          )}
 
           {/* 帳票出力 */}
           <section className="wos-card">

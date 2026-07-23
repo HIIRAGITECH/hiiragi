@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { formatYen } from "@/lib/format";
+import { salesMonthOrFilter } from "@/lib/sales/filter";
 import { calculateTotals } from "@/lib/orders/totals";
 import {
   classifyPayment,
@@ -93,6 +94,9 @@ async function loadDashboard(): Promise<DashboardData> {
   const prevMonth = month === 1 ? 12 : month - 1;
   const prevYear = month === 1 ? year - 1 : year;
   const startPrev = `${prevYear}-${pad2(prevMonth)}-01T00:00:00+09:00`;
+  // 売上計上月（sales_month）を優先した対象月判定（売上集計ページと同じ流儀）。
+  const monthFirstThis = `${year}-${pad2(month)}-01`;
+  const monthFirstPrev = `${prevYear}-${pad2(prevMonth)}-01`;
 
   const [
     inProgressRes,
@@ -124,22 +128,20 @@ async function loadDashboard(): Promise<DashboardData> {
       )
       .eq("user_id", user.id)
       .eq("invoice_status", "請求済"),
-    // 今月売上（請求済 + 入金済）
+    // 今月売上（請求済 + 入金済）。売上計上月優先・未設定は invoiced_at の月で判定。
     supabase
       .from("orders")
       .select("items, discount_amount, deposit_amount")
       .eq("user_id", user.id)
       .in("invoice_status", ["請求済", "入金済"])
-      .gte("invoiced_at", startThis)
-      .lt("invoiced_at", endThis),
+      .or(salesMonthOrFilter(monthFirstThis, startThis, endThis)),
     // 前月売上
     supabase
       .from("orders")
       .select("items, discount_amount, deposit_amount")
       .eq("user_id", user.id)
       .in("invoice_status", ["請求済", "入金済"])
-      .gte("invoiced_at", startPrev)
-      .lt("invoiced_at", startThis),
+      .or(salesMonthOrFilter(monthFirstPrev, startPrev, startThis)),
     // 在庫アラート
     supabase
       .from("parts_inventory")

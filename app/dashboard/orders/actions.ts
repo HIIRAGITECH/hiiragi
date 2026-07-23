@@ -587,7 +587,7 @@ export async function updateInvoiceStatus(
 
   const { data: current } = await supabase
     .from("orders")
-    .select("invoiced_at, paid_at, payment_due_date, invoice_subject")
+    .select("invoiced_at, paid_at, payment_due_date, invoice_subject, sales_month")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -599,12 +599,16 @@ export async function updateInvoiceStatus(
     (current?.payment_due_date as string | null | undefined) ?? null;
   let invoice_subject: string | null =
     (current?.invoice_subject as string | null | undefined) ?? null;
+  // 売上計上月は既存値を保持。「未請求」に戻すときだけ他の請求メタと同様に null リセットする。
+  let sales_month: string | null =
+    (current?.sales_month as string | null | undefined) ?? null;
 
   if (next === "未請求") {
     invoiced_at = null;
     paid_at = null;
     payment_due_date = null;
     invoice_subject = null;
+    sales_month = null;
   } else if (next === "請求済") {
     if (!invoiced_at) invoiced_at = nowIso;
     paid_at = null;
@@ -637,6 +641,7 @@ export async function updateInvoiceStatus(
       paid_at,
       payment_due_date,
       invoice_subject,
+      sales_month,
     })
     .eq("id", id)
     .eq("user_id", user.id);
@@ -688,6 +693,43 @@ export async function updateInvoiceMeta(
   revalidatePath("/dashboard/orders");
   revalidatePath(`/dashboard/orders/${id}`);
   revalidatePath("/dashboard/payments");
+  revalidatePath("/dashboard");
+  return undefined;
+}
+
+// 経営者判断の「売上計上月」を保存する。invoice_status は変更しない（メタだけ更新）。
+//   - month は 'YYYY-MM'（<input type="month"> の値）。月初1日 'YYYY-MM-01' に正規化して保存する。
+//   - null / '' を渡すとクリア（＝ invoiced_at の月で集計する従来動作に戻す）。
+//   - 売上集計（/dashboard/sales）と KPI（/dashboard）の両方が sales_month を参照するため両方 revalidate する。
+export async function updateSalesMonth(
+  id: string,
+  month: string | null,
+): Promise<{ error: string } | undefined> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "認証エラー: 再度ログインしてください。" };
+
+  // 'YYYY-MM'（type=month）を月初1日の date 文字列に正規化。空 / null はクリア。
+  let salesMonth: string | null = null;
+  const raw = (month ?? "").trim();
+  if (raw !== "") {
+    const m = /^(\d{4})-(\d{2})$/.exec(raw);
+    if (!m) return { error: "月の形式が不正です（YYYY-MM）。" };
+    salesMonth = `${m[1]}-${m[2]}-01`;
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ sales_month: salesMonth })
+    .eq("id", id)
+    .eq("user_id", user.id);
+  if (error) return { error: `更新に失敗しました: ${error.message}` };
+
+  revalidatePath("/dashboard/orders");
+  revalidatePath(`/dashboard/orders/${id}`);
+  revalidatePath("/dashboard/sales");
   revalidatePath("/dashboard");
   return undefined;
 }

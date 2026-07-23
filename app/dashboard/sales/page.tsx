@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { salesMonthOrFilter } from "@/lib/sales/filter";
 import { TAX_RATE, calculateTotals, calculateProfit } from "@/lib/orders/totals";
 import { formatYen } from "@/lib/format";
 import type {
@@ -66,6 +67,7 @@ export default async function SalesPage({
   const monthRaw = pickInt(sp?.month, now.getMonth() + 1);
   const month = Math.min(12, Math.max(1, monthRaw));
 
+  const monthFirst = `${year}-${pad2(month)}-01`;
   const start = `${year}-${pad2(month)}-01T00:00:00+09:00`;
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
@@ -84,8 +86,8 @@ export default async function SalesPage({
       )
       .eq("user_id", user!.id)
       .in("invoice_status", ["請求済", "入金済"])
-      .gte("invoiced_at", start)
-      .lt("invoiced_at", end)
+      // 売上計上月（sales_month）優先・未設定は invoiced_at の月で判定（共通ヘルパー）。
+      .or(salesMonthOrFilter(monthFirst, start, end))
       .order("invoiced_at", { ascending: true }),
     supabase
       .from("work_item_categories")
@@ -276,7 +278,7 @@ export default async function SalesPage({
             {year}年 {month}月の売上
           </h1>
           <div className="wos-gloss">
-            請求書発行日（invoiced_at）の月で集計。作業完了は売上、未完了は前受金として分類されます。
+            売上計上月（未設定なら請求書発行日）の月で集計。作業完了は売上、未完了は前受金として分類されます。
           </div>
         </div>
         <div className="wos-actions">

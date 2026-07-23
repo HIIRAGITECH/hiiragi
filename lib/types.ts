@@ -273,6 +273,9 @@ export type Order = {
   estimate_status: EstimateStatus;
   invoice_status: InvoiceStatus;
   invoiced_at: string | null; // ISO timestamptz、売上計上の基準日
+  // 経営者判断の売上計上月（YYYY-MM-01、月初1日）。null なら invoiced_at の月で集計（従来動作）。
+  // 内部管理用・顧客非公開（マイページ/PDF には出さない）。
+  sales_month: string | null;
   paid_at: string | null; // ISO timestamptz、入金確認日
   payment_due_date: string | null; // YYYY-MM-DD、振込期限（請求書フッタ表示）
   invoice_subject: string | null; // 請求書の件名（合計金額の上に表示、任意。見積書には出さない）

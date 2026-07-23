@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS orders (
   invoice_status    text NOT NULL DEFAULT '未請求'
     CHECK (invoice_status IN ('未請求','請求済','入金済')),
   invoiced_at       timestamptz, -- 請求書発行日（売上計上の基準日）
+  sales_month       date,        -- 経営者判断の売上計上月（月初1日）。null なら invoiced_at の月で集計。内部管理用・顧客非公開
   paid_at           timestamptz, -- 入金確認日
   payment_due_date  date,        -- 振込期限（請求書フッタ表示用、任意）
   invoice_subject   text,        -- 請求書の件名（合計金額の上に表示、任意。見積書には出さない）
