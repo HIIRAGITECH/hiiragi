@@ -28,7 +28,8 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-07-08（マイページの見積セクション折りたたみ・本番反映＝`invoice_status∈{請求済,入金済}` かつ `work_status=完了` のとき見積セクションをネイティブ `<details>` で折りたたみ「（参考）お見積り内容 ▼」に。作業完了カードが明細を担う状態のときだけ見積の重複表示を畳む。**AND条件**により「請求済だが作業未完了（前払い・部品先取り運用）」では従来通り展開＝明細が展開画面から消えない。accent枠を外し「参考」トーンに・サーバーコンポーネントのまま（クライアント境界を増やさない）。コードのみ・DB変更なし・mypage-view.tsx 1ファイル・commit `26ea874`。詳細は§4 2026-07-08）
+最終更新: 2026-07-23（**売上計上月**機能・dev/prod両方反映＝経営者判断で受注ごとに「何月分の売上とするか」を上書きできる `orders.sales_month`(date・月初1日・nullable) を新設。null は従来どおり invoiced_at の月で集計＝後方互換。受注詳細に「売上計上月」小セクション（請求済/入金済のみ・`<input type=month>` モーダル・別月なら「（変更あり）」）。集計は **/dashboard/sales と /dashboard(KPI) の2箇所**を `lib/sales/filter.ts` の `.or()` 2枝（sales_month優先・未設定は invoiced_at）に切替。**マイページ/PDFには無改修＝漏洩させない**（RPC/型/描画に足さない）。prodはSQL Editor手動適用・台帳登録済（既存14件は sales_month=null で無影響）。commit `459d8c3`。詳細は§4 2026-07-23）
+※前回 2026-07-08: マイページの見積セクション折りたたみ・本番反映＝`invoice_status∈{請求済,入金済}` かつ `work_status=完了` のとき見積セクションをネイティブ `<details>` で折りたたみ「（参考）お見積り内容 ▼」に。**AND条件**で「請求済だが作業未完了」は従来通り展開。コードのみ・DB変更なし・commit `26ea874`。詳細は§4 2026-07-08
 ※前回 2026-06-26: 帳票出力を刷新・本番反映＝納品書/領収書を追加し4種化＋複数選択を1つにまとめるPDF結合(pdf-lib)、受注詳細の帳票出力をチェックボックスのポップアップ化。振込期限・件名の入力をPaymentDueModalから帳票ポップアップへ移行(updateInvoiceMeta)・PaymentDueModal廃止。DBスキーマ変更なし・commit `d582a6d`/`2310707`/`38f796f`。詳細は§4 2026-06-26
 ※前回 2026-06-23: マイページ改修フェーズA本番反映＝「作業状況」の明細再掲を廃止し進捗フェーズバー（受注受付→お見積り→ご了承・作業開始→作業中→作業完了）に置換、支払い情報を了承段階から前倒し表示。コードのみ・DB変更なし・commit `9d1f38f`。発送情報（フェーズB）は実装→dev検証まで完了したが見送り・巻き戻し＝§7参照）
 ※前回 2026-06-22: マイページURL 404バグ修正（Vercel `NEXT_PUBLIC_SITE_URL` 設定）＋認証メール日本語化＋受注の顧客検索コンボボックス化＋special_freeのmypage有効化。
@@ -147,6 +148,52 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-07-23 ── 売上計上月（経営者判断の会計分類）・dev/prod両方反映
+
+> 整備工場の実務では「6/30締めのつもりが請求書発行操作は7/2になった」等、請求書発行日
+> （`invoiced_at`）の月と、経営者が意図する売上計上月がズレるケースが頻繁にある。従来は売上集計が
+> `invoiced_at` の月固定だったため7月分に入ってしまう。そこで受注ごとに「何月分の売上とするか」を
+> 上書きできる `orders.sales_month` を新設。**調査→dev検証→prod反映まで一気通貫。commit `459d8c3`。**
+
+**新フィールド（加算的・後方互換）**
+- `orders.sales_month date NULL`（default なし）。**月初1日 `YYYY-MM-01` を格納**。
+  - **null = 従来どおり `invoiced_at` の月で集計**（既存全受注は null＝無影響。dev5件/prod14件とも null）。
+  - 内部管理用・顧客非公開。migration `20260723000000_add_sales_month_to_orders.sql`＋`schema.sql` 同期。
+  - 型＝date を採用（論点A）：同テーブルの `payment_due_date` が date という先例と整合。「日」の無意味さは
+    アプリ層で吸収（UIは年月のみ・サーバーで day=01 に正規化）。GRANT/RLS 追加不要（列追加はメタデータのみ）。
+
+**集計切替＝2箇所ある（重要）**
+- **実コードは DATE_TRUNC ではなく `.gte/.lt` の範囲フィルタ**だった。COALESCE 相当を PostgREST で書くため
+  `lib/sales/filter.ts` の `salesMonthOrFilter()` で **`.or()` 2枝**に統一：
+  ①`sales_month.eq.<月初>`（経営者が明示割当＝invoiced_at が別月でも取り込む）／
+  ②`and(sales_month.is.null, invoiced_at.gte.<start>, invoiced_at.lt.<end>)`（未設定は従来判定）。
+- 適用先は **`/dashboard/sales`（売上集計）と `/dashboard`（KPI 今月/前月売上）の両方**。片方だけだと数字がズレるため
+  必ず両方。ヘッダ文言も「売上計上月（未設定なら請求書発行日）の月で集計」に更新。
+- **再割当が正しく成立**することを dev の SQL で全4ケース検証（7月発行→6月上書きは6月のみ・7月から消える 等）。
+
+**受注詳細UI（`sales-month-section.tsx` 新規）**
+- 帳票出力セクションの直前に「売上計上月」小セクション。**`invoice_status ∈ {請求済,入金済}` のときだけ表示**。
+- 発行日（読取専用・JST年月）と計上月（既定＝`sales_month ?? invoiced_at の月`）を対で表示。
+  上書きが発行日の月と異なるとき「**（変更あり）**」を控えめに表示（論点C＝経営者判断の可視化）。
+- `<input type="month">` のモーダル（`document-output` のポータル/refresh流儀）。「**クリア**」で null に戻せる。
+
+**サーバーアクション**
+- `updateSalesMonth(id, 'YYYY-MM'|null)` 新設：月初1日に正規化して update／null・空でクリア。
+  `/dashboard/orders/[id]`・`/dashboard/sales`・`/dashboard` を revalidate。ステータス遷移とは独立（`updateInvoiceMeta` と同じ流儀）。
+- `updateInvoiceStatus` の**「未請求」戻し分岐で `sales_month=null` もリセット**（論点B）。理由＝最も近い類似項目
+  `invoice_subject`/`payment_due_date` が未請求戻しで null リセットされる既存挙動に**一貫**させる（「残す」特例を作らない）。
+  請求済/入金済分岐は無改修（デフォルト null＝発行日の月に従うので初期値焼き込み不要）。
+
+**マイページ/PDFに漏らさない＝「足さないこと」が対策**
+- `mypage_get_by_token` は `SELECT *` ではなく**明示allowlist**（sales_month を返さない）。`MypageRpcRow`/`MypageOrder`
+  型にも無い。よって **`lib/mypage/load.ts`・RPC・PDF は無改修**が正解（うっかり RPC に列を足さない限り構造的に漏れない）。
+- 請求書PDFルートは `orders` を `select("*")` で取るが、react-pdf は明示フィールドのみ描画＝**配線しなければ印刷されない**。
+
+**検証・反映**
+- dev：migration適用・`tsc --noEmit`/`next build` 通過・`.or()` 再割当をSQLで全ケース検証・小野寺氏のブラウザ目視（未請求で非表示／請求済で既定＝発行日の月／別月変更で「変更あり」／売上集計・KPIの移動／未請求戻しでnull／マイページ非漏洩）完了。
+- prod：**本番MCPは読み取り専用**のため SQL Editor で BEGIN/COMMIT 手動適用＋台帳(`20260723000000`)登録。事後 `col_ok=1/date/ledger_ok=1`、既存14件 `sales_month=null` を確認（無影響）。
+- lint：変更ファイルはクリーン（残る既存エラーは `customer-combobox.tsx`・`app/locked/page.tsx` のベースライン・本件無関係）。
 
 ### 2026-07-20 ── お客様マイページオプションの Stripe 連携（独立subscription方式・dev実装）
 
