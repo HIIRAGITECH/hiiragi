@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { loadPrimaryImageUrls } from "@/lib/parts/images-server";
 import type {
   PartCategory,
   PartsInventory,
@@ -74,6 +75,10 @@ export default async function PartsInventoryPage(props: {
 
   const categories = (categoriesData ?? []) as PartCategory[];
 
+  // 一覧のサムネイル: 各部品の代表画像（display_order 最小）の署名付きURL。
+  // バケットは非公開なので都度署名する。画像が無い部品はキーが無く、表側でプレースホルダー表示になる。
+  const thumbnailByPart = await loadPrimaryImageUrls(user!.id);
+
   return (
     <>
       <div className="wos-pagehead">
@@ -108,6 +113,7 @@ export default async function PartsInventoryPage(props: {
         variantsByPart={variantsByPart}
         categories={categories}
         selectedCategory={selectedCategory}
+        thumbnailByPart={thumbnailByPart}
       />
     </>
   );

@@ -366,6 +366,27 @@ export type PartsInventoryVariant = {
   updated_at: string;
 };
 
+// 部品の商品画像 (parts_inventory_images の 1 行)。2026-09-09 で新設。
+//
+// 画像は **親 parts_inventory 側**に持つ（variants には持たせない）。画像は物理部品そのものの
+// 写真であり、車種別の呼称＝売り方(variant)ごとには変わらないため。DECISIONS.md §3 の
+// 「部品は寸法で1行・売り方だけを二階にぶら下げる」と一貫する。
+//
+// 1部品あたり最大5枚・0枚も可（画像は任意）。display_order 昇順に並び、**先頭(0)が代表画像＝
+// 一覧のサムネイル**。実体は非公開バケット `part-images` にあり、この型が持つのは
+// storage_path（オブジェクトパス）だけ。表示用URLは署名付きURLを都度発行する（URLは保存しない）。
+export type PartImage = {
+  id: string;
+  user_id: string;
+  part_id: string;
+  storage_path: string;
+  display_order: number;
+  created_at: string;
+};
+
+// 表示用に署名付きURLを添えた画像。url は署名に失敗した/期限切れのとき null。
+export type PartImageWithUrl = PartImage & { url: string | null };
+
 // 在庫移動の種別。
 //   in     = 入庫
 //   out    = 出庫（受注確定で減算する用途。Step 2 では未使用）

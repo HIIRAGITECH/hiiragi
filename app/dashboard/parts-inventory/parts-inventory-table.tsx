@@ -62,6 +62,9 @@ type Props = {
   categories?: PartCategory[];
   // 選択中カテゴリ（URL ?category）。null=すべて表示 / "none"=未分類 / uuid=カテゴリ。
   selectedCategory?: string | null;
+  // 商品画像（2026-09-09）: 各部品の代表画像の署名付きURL。キーが無い部品はプレースホルダー表示。
+  // 署名はサーバー側（page.tsx → lib/parts/images-server）で発行済み。ここでは表示するだけ。
+  thumbnailByPart?: Record<string, string>;
 };
 
 type StockDialog =
@@ -74,6 +77,7 @@ export default function PartsInventoryTable({
   variantsByPart = {},
   categories = [],
   selectedCategory = null,
+  thumbnailByPart = {},
 }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -292,6 +296,7 @@ export default function PartsInventoryTable({
               <thead>
                 <tr className="border-b-2 border-[var(--color-line-strong)] bg-[var(--color-cream)]">
                   <th className="wos-th w-10 text-center">並び</th>
+                  <th className="wos-th w-16 text-center">画像</th>
                   <th className="wos-th">部品名</th>
                   <th className="wos-th right">原価</th>
                   <th className="wos-th right">在庫</th>
@@ -313,6 +318,7 @@ export default function PartsInventoryTable({
                       key={r.id}
                       r={r}
                       variants={variantsByPart[r.id] ?? []}
+                      thumbnailUrl={thumbnailByPart[r.id] ?? null}
                       disabled={!canDrag}
                       busy={busy}
                       onStockIn={(row) => setDialog({ kind: "in", row })}
@@ -358,6 +364,7 @@ export default function PartsInventoryTable({
 function SortablePartBody({
   r,
   variants,
+  thumbnailUrl,
   disabled,
   busy,
   onStockIn,
@@ -367,6 +374,7 @@ function SortablePartBody({
 }: {
   r: PartsInventory;
   variants: PartsInventoryVariant[];
+  thumbnailUrl: string | null;
   disabled: boolean;
   busy: boolean;
   onStockIn: (row: PartsInventory) => void;
@@ -414,6 +422,9 @@ function SortablePartBody({
               ⠿
             </button>
           )}
+        </td>
+        <td className="wos-td align-top">
+          <Thumbnail url={thumbnailUrl} name={r.name} />
         </td>
         <td className="wos-td align-top">
           {deleted ? (
@@ -508,17 +519,43 @@ function SortablePartBody({
           )}
         </td>
       </tr>
-      {/* ぶら下がり価格（表示のみ・編集は編集画面で）。 */}
+      {/* ぶら下がり価格（表示のみ・編集は編集画面で）。列数は 並び/画像/部品名/原価/在庫/状態/操作 = 7。 */}
       <tr>
         <td className="border-b border-[var(--color-line)]" />
         <td
-          colSpan={5}
+          colSpan={6}
           className="border-b border-[var(--color-line)] px-3 pb-2 pt-0"
         >
           <PriceHangers variants={variants} />
         </td>
       </tr>
     </tbody>
+  );
+}
+
+// 代表画像のサムネイル。画像が無い部品はプレースホルダー（枠だけの箱）を出し、
+// 行の高さが画像あり/なしでガタつかないようにする。
+function Thumbnail({ url, name }: { url: string | null; name: string }) {
+  return (
+    <div className="flex h-12 w-12 items-center justify-center overflow-hidden border border-[var(--color-line)] bg-[var(--color-cream)]">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={name}
+          loading="lazy"
+          className="h-full w-full object-contain"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="text-base text-[var(--color-ink-light)] opacity-40"
+          title="画像なし"
+        >
+          ▤
+        </span>
+      )}
+    </div>
   );
 }
 
