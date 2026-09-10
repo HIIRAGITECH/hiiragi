@@ -70,6 +70,8 @@ type PartPayload = {
   supplier: string | null;
   unit: string | null;
   memo: string | null;
+  // 在庫を追跡するか。未チェック時は checkbox が送られず pickBool が false を返す＝既定「追跡しない」。
+  track_stock: boolean;
   // 部品カテゴリ 段階2: 選ばれた末端カテゴリの id（未分類は null）。
   // ここでは raw の文字列を持つだけ。所有者検証は resolveCategoryId で行い、DB に入れる直前に確定する。
   category_id: string | null;
@@ -87,6 +89,7 @@ function readPartPayload(formData: FormData): PartPayload | { error: string } {
     supplier: pickString(formData, "supplier"),
     unit: pickString(formData, "unit"),
     memo: pickString(formData, "memo"),
+    track_stock: pickBool(formData, "track_stock"),
     category_id: pickString(formData, "category_id"),
   };
 }
@@ -460,7 +463,7 @@ export async function duplicatePart(formData: FormData) {
   const { data: src } = await supabase
     .from("parts_inventory")
     .select(
-      "name, internal_code, external_code, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo, category_id",
+      "name, internal_code, external_code, cost_price, sale_price, show_in_detail, reorder_point, supplier, unit, memo, track_stock, category_id",
     )
     .eq("id", id)
     .eq("user_id", user.id)

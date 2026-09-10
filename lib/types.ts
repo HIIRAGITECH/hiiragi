@@ -330,6 +330,9 @@ export type PartsInventory = {
   unit: string | null;
   memo: string | null;
   display_order: number;
+  // 在庫を追跡するか。false（既定）=追跡しない（在庫数は表示するが発注点判定・欠品/要発注バッジの対象外）。
+  // true=従来どおり発注点判定と欠品表示を行う。表示上の扱いを分岐させるだけで、在庫数の計算・在庫RPCには無関与。
+  track_stock: boolean;
   // 部品カテゴリ 段階2: 部品が属するカテゴリ(part_categories)の末端 id。null=未分類。
   // ON DELETE SET NULL のため、カテゴリ削除で自動的に null（未分類）に戻る。
   category_id: string | null;

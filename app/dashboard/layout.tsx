@@ -87,14 +87,16 @@ async function fetchSidebarCounts() {
       .eq("invoice_status", "請求済"),
     supabase
       .from("parts_inventory")
-      .select("stock_quantity, reorder_point")
+      .select("stock_quantity, reorder_point, track_stock")
       .eq("user_id", user.id)
       .is("deleted_at", null),
   ]);
 
+  // 追跡しない部品(track_stock=false)はサイドバーの要発注バッジにも含めない（一覧・ダッシュボードと一致）。
   const partsAlert =
     partsRes.data?.filter(
-      (p) => Number(p.stock_quantity) <= Number(p.reorder_point),
+      (p) =>
+        p.track_stock && Number(p.stock_quantity) <= Number(p.reorder_point),
     ).length ?? 0;
 
   return {

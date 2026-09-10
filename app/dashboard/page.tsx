@@ -145,7 +145,7 @@ async function loadDashboard(): Promise<DashboardData> {
     // 在庫アラート
     supabase
       .from("parts_inventory")
-      .select("id, name, stock_quantity, reorder_point")
+      .select("id, name, stock_quantity, reorder_point, track_stock")
       .eq("user_id", user.id)
       .is("deleted_at", null),
   ]);
@@ -233,9 +233,11 @@ async function loadDashboard(): Promise<DashboardData> {
       name: string;
       stock_quantity: number;
       reorder_point: number;
+      track_stock: boolean;
     }[];
+  // 追跡しない部品(track_stock=false)は発注点を割っても要発注カウントに含めない（一覧の判定と一致）。
   const partsAlert = partsData.filter(
-    (p) => Number(p.stock_quantity) <= Number(p.reorder_point),
+    (p) => p.track_stock && Number(p.stock_quantity) <= Number(p.reorder_point),
   ).length;
 
   // 見積発行待ちの最古日数

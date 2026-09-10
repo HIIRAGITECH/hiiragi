@@ -39,6 +39,11 @@ export default function PartForm({
     initial?.show_in_detail ?? true,
   );
 
+  // 在庫を追跡するか。既定は「追跡しない」(false)。追跡する部品のみ発注点判定・欠品表示の対象になる。
+  const [trackStock, setTrackStock] = useState<boolean>(
+    initial?.track_stock ?? false,
+  );
+
   // 原価未入力での保存は、粗利計算が 0 になる影響が大きいので確認ダイアログを挟む。
   // OK なら通常通り form action が走り、server action 側の pickNumber が 0 に正規化する。
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -180,9 +185,31 @@ export default function PartForm({
             className="wos-input text-right"
           />
           <p className="mt-1 text-xs text-[var(--color-ink-light)]">
-            在庫がこの数を下回ったら一覧で発注バッジが付きます。
+            在庫がこの数を下回ったら一覧で発注バッジが付きます（在庫を追跡する部品のみ）。
           </p>
         </div>
+      </div>
+
+      {/* 在庫を追跡するか。既定は追跡しない。EC 販売用など数量を正確に保ちたい部品だけ ON にする。 */}
+      <div className="border border-[var(--color-line)] bg-[var(--color-cream)] px-4 py-3">
+        <label className="flex cursor-pointer items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="track_stock"
+            checked={trackStock}
+            onChange={(e) => setTrackStock(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="font-semibold text-[var(--color-ink)]">
+              在庫を追跡する
+            </span>
+            <span className="mt-0.5 block text-xs text-[var(--color-ink-light)]">
+              ON にすると発注点を割ったとき欠品・要発注として通知します（EC 販売用など在庫数を正確に保つ部品向け）。
+              OFF（既定）の部品は在庫数を表示するだけで、発注点を割っても警告しません。
+            </span>
+          </span>
+        </label>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">

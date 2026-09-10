@@ -46,11 +46,21 @@ function normalize(s: string): string {
   return s.toLowerCase().normalize("NFKC");
 }
 
-type StockStatus = "out" | "low" | "ok";
+// "untracked" = 在庫を追跡しない部品（track_stock=false）。在庫数は表示するが発注点判定の対象外にし、
+// 欠品/要発注バッジも付けない（現場の「買ってすぐ使う」部品が常時欠品表示になるのを避けるため）。
+type StockStatus = "untracked" | "out" | "low" | "ok";
 function stockStatus(r: PartsInventory): StockStatus {
+  if (!r.track_stock) return "untracked";
   if (r.stock_quantity <= 0) return "out";
   if (r.stock_quantity <= r.reorder_point) return "low";
   return "ok";
+}
+
+// 発注が必要（＝要発注/欠品バッジ・アラート・「発注が必要なものだけ」フィルタの対象）か。
+// 追跡しない部品(untracked)は在庫数がマイナスでも対象外。
+function needsReorder(r: PartsInventory): boolean {
+  const s = stockStatus(r);
+  return s === "out" || s === "low";
 }
 
 type Props = {
@@ -82,6 +92,8 @@ export default function PartsInventoryTable({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [onlyReorder, setOnlyReorder] = useState(false);
+  // 「追跡する部品のみ」フィルタ（track_stock=true の EC 販売用部品などに絞る）。
+  const [onlyTracked, setOnlyTracked] = useState(false);
   const [pending, startTransition] = useTransition();
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<StockDialog | null>(null);
@@ -104,9 +116,7 @@ export default function PartsInventoryTable({
   );
 
   const reorderCount = useMemo(
-    () =>
-      rows.filter((r) => r.deleted_at === null && stockStatus(r) !== "ok")
-        .length,
+    () => rows.filter((r) => r.deleted_at === null && needsReorder(r)).length,
     [rows],
   );
 
@@ -156,7 +166,8 @@ export default function PartsInventoryTable({
 
   const filtered = useMemo(() => {
     let list = rows;
-    if (onlyReorder) list = list.filter((r) => stockStatus(r) !== "ok");
+    if (onlyReorder) list = list.filter((r) => needsReorder(r));
+    if (onlyTracked) list = list.filter((r) => r.track_stock);
     // カテゴリ絞り込み（方式②の述語）。未分類は category_id IS NULL、それ以外は子孫集合に含む部品。
     if (selectedCategory === UNCATEGORIZED) {
       list = list.filter((r) => r.category_id === null);
@@ -174,11 +185,14 @@ export default function PartsInventoryTable({
     }
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, query, onlyReorder, variantsByPart, selectedCategory, descendantSet]);
+  }, [rows, query, onlyReorder, onlyTracked, variantsByPart, selectedCategory, descendantSet]);
 
   // カテゴリ選択も「フィルタ中」に含める → 既存の「フィルタ中はDnD無効」「件数テキスト」判定が自動一致。
   const isFiltering =
-    onlyReorder || query.trim().length > 0 || selectedCategory !== null;
+    onlyReorder ||
+    onlyTracked ||
+    query.trim().length > 0 ||
+    selectedCategory !== null;
   // 並べ替えはフィルタ解除かつ非表示を含めない通常表示のときのみ（保存中も一時無効）。
   const dndEnabled = !isFiltering && !includeDeleted;
   const canDrag = dndEnabled && !pending;
@@ -261,6 +275,12 @@ export default function PartsInventoryTable({
         >
           発注が必要なものだけ
           {reorderCount > 0 && <span className="wos-ct">{reorderCount}</span>}
+        </span>
+        <span
+          className={`wos-chip ${onlyTracked ? "active" : ""}`}
+          onClick={() => setOnlyTracked((v) => !v)}
+        >
+          追跡する部品のみ
         </span>
         <label className="text-xs text-[var(--color-ink-mid)] flex items-center gap-2 ml-auto cursor-pointer">
           <input
@@ -609,6 +629,10 @@ function PriceHangers({ variants }: { variants: PartsInventoryVariant[] }) {
 }
 
 function StatusBadge({ status }: { status: StockStatus }) {
+  if (status === "untracked") {
+    // 追跡しない部品。在庫数は表示するが警告色は付けない（グレーの中立バッジ）。
+    return <span className="wos-status w-u">追跡なし</span>;
+  }
   if (status === "out") {
     return <span className="wos-status over">欠品</span>;
   }
