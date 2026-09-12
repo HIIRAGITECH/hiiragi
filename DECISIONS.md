@@ -28,7 +28,8 @@
 
 ## 1. 現状スナップショット（常に最新を保つ）
 
-最終更新: 2026-09-09（**部品在庫の商品画像**・prod DB適用済み／コード反映＝部品(親 `parts_inventory`)に画像を最大5枚・任意でぶら下げる `parts_inventory_images` を新設。二階(variants)には持たせない＝画像は物理部品の写真で売り方ごとに変わらないため。非公開バケット `part-images` に保存し表示は署名付きURL（EC公開時に原価と一緒に漏れる経路を作らないため／DBはパスのみ保持）。編集画面に画像欄（D&D並べ替え・個別削除・クライアント側で長辺1600pxに縮小）、一覧に代表画像のサムネイル列（画像なしはプレースホルダー）。5枚上限はDB側でも担保（CHECK＋トリガ、`pg_advisory_xact_lock` を使い **在庫RPCが触る `parts_inventory` の行ロックは取らない**）。**在庫RPC・`parts_inventory` の既存カラムは無改修。** ⚠️ **実機動作は未検証**（デプロイ後に本番で1周確認が必要）。**dev は Supabase 解約済みで事前検証不可**。詳細は§4 2026-09-09）
+最終更新: 2026-09-12（**部品在庫の貼り付け入庫**・prod DB適用済み／実機未検証＝仕入先の納品書のタブ区切り表（品番/品名/数量/単価/希望小売価格）を貼り付けて一括入庫する機能。`external_code`＝仕入れ品番で照合し、1件=既存/0件=新規/2件以上=候補選択。確認画面を「手を動かす順」にグループ分け（①要選択②新規③原価変更あり④原価変更なし・各件数バッジ）。**更新は原価(cost_price)と在庫数(stock_quantity)のみ・定価(list_price)/掛率(markup_rate)には一切書き込まない**。入庫は加算のみで既存の在庫RPCは無改修。確定は新規RPC `commit_paste_stock_in`（SECURITY INVOKER・1トランザクション）。二重投入は納品書番号で警告（非ブロック）。新設 `parts_stock_in_batches`＋`stock_movements.batch_id`（nullable追加）。詳細は§4 2026-09-12）
+※前回 2026-09-09（**部品在庫の商品画像**・prod DB適用済み／コード反映＝部品(親 `parts_inventory`)に画像を最大5枚・任意でぶら下げる `parts_inventory_images` を新設。二階(variants)には持たせない＝画像は物理部品の写真で売り方ごとに変わらないため。非公開バケット `part-images` に保存し表示は署名付きURL（EC公開時に原価と一緒に漏れる経路を作らないため／DBはパスのみ保持）。編集画面に画像欄（D&D並べ替え・個別削除・クライアント側で長辺1600pxに縮小）、一覧に代表画像のサムネイル列（画像なしはプレースホルダー）。5枚上限はDB側でも担保（CHECK＋トリガ、`pg_advisory_xact_lock` を使い **在庫RPCが触る `parts_inventory` の行ロックは取らない**）。**在庫RPC・`parts_inventory` の既存カラムは無改修。** ⚠️ **実機動作は未検証**（デプロイ後に本番で1周確認が必要）。**dev は Supabase 解約済みで事前検証不可**。詳細は§4 2026-09-09）
 ※前回 2026-07-23: **売上計上月**機能・dev/prod両方反映＝経営者判断で受注ごとに「何月分の売上とするか」を上書きできる `orders.sales_month`(date・月初1日・nullable) を新設。null は従来どおり invoiced_at の月で集計＝後方互換。受注詳細に「売上計上月」小セクション（請求済/入金済のみ・`<input type=month>` モーダル・別月なら「（変更あり）」）。集計は **/dashboard/sales と /dashboard(KPI) の2箇所**を `lib/sales/filter.ts` の `.or()` 2枝（sales_month優先・未設定は invoiced_at）に切替。**マイページ/PDFには無改修＝漏洩させない**（RPC/型/描画に足さない）。prodはSQL Editor手動適用・台帳登録済（既存14件は sales_month=null で無影響）。commit `459d8c3`。詳細は§4 2026-07-23）
 ※前回 2026-07-08: マイページの見積セクション折りたたみ・本番反映＝`invoice_status∈{請求済,入金済}` かつ `work_status=完了` のとき見積セクションをネイティブ `<details>` で折りたたみ「（参考）お見積り内容 ▼」に。**AND条件**で「請求済だが作業未完了」は従来通り展開。コードのみ・DB変更なし・commit `26ea874`。詳細は§4 2026-07-08
 ※前回 2026-06-26: 帳票出力を刷新・本番反映＝納品書/領収書を追加し4種化＋複数選択を1つにまとめるPDF結合(pdf-lib)、受注詳細の帳票出力をチェックボックスのポップアップ化。振込期限・件名の入力をPaymentDueModalから帳票ポップアップへ移行(updateInvoiceMeta)・PaymentDueModal廃止。DBスキーマ変更なし・commit `d582a6d`/`2310707`/`38f796f`。詳細は§4 2026-06-26
@@ -149,6 +150,67 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-09-12 ── 部品在庫の「貼り付け入庫」（納品書のタブ区切り表を一括入庫）・**prod DB適用済み／実機動作は未検証**
+
+> 部品を仕入れても入庫登録が面倒で行われず、在庫数が実態と合っていない。仕入先（主にカスタムジャパン）の
+> 納品書PDFから起こしたタブ区切り表（品番／品名／数量／単価／希望小売価格）を貼り付けて、既存部品の入庫と
+> 新規部品の登録＋初期入庫を **確認画面を経て一括確定** できるようにした。**マイグレーションは prod へ適用済み**
+> （prod MCP は読み取り専用のため、小野寺が SQL Editor で手動実行。dev は解約済み＝適用先は prod のみ）。
+
+**照合（DECISIONS §3 と一貫）**
+- 照合キーは **`parts_inventory.external_code`＝「仕入れ品番（社外品番）」**（フォームのラベルと一致）。正規化は trim＋NFKC＋小文字化。
+- 1件一致＝既存部品／0件＝新規候補／2件以上＝自動で決めず候補を出してユーザーに選ばせる（選ぶまで確定不可。
+  「どれでもない（新規登録）」も選べる）。現状 prod は external_code 重複ゼロだが、仕様として重複解決を実装。
+
+**確定前に必ず確認画面（4パターン）**
+- ①既存・原価変更なし → 入庫数量のみ。②既存・原価変更あり → 「原価 2,650 → 2,684 円」の差分＋**「この原価に更新する」
+  チェック（既定ON）**、参考として納品書の希望小売価格とアプリ側の現在の定価を併記（表示のみ）。③新規 → 品名・仕入れ品番・
+  原価を納品書値で初期表示しその場で編集・登録（track_stock 既定OFF・希望小売価格は定価に入れない）。④重複 → 候補を並べて選択。
+- 行ごとに「取り込む」トグルで除外可。数量が読めない行は自動除外し件数を通知。ヘッダー行・空行は無視。
+- **確認画面は「手を動かす必要が大きい順」にグループ分けして表示**（各グループに件数バッジ）:
+  ①選択が必要（品番重複・確定ブロック）→②新規登録→③既存・原価変更あり→④既存・原価変更なし→（最下部）取り込まない。
+  グループは行の状態から都度算出＝重複行で候補を選ぶ/新規に切り替えると即座に該当グループへ移動する。
+
+**制約の遵守（重要）**
+- **定価(list_price)・掛率(markup_rate) には一切書き込まない**。定価は parts_inventory には無く二階(variants)が持つ
+  「アプリ側で決めた売値」で、メーカー希望小売価格とは無関係。新規部品は空の汎用 variant を1枚だけ作る（`list_price=null`）。
+- **更新するのは原価(cost_price)と在庫数(stock_quantity)のみ**。入庫は在庫数の**加算のみ**で、既存の在庫RPC
+  （reserve/release/consume/unconsume/deduct 系）・reserved_quantity・在庫数の計算ロジックには**一切触れていない**。
+  加算＋`stock_movements` への `'in'` 記録という既存 `registerStockIn` と同じ流儀を踏襲。
+- **「確定」を押すまでDBに一切書き込まない**（解析・照合・編集はすべてクライアント側。書き込みは確定時の RPC 1回だけ）。
+- **既存カラムの変更・削除なし（追加のみ）**。`stock_movements.batch_id`（nullable）を追加したが、既存の入庫/棚卸/出庫の
+  挿入は batch_id を指定せず null のまま＝無影響。
+
+**二重投入の防止**
+- 納品書番号(`delivery_note_no`)を任意入力。入力欄の blur 時に同番号の既存バッチを引き、あれば警告バナー
+  （**強制ブロックはしない**）。DB側に UNIQUE は張らない（同番号の再入庫を運用判断で許すため）。
+
+**原子性（全部かゼロか）**
+- 確定は **SECURITY INVOKER の新規 RPC `commit_paste_stock_in(text,text,text,jsonb)` 1本**で1トランザクション実行。
+  途中失敗なら全ロールバック。既存の在庫RPCは**新規RPCとは別物**で無改修（制約「既存の在庫RPCに触れない」を遵守）。
+  RLS＋所有確認は invoker 権限で評価され、他テナントには触れない。既存部品行は `FOR UPDATE` で直列化。
+
+**新設DB（prod 未適用）**
+- `parts_stock_in_batches`（入庫バッチ＝納品書1回ぶん。明細は `stock_movements(batch_id)` 側が担う）＋RLS4本＋
+  部分index。`stock_movements` に `batch_id`（nullable FK・ON DELETE SET NULL）＋部分index。RPC `commit_paste_stock_in`。
+- migration `supabase/migrations/20260912000000_create_paste_stock_in.sql`。
+
+**変更ファイル**
+- DB: 上記 migration（未適用）。型: `lib/types.ts`（`StockInBatch`・`StockMovement.batch_id`）。
+- 画面: `app/dashboard/parts-inventory/paste-in/page.tsx`（部品ロード）、`paste-in-form.tsx`（貼付・解析・照合・確認UI）、
+  `paste-in-actions.ts`（`commitPasteStockIn`＝RPC呼出・`lookupDeliveryNote`＝重複警告）、一覧 `page.tsx` に「貼り付け入庫」導線追加。
+- **`actions.ts`（本体・価格カード・既存の入庫/棚卸）は無改修。`parts_inventory`・`parts_inventory_variants` の既存カラムも変更なし。**
+
+**検証・反映**
+- `tsc --noEmit`・`next build`（新ルート `/dashboard/parts-inventory/paste-in` を確認）・`eslint`（変更ファイル）通過。
+- **prod DB 適用済み（2026-09-12・SQL Editor 手動実行）＋台帳登録（`20260912000000`）済み**。確認クエリでグリーン確認：
+  `parts_stock_in_batches` の RLS 有効（relrowsecurity=true）／RLSポリシー4本（SELECT/INSERT/UPDATE/DELETE）／
+  `stock_movements.batch_id` が nullable・uuid・ON DELETE SET NULL／`commit_paste_stock_in` が SECURITY INVOKER で
+  authenticated が EXECUTE 可／`supabase_migrations.schema_migrations` に `20260912000000` 登録済み。
+- **⚠️ 実機（画面）動作は未検証**。確認できているのは上記の DB 構造だけで、貼り付け→解析→照合→確認画面のグループ分け
+  →確定（既存入庫の加算・原価更新ON/OFF・新規登録＋初期在庫・重複選択の強制・二重投入警告・**定価/掛率が不変であること**）は
+  いずれもコードのデプロイ後に本番で1周確認する。
 
 ### 2026-09-10 ── 部品在庫に「在庫を追跡するか」の区分（track_stock）を追加（表示のみ・在庫ロジック無改修）
 

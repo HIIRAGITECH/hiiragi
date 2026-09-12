@@ -91,6 +91,12 @@ export default async function PartsInventoryPage(props: {
         </div>
         <div className="wos-actions">
           <Link
+            href="/dashboard/parts-inventory/paste-in"
+            className="wos-btn-ghost wos-btn-sm"
+          >
+            貼り付け入庫
+          </Link>
+          <Link
             href="/dashboard/parts-inventory/new"
             className="wos-btn wos-btn-sm"
           >

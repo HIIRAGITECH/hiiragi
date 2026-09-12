@@ -408,6 +408,20 @@ export type StockMovement = {
   related_order_id: string | null;
   unit_cost: number | null;
   memo: string | null;
+  // 貼り付け入庫（2026-09-12）で作られた 'in' 行が、その入庫バッチ(parts_stock_in_batches)を指す。
+  // 既存の入庫/棚卸/出庫は指定しない＝null（後方互換）。
+  batch_id: string | null;
+  created_at: string;
+};
+
+// 貼り付け入庫のバッチ（納品書1回ぶんの入庫）。明細は stock_movements(batch_id) 側が持つ。
+// 2026-09-12 新設。二重投入の警告のため delivery_note_no を任意で記録する。
+export type StockInBatch = {
+  id: string;
+  user_id: string;
+  delivery_note_no: string | null;
+  supplier: string | null;
+  note: string | null;
   created_at: string;
 };
 
