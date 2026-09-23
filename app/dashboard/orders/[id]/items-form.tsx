@@ -539,6 +539,60 @@ const GRID_COLS_MD =
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
+// スプレッドシート化（2026-09）: 数字セルの「最初から 0 が入っていて 4500 と打つと 45000 になる」を防ぐ。
+// B案: PC幅(md以上)だけ、フォーカス時に値が "0" なら**表示だけ**空にする（0以外は何もしない）。
+// フォーカスを外したら表示を prop の値に戻す＝何も打たなければ親の state は "0" のままなので "0" に戻る。
+// ★ 親の state（保存データ）は「打った時（onChange）」しか変えない。表示クリアは onChange を呼ばないため、
+//    focus→blur で何も打たなければ保存内容は一切変わらない（labor_cost 等に 0 が紛れ込むこともない）。
+// スマホ幅（767px以下）は matchMedia で対象外＝従来どおり。
+function GridNumberInput({
+  value,
+  onChange,
+  className,
+  ariaLabel,
+  placeholder,
+  inputMode = "numeric",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className: string;
+  ariaLabel: string;
+  placeholder?: string;
+  inputMode?: "numeric" | "decimal";
+}) {
+  // null = prop の値をそのまま表示。文字列 = フォーカス中の一時表示（データではない）。
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft !== null ? draft : value;
+  const isPc = () =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(min-width: 768px)").matches;
+  return (
+    <input
+      type="number"
+      inputMode={inputMode}
+      min={0}
+      step={1}
+      value={shown}
+      onChange={(e) => {
+        // 打った内容は従来どおり親へ反映（この経路だけがデータを変える）。
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      onFocus={() => {
+        // PC幅のみ: 初期の "0" は表示だけ空にする（0以外・スマホは何もしない）。
+        if (isPc() && value === "0") setDraft("");
+      }}
+      onBlur={() => {
+        // 表示の一時クリアを解除。打っていなければ親は "0" のままなので "0" 表示に戻る。
+        setDraft(null);
+      }}
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      className={className}
+    />
+  );
+}
+
 // 明細作り直し 段階1 (2026-07-11): 各行の単価が「業販」か「定価」かを示す控えめなバッジ。
 // 判定は受注の顧客区分のみ（business=業販 / personal・未設定=定価）。これは表示専用で、
 // 金額の値・計算・保存・PDF・在庫連携には一切影響しない（バッジを足すだけ）。
@@ -1769,17 +1823,12 @@ function ItemTableEditor({
                             <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                               工賃
                             </label>
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min={0}
-                              step={1}
+                            <GridNumberInput
                               value={work.unit_price}
-                              onChange={(e) =>
-                                updateUnitPrice(workIndex, e.target.value)
-                              }
+                              onChange={(v) => updateUnitPrice(workIndex, v)}
+                              inputMode="numeric"
                               placeholder="—"
-                              aria-label="工賃"
+                              ariaLabel="工賃"
                               className={`${cellInputClass} text-right`}
                             />
                           </div>
@@ -1788,17 +1837,12 @@ function ItemTableEditor({
                             <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                               部品代
                             </label>
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min={0}
-                              step={1}
+                            <GridNumberInput
                               value={part.unit_price}
-                              onChange={(e) =>
-                                updateUnitPrice(partIndex, e.target.value)
-                              }
+                              onChange={(v) => updateUnitPrice(partIndex, v)}
+                              inputMode="numeric"
                               placeholder="—"
-                              aria-label="部品代"
+                              ariaLabel="部品代"
                               className={`${cellInputClass} text-right`}
                             />
                           </div>
@@ -1891,16 +1935,13 @@ function ItemTableEditor({
                                 <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                                   作業数量
                                 </label>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min={0}
-                                  step={1}
+                                <GridNumberInput
                                   value={work.quantity}
-                                  onChange={(e) =>
-                                    update(workIndex, { quantity: e.target.value })
+                                  onChange={(v) =>
+                                    update(workIndex, { quantity: v })
                                   }
-                                  aria-label="作業数量"
+                                  inputMode="decimal"
+                                  ariaLabel="作業数量"
                                   className={`${cellInputClass} text-center`}
                                 />
                               </div>
@@ -1908,16 +1949,13 @@ function ItemTableEditor({
                                 <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                                   部品数量
                                 </label>
-                                <input
-                                  type="number"
-                                  inputMode="decimal"
-                                  min={0}
-                                  step={1}
+                                <GridNumberInput
                                   value={part.quantity}
-                                  onChange={(e) =>
-                                    update(partIndex, { quantity: e.target.value })
+                                  onChange={(v) =>
+                                    update(partIndex, { quantity: v })
                                   }
-                                  aria-label="部品数量"
+                                  inputMode="decimal"
+                                  ariaLabel="部品数量"
                                   className={`${cellInputClass} text-center`}
                                 />
                               </div>
@@ -2054,14 +2092,11 @@ function ItemTableEditor({
                   <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 md:hidden">
                     数量
                   </label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step={1}
+                  <GridNumberInput
                     value={r.quantity}
-                    onChange={(e) => update(i, { quantity: e.target.value })}
-                    aria-label="数量"
+                    onChange={(v) => update(i, { quantity: v })}
+                    inputMode="decimal"
+                    ariaLabel="数量"
                     className={`${gridCellInput} text-center`}
                   />
                 </div>
@@ -2072,15 +2107,12 @@ function ItemTableEditor({
                     <span>金額</span>
                     <PriceKindBadge isBusiness={isBusiness} />
                   </label>
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={0}
-                    step={1}
+                  <GridNumberInput
                     value={r.unit_price}
-                    onChange={(e) => updateUnitPrice(i, e.target.value)}
+                    onChange={(v) => updateUnitPrice(i, v)}
+                    inputMode="numeric"
                     placeholder="—"
-                    aria-label="金額（単価）"
+                    ariaLabel="金額（単価）"
                     className={`${gridCellInput} text-right`}
                   />
                 </div>
