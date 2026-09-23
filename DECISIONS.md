@@ -209,6 +209,12 @@ focus→blur で何も打たなければ保存内容は完全に不変（`labor_
 作業数量/部品数量**。対象外＝**原価・定価**（元々 "" で「—」表示）と**割引・預かり金**（`moneyDefault` が既に "" で「—」表示＝
 問題が起きない）。スマホ幅は `matchMedia` で対象外＝従来どおり。tsc/eslint/build 通過。
 
+**本番反映済み（2026-09-24）**：`feature/order-items-grid`（`304a76c` グリッド化＋候補表示／`c51b2e5` 0クリアB案）を
+`main` へ **fast-forward マージ＆push**（`d720c55..c51b2e5`）。衝突なし（main は分岐点から未進行）。Vercel の GitHub 連携で
+`main` push → 本番（`https://app.hiiragi-tech.app`）へ自動デプロイ。実機（PC）で候補表示・IME・グリッド・0クリア・保存往復まで
+確認済み。**DB/マイグレーションは無し（コードのみの反映）**。`.env.local` は Git 非追跡のため反映に含まれない（本番の接続情報は
+Vercel 環境変数側）。
+
 ### 2026-09-13 ── EC 販売用の在庫引当 RPC（受注非依存・負数ガード付き）を新設・**マイグレーション作成のみ／prod 未適用**
 
 > 既存の在庫RPC（reserve/release/consume/unconsume/deduct 系）は **すべて orders への紐付けが必須**で、
