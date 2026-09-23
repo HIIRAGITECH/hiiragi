@@ -151,6 +151,107 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-09-23 ── 受注明細を「スプレッドシート風グリッド＋作業内容セルの候補表示」に刷新（PC幅のみ・**DB/保存/計算/在庫/PDF は無改修**・実装のみ／ブランチ `feature/order-items-grid`／実機未検証）
+
+> 受注詳細の明細を、見た目だけスプレッドシート風の表（グリッド）にし、作業内容セルに打つと
+> 部品在庫と作業メニューの候補が出る入力補助を追加した。**機能・保存内容・計算・在庫・PDF は一切変えない**
+> ことを最優先ルールとして着手（Phase 0 で計画→承認、Phase 1 で実装、Phase 2 で型/lint/build 通過）。
+
+**触っていない（＝壊さないと約束した領域。すべて無改修）**
+- `OrderItem` 型・`orders.items`（JSONB）の中身・DB（マイグレーション追加なし）。
+- 保存処理 `updateOrderItems`（保存ボタン方式・保存単位＝明細全体）。
+- 在庫RPC（reserve/release/consume/unconsume）とその呼び出しタイミング・在庫確保済み/消費済みの編集警告。
+- 合計・税・粗利の計算（`lib/orders/totals.ts`）。見積書・請求書PDF（原価・間接材料が顧客に出ない仕組み）。
+- 行を作る `rowFromPart` / `rowFromMenu`・車種別定価/業販掛け率の解決ロジック（**候補決定時もこの2関数を呼ぶ**）。
+- スマホ幅（767px以下）の表示と動き（`.wos-item-row` の1列縦積みのまま）。Stripe/サブスク。
+
+**作ったもの（見た目＋候補のみ）**
+- **PC幅（md=768px以上）だけグリッド表示**：各業務カテゴリ別セクションの中身を、列ヘッダー（#/種別/作業内容/
+  数量/金額/小計/操作）＋罫線（`divide-x`）のマス目に。**小計を「行の下の別行」から「列」へ移動（表示のみ）**。
+  入力欄はPC幅で枠・角丸を消してセルの壁に見た目を委ね、フォーカス時だけ枠を戻す。**md未満は従来の縦積み箱型のまま**
+  （新CSSはすべて `md:` 限定・globals.css の767px以下ルールは無改修）。業販/定価バッジは金額列ヘッダーに1つ集約。
+- **「まとめ表示（親子）」は現状の“結合1行”のまま**・罫線だけ付ける（小野寺判断＝Q。字下げ2行化は現行表示から
+  変わるため不採用。表示・開閉・ドラッグ・保存の挙動を完全維持）。
+- **「＋1行」「＋5行」ボタン**：従来の「＋ 明細行を追加」と同一の空行（`emptyRow`）を1/5行足す（旧ボタンを置換）。
+- **作業内容セルの候補表示（新規コンポーネント `work-name-suggest.tsx`）**：
+  - 出どころ＝部品在庫＋作業メニュー（作業セットは出さない）。検索対象＝部品:名前/internal_code/external_code/
+    variant.part_number、メニュー:work_name/part_name。候補に「部品/作業」バッジ、部品は品番・在庫数の色バッジ
+    （既存 `stockStatus` と同基準＝赤欠品/黄要発注/緑OK/灰追跡なし）・単価を表示。
+  - **日本語変換(IME)**：変換中の Enter は横取りせず変換確定のみ（`isComposing`/keyCode 229 を両方判定）。候補は
+    変換確定後に表示（半角英数は即時）。表示中は↓↑選択・Enter決定・Esc閉じ・クリック決定。**候補が出ていない時の
+    Enter は従来どおりフォーム送信**（`<form action>` の挙動を維持）。
+  - **決定時**＝親が既存 `rowFromPart`/`rowFromMenu` で行を作り、編集中の行を置き換える（新規行を増やさない）。
+    カテゴリ振り分けは既存ボタンと同一（部品→常に「整備」／メニュー→そのメニューの業務カテゴリ）。同一カテゴリは
+    その場で位置維持して置換、別カテゴリはそのカテゴリ末尾へ移動（＝モーダル追加と同じ）＝Q回答どおり。
+  - 在庫に無い部品のその場登録は作らない（要望どおり）。候補を選ばず打っただけなら従来の手入力行。
+
+**作らなかったもの**：Tab/Enterのセル移動、表からの貼り付け、同時編集の上書き防止、受注一覧のグリッド化、在庫ルール変更。
+
+**変更ファイル**
+- 新規 `app/dashboard/orders/[id]/work-name-suggest.tsx`（候補ドロップダウン＋IME判定のみ。行生成は持たない）。
+- `app/dashboard/orders/[id]/items-form.tsx`（グリッドの見た目・ヘッダー・小計列・+1/+5行・候補配線 `pickSuggestion`・
+  表示用ヘルパー `partNumbersByPart`/`partInsertPrice`/`menuInsertPrice`）。`app/globals.css` は**無改修**（新装飾はすべて `md:`
+  ユーティリティで完結。767px以下の縦積みルールに触れないため）。**actions.ts・totals.ts・型・DB・PDF は無改修。**
+
+**検証・反映状況**
+- `tsc --noEmit`／`eslint`（変更2ファイル）／`next build`（Compiled successfully・静的36/36）通過。
+- **⚠️ 実機（画面）動作は未検証**。dev DB は解約済みのため、**本番で「使い捨てダミー受注1件」を使い、
+  ステータスを一切動かさず（在庫が動くため）明細の追加・保存・再読込だけを確認 → 済んだら削除**する方針
+  （`deleteOrder` は orders 行の単純削除で、stock_movements/parts_inventory への FK・トリガ無し＝在庫・他データに
+  影響しないことをコードで確認済み）。**本物の受注では試さない**（候補が出ていない時の Enter が保存送信のため）。
+- ブランチ `feature/order-items-grid` に実装（main 未マージ・未デプロイ・未コミットの可能性あり＝指示待ち）。
+
+### 2026-09-13 ── EC 販売用の在庫引当 RPC（受注非依存・負数ガード付き）を新設・**マイグレーション作成のみ／prod 未適用**
+
+> 既存の在庫RPC（reserve/release/consume/unconsume/deduct 系）は **すべて orders への紐付けが必須**で、
+> 受注に紐づかない在庫確保ができない。さらに **負数ガードが無く**、在庫不足でも減算が通り stock_quantity /
+> reserved_quantity がマイナスになる（社内運用は「買う→すぐ使う」で実害なしだが、EC は同時注文で売り越しが起きる）。
+> そこで **受注非依存・負数ガード付きの `ec_*` 4本を新規追加**する。マイグレーション
+> `supabase/migrations/20260913000000_create_ec_stock_rpc.sql` を作成。**prod 未適用**（小野寺が SQL Editor で手動実行）。
+
+**新設した4本（すべて SECURITY INVOKER・search_path=public・parts_inventory.user_id = auth.uid() 所有者チェック）**
+- `ec_reserve_stock(p_part_id uuid, p_qty numeric) returns jsonb` … `stock_quantity - reserved_quantity >= p_qty`
+  のときだけ `reserved_quantity += p_qty`。足りなければ在庫不足エラー（ERRCODE=P0004）。
+- `ec_release_stock(...)` … `reserved_quantity -= p_qty`。`GREATEST(...,0)` で負数クランプ。実際に解放できた数を返す。
+- `ec_consume_stock(...)` … 出荷。`stock_quantity` と `reserved_quantity` を同時に減算。双方 `GREATEST(...,0)` でクランプ。
+- `ec_unconsume_stock(...)` … 出荷取消。`stock_quantity` と `reserved_quantity` を p_qty ぶん復元（加算のみ＝負数リスクなし）。
+
+**設計判断**
+- **「条件付きUPDATEの行数0＝失敗」だけにしなかった理由**：行数0 では「部品が無い / 他テナント / track_stock=false /
+  在庫不足」を区別できない。要件で **track_stock=false は固有エラーを返す**必要があるため、対象行を
+  `SELECT ... FOR UPDATE` で1行だけロックして状態を読み、原因別に例外を投げてから UPDATE する方式にした。
+  行ロックにより **同一部品への同時注文は直列化**され、二重引き当て（売り越し）は起きない（要件「同時実行への対応」を満たす）。
+- **失敗は例外（RAISE EXCEPTION）で返す**：既存 RPC と同じ流儀。クリーンにロールバックし、呼び出し側は ERRCODE で
+  在庫不足（P0004）・EC対象外（P0003）・未認証（P0001）・部品なし（P0002）・数量不正（22023）を判別できる。
+- **track_stock=false は EC 販売対象外**：4本すべてで `track_stock=true` を必須にし、false なら P0003 を返す（引当しない）。
+- **負数ガードの方式はクランプ**：release/consume で `GREATEST(現在値 - p_qty, 0)` を採り、実際に減らせた数を
+  jsonb（released/consumed）で返す。過剰解放・過剰消費でも列を破壊しない（EC の売り越し防止は reserve 側で担保）。
+- **stock_movements への履歴は記録する**：既存 RPC と同じく reserve/release/out/in を追記（`related_order_id` /
+  `related_order_text_id` は null＝受注非依存）。stock_quantity は保存列で movements から算出しないため、
+  **既存の在庫計算ロジックには影響しない**（追記のみ）。
+
+**デッドロック回避（ロック順序）**
+- `ec_*` は 1コールにつき parts_inventory を **1行だけ**ロックする（受注RPCのように複数明細行を跨がない）。
+  単一資源のロックはロック順序の循環を作れないため、複数行をロックする既存の受注RPCと同時に走っても
+  **デッドロックしない**。ロックは常に parts_inventory 行 → stock_movements へ INSERT の順（既存と同順序・
+  stock_movements は追記のみで行ロック競合を生まない）。
+
+**制約の遵守（すべて満たしている）**
+- 既存RPC6本（reserve_order_stock / release_order_reservation / consume_order_stock / unconsume_order_stock /
+  deduct_order_stock / reverse_order_stock_deduction）には**一切触れていない**。
+- 既存カラムの変更・削除なし（このマイグレーションはカラムを1つも変更しない＝関数の CREATE と GRANT のみ）。
+- 既存の在庫計算ロジックは無改修。DECISIONS §3（部品は寸法で1行・track_stock で EC を区別）とも整合。
+
+**運用上の留意（要検討・今回のスコープ外）**
+- 本 RPC は **SECURITY INVOKER + auth.uid() 所有者チェック**（要件どおり）のため、**実行はテナント本人の認証コンテキストが前提**。
+  EC ストアフロントの非ログイン顧客（auth.uid()=null）から直接は呼べない。EC バックエンドがテナント所有者として
+  呼ぶ経路を用意するか、非ログイン公開が必要になったら別途 SECURITY DEFINER のラッパを足す設計になる
+  （§2026-09-09 の画像署名と同じ「公開が要るなら別口を足す」方針）。今回は要件の SECURITY INVOKER を厳守し、この点は保留。
+
+**適用（未実施）**
+- マイグレーションは作成済み・**prod 未適用**。prod MCP は読み取り専用のため小野寺が SQL Editor で手動実行する。
+  dev は解約済みで適用先は prod のみ。適用手順と確認用 SELECT は別途提示済み（本チャット）。事後に本節へ「適用済み」を追記する。
+
 ### 2026-09-12 ── 部品在庫の「貼り付け入庫」（納品書のタブ区切り表を一括入庫）・**prod DB適用済み／実機動作は未検証**
 
 > 部品を仕入れても入庫登録が面倒で行われず、在庫数が実態と合っていない。仕入先（主にカスタムジャパン）の

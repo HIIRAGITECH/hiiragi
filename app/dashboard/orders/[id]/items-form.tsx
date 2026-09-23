@@ -50,6 +50,7 @@ import SearchInput from "@/lib/components/search-input";
 import WorkMenuForm from "../../work-menus/work-menu-form";
 import { createWorkMenuReturning } from "../../work-menus/actions";
 import type { FolderActionResult, FormState } from "../actions";
+import WorkNameSuggest, { type SuggestChoice } from "./work-name-suggest";
 
 type SetWithItems = {
   set: WorkMenuSet;
@@ -524,6 +525,17 @@ function splitByCategory(
 const cellInputClass =
   "w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-50 dark:focus:ring-zinc-50";
 
+// スプレッドシート化（2026-09）: PC 幅（md 以上）だけ、入力欄の枠と角丸を消してセルの壁
+// （divide-x の罫線）に見た目を委ねる＝「マス目」。md 未満（スマホ）は cellInputClass のまま
+// ＝従来の箱型・縦積み（挙動も見た目も不変）。フォーカス時は md でも枠を戻して所在を分かりやすく。
+const gridCellInput = `${cellInputClass} md:rounded-none md:border-transparent md:bg-transparent md:focus:border-zinc-900 md:focus:bg-white md:dark:focus:border-zinc-50 md:dark:focus:bg-zinc-950`;
+const gridCellSelect = `${cellInputClass} disabled:opacity-70 md:rounded-none md:border-transparent md:bg-transparent md:focus:border-zinc-900 md:focus:bg-white md:dark:focus:border-zinc-50 md:dark:focus:bg-zinc-950`;
+// PC 幅でセルに余白を与え、壁（罫線）から中身が離れて見えるようにする。md 未満では効かない。
+const gridCellPad = "md:px-2 md:py-1.5";
+// 単独行 / ヘッダーの列テンプレート（PC 幅）。#／種別／作業内容／数量／金額／小計／操作 の 7 列。
+const GRID_COLS_MD =
+  "md:grid-cols-[28px_84px_minmax(0,1fr)_56px_104px_96px_auto]";
+
 const labelClass =
   "mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
@@ -783,6 +795,86 @@ export default function ItemsForm({
     setPartPickerOpen(false);
   }
 
+  // 作業内容セルの候補表示（2026-09）用データ。
+  // 部品ごとの variant.part_number（社内品番）一覧＝候補の検索対象＋社内品番表示に使う。
+  const partNumbersByPart = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const v of allVariants) {
+      const n = v.part_number?.trim();
+      if (!n) continue;
+      const arr = m.get(v.part_id);
+      if (arr) arr.push(n);
+      else m.set(v.part_id, [n]);
+    }
+    return m;
+  }, [allVariants]);
+
+  // 候補に出す単価は、実際に挿入される行（rowFromPart / rowFromMenu）の unit_price を
+  // そのまま読む。これで「候補に見えた単価」と「挿入後の金額」が必ず一致する（＝二重計算しない）。
+  function partInsertPrice(p: PartsInventory): number {
+    return (
+      Number(
+        rowFromPart(
+          p,
+          "",
+          effectiveVariantByPart.get(p.id) ?? null,
+          isBusiness,
+        ).unit_price,
+      ) || 0
+    );
+  }
+  function menuInsertPrice(m: WorkMenuItem): number {
+    return Number(rowFromMenu(m, indirectByMenu, isBusiness).unit_price) || 0;
+  }
+
+  // 候補を決定したとき: 既存の追加ボタンと完全に同じ行を作り、編集中だったその行を
+  // 「置き換える」（新しい行を増やさない）。行の生成は既存 rowFromPart / rowFromMenu に委ね、
+  // カテゴリ振り分けも既存ボタン（handlePartPickerConfirm / handleMenuPickerConfirm）と同じ:
+  //   部品 → 常に「整備」（無ければ先頭）／メニュー → そのメニューの業務カテゴリ（空なら整備）。
+  function pickSuggestion(
+    categoryId: string,
+    index: number,
+    choice: SuggestChoice,
+  ) {
+    const partFallbackId =
+      allCategories.find((c) => c.name === "整備")?.id ??
+      allCategories[0]?.id ??
+      "";
+    const menuFallbackId = allCategories.find((c) => c.name === "整備")?.id ?? "";
+    let built: ItemRow;
+    if (choice.type === "part") {
+      built = rowFromPart(
+        choice.part,
+        partFallbackId,
+        effectiveVariantByPart.get(choice.part.id) ?? null,
+        isBusiness,
+      );
+    } else {
+      built = rowFromMenu(choice.menu, indirectByMenu, isBusiness);
+      if (!built.item_category_id) built.item_category_id = menuFallbackId;
+    }
+    const key = built.item_category_id || categoryId;
+    if (!built.item_category_id) built.item_category_id = key;
+    setRowsByCat((prev) => {
+      const next: Record<string, ItemRow[]> = { ...prev };
+      if (key === categoryId) {
+        // 同一カテゴリ: 編集中だった行を「その場で」作った行に置き換える（位置を保つ）。
+        const src = [...(next[categoryId] ?? [])];
+        if (index >= 0 && index < src.length) src[index] = built;
+        else src.push(built);
+        next[categoryId] = src;
+      } else {
+        // 別カテゴリ（例: 車検整備のメニュー）: 元セクションから取り除き、
+        // 既存の「メニューから追加」ボタンと同じくそのメニューのカテゴリ末尾へ載せる。
+        const src = [...(next[categoryId] ?? [])];
+        if (index >= 0 && index < src.length) src.splice(index, 1);
+        next[categoryId] = src;
+        next[key] = [...(next[key] ?? []), built];
+      }
+      return next;
+    });
+  }
+
   // 行の ☆ ボタン: その行を作業メニューマスター（work_menu_items）に登録する。
   // 旧仕様（確認ダイアログ→一発INSERT）から、既存のメニュー登録フォーム（WorkMenuForm）を
   // ポップアップで開く方式に変更。明細の情報を初期値として詰めた状態で開き、ユーザーが確認・
@@ -951,6 +1043,14 @@ export default function ItemsForm({
               defaultTaxCategory={sectionTaxCategory}
               onRegisterRow={openMenuModal}
               isBusiness={isBusiness}
+              suggestParts={allParts}
+              suggestMenus={allMenus}
+              partNumbersByPart={partNumbersByPart}
+              partInsertPrice={partInsertPrice}
+              menuInsertPrice={menuInsertPrice}
+              onPickSuggestion={(index, choice) =>
+                pickSuggestion(catId, index, choice)
+              }
             />
           </section>
         );
@@ -1355,6 +1455,12 @@ function ItemTableEditor({
   defaultTaxCategory,
   onRegisterRow,
   isBusiness,
+  suggestParts,
+  suggestMenus,
+  partNumbersByPart,
+  partInsertPrice,
+  menuInsertPrice,
+  onPickSuggestion,
 }: {
   rows: ItemRow[];
   onChange: (rows: ItemRow[]) => void;
@@ -1367,6 +1473,14 @@ function ItemTableEditor({
   onRegisterRow: (categoryId: string, index: number) => void;
   // 業販対応 段2-1: 法人時は「単価/業販/参考定価」3列、個人時は「単価」1列に切替。
   isBusiness: boolean;
+  // 作業内容セルの候補表示（2026-09）。候補の出どころと表示用ヘルパー、決定時のコールバック。
+  suggestParts: PartsInventory[];
+  suggestMenus: WorkMenuItem[];
+  partNumbersByPart: Map<string, string[]>;
+  partInsertPrice: (p: PartsInventory) => number;
+  menuInsertPrice: (m: WorkMenuItem) => number;
+  // 候補を決定したとき（この行 index を、選んだ候補で置き換える）。行生成は親が行う。
+  onPickSuggestion: (index: number, choice: SuggestChoice) => void;
 }) {
   function update(i: number, patch: Partial<ItemRow>) {
     onChange(
@@ -1419,8 +1533,12 @@ function ItemTableEditor({
   function toggleDetail(i: number) {
     update(i, { _detailOpen: !(rows[i]?._detailOpen === true) });
   }
-  function add() {
-    onChange([...rows, emptyRow(categoryId, defaultTaxCategory)]);
+  // 「+ 明細行を追加」/「＋1行」/「＋5行」。作られる空行の中身は従来の add() と同一。
+  function addN(n: number) {
+    const extra = Array.from({ length: n }, () =>
+      emptyRow(categoryId, defaultTaxCategory),
+    );
+    onChange([...rows, ...extra]);
   }
   function remove(i: number) {
     onChange(rows.filter((_, idx) => idx !== i));
@@ -1549,15 +1667,34 @@ function ItemTableEditor({
           明細はありません
         </p>
       ) : (
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
-        >
-          <SortableContext
-            items={units.map((u) => unitId(u))}
-            strategy={verticalListSortingStrategy}
+        // PC 幅のみ枠で囲ってテーブルに見せる。overflow-hidden は付けない
+        // （候補ドロップダウンが行の外に出るため。付けると下端の行で切れる）。
+        <div className="md:rounded-lg md:border md:border-zinc-200 md:dark:border-zinc-800">
+          {/* PC 幅のみの列ヘッダー。md 未満（スマホ縦積み）では出さない。
+              業販/定価バッジは金額列にまとめて1つだけ出す（各行では隠す）。 */}
+          <div
+            className={`hidden md:grid ${GRID_COLS_MD} md:items-stretch md:divide-x md:divide-zinc-200 md:rounded-t-lg md:border-b md:border-zinc-200 md:bg-zinc-50 md:text-[10px] md:font-medium md:uppercase md:tracking-wider md:text-zinc-500 md:dark:divide-zinc-800 md:dark:border-zinc-800 md:dark:bg-zinc-800/40 md:dark:text-zinc-400`}
           >
+            <div className="px-2 py-1.5 text-center">#</div>
+            <div className="px-2 py-1.5">種別</div>
+            <div className="px-2 py-1.5">作業内容</div>
+            <div className="px-2 py-1.5 text-center">数量</div>
+            <div className="flex items-center justify-between gap-1 px-2 py-1.5">
+              <span>金額</span>
+              <PriceKindBadge isBusiness={isBusiness} />
+            </div>
+            <div className="px-2 py-1.5 text-right">小計</div>
+            <div className="px-2 py-1.5 text-right">操作</div>
+          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={units.map((u) => unitId(u))}
+              strategy={verticalListSortingStrategy}
+            >
             {units.map((u, uPos) => {
               const id = unitId(u);
               // 表示単位ごとにゼブラ・連番（結合ユニットは1つとして数える）。
@@ -1849,16 +1986,19 @@ function ItemTableEditor({
                 <SortableItemRow key={id} id={id} zebra={zebra}>
                   {(handle) => (
                     <>
-              {/* 段階2: 簡易入力行 = [#] [種別] [名前] [数量] [金額+バッジ] [詳細/×]。
+              {/* 段階2: 簡易入力行 = [#] [種別] [名前] [数量] [金額+バッジ] [小計] [詳細/×]。
                   原価・定価・業販・マスター登録・補足は下の「詳細」パネルに格納し、普段はすっきり保つ。
-                  items-end で各セルを下端揃え（ラベル付きセルの入力底辺を一致）。 */}
-              <div className="wos-item-row grid items-end gap-x-2 gap-y-1 grid-cols-[24px_72px_minmax(0,1fr)_52px_100px_auto] sm:grid-cols-[28px_84px_minmax(0,1fr)_60px_116px_auto]">
+                  md 未満は wos-item-row（globals.css）で 1 列縦積み＝従来どおり。md 以上は 7 列の
+                  マス目（罫線 divide-x）＋小計列に切り替える（見た目のみ・保存や計算は不変）。 */}
+              <div
+                className={`wos-item-row grid items-end gap-x-2 gap-y-1 grid-cols-[24px_72px_minmax(0,1fr)_52px_100px_auto] sm:grid-cols-[28px_84px_minmax(0,1fr)_60px_116px_auto] ${GRID_COLS_MD} md:items-stretch md:gap-x-0 md:divide-x md:divide-zinc-200 md:dark:divide-zinc-800`}
+              >
                 {/* # バッジ＝ドラッグハンドル。ハンドルだけに listeners を付け、行内 input は掴まず編集可。 */}
                 <button
                   type="button"
                   aria-label="ドラッグして並べ替え"
                   title="ドラッグで並べ替え（同カテゴリ内）"
-                  className="mb-0.5 inline-flex h-8 w-6 cursor-grab items-center justify-center rounded bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300"
+                  className="mb-0.5 inline-flex h-8 w-6 cursor-grab items-center justify-center rounded bg-zinc-200 text-xs font-medium text-zinc-700 active:cursor-grabbing dark:bg-zinc-700 dark:text-zinc-300 md:mb-0 md:h-full md:w-full md:place-self-stretch md:rounded-none"
                   {...handle.attributes}
                   {...handle.listeners}
                 >
@@ -1866,8 +2006,8 @@ function ItemTableEditor({
                 </button>
 
                 {/* 種別（作業/部品）。マスター由来の行は種別が確定なので変更不可。 */}
-                <div>
-                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                <div className={gridCellPad}>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 md:hidden">
                     種別
                   </label>
                   <select
@@ -1880,30 +2020,38 @@ function ItemTableEditor({
                         ? "マスター（メニュー/部品在庫）から追加した行は種別が確定しています"
                         : "作業か部品かを選びます"
                     }
-                    className={`${cellInputClass} disabled:opacity-70`}
+                    className={gridCellSelect}
                   >
                     <option value="labor">作業</option>
                     <option value="part">部品</option>
                   </select>
                 </div>
 
-                {/* 名前（種別に応じて work_name / part_name を編集） */}
-                <div>
-                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                {/* 名前（種別に応じて work_name / part_name を編集）。
+                    単独行のみ、部品在庫＋作業メニューの候補を出す（決定で行を置き換える）。
+                    まとめ行の名前欄には出さない（Q1）。 */}
+                <div className={gridCellPad}>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 md:hidden">
                     {r.kind === "part" ? "部品名" : "作業内容"}
                   </label>
-                  <input
+                  <WorkNameSuggest
                     value={r.kind === "part" ? r.part_name : r.name}
-                    onChange={(e) => updateName(i, e.target.value)}
+                    onChange={(v) => updateName(i, v)}
+                    onPick={(choice) => onPickSuggestion(i, choice)}
+                    parts={suggestParts}
+                    menus={suggestMenus}
+                    partNumbersByPart={partNumbersByPart}
+                    partInsertPrice={partInsertPrice}
+                    menuInsertPrice={menuInsertPrice}
                     placeholder={r.kind === "part" ? "部品名" : "作業内容"}
-                    aria-label={r.kind === "part" ? "部品名" : "作業内容"}
-                    className={cellInputClass}
+                    ariaLabel={r.kind === "part" ? "部品名" : "作業内容"}
+                    className={gridCellInput}
                   />
                 </div>
 
                 {/* 数量 */}
-                <div>
-                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                <div className={gridCellPad}>
+                  <label className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 md:hidden">
                     数量
                   </label>
                   <input
@@ -1914,13 +2062,13 @@ function ItemTableEditor({
                     value={r.quantity}
                     onChange={(e) => update(i, { quantity: e.target.value })}
                     aria-label="数量"
-                    className={`${cellInputClass} text-center`}
+                    className={`${gridCellInput} text-center`}
                   />
                 </div>
 
-                {/* 金額（単価）＋業販/定価バッジ */}
-                <div>
-                  <label className="mb-0.5 flex items-center justify-between gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                {/* 金額（単価）＋業販/定価バッジ。md 以上ではバッジはヘッダー側に出すのでラベルは隠す。 */}
+                <div className={gridCellPad}>
+                  <label className="mb-0.5 flex items-center justify-between gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400 md:hidden">
                     <span>金額</span>
                     <PriceKindBadge isBusiness={isBusiness} />
                   </label>
@@ -1933,12 +2081,21 @@ function ItemTableEditor({
                     onChange={(e) => updateUnitPrice(i, e.target.value)}
                     placeholder="—"
                     aria-label="金額（単価）"
-                    className={`${cellInputClass} text-right`}
+                    className={`${gridCellInput} text-right`}
                   />
                 </div>
 
+                {/* 小計（md 以上の列。md 未満では下の行に出す＝従来どおり）。表示専用。 */}
+                <div
+                  className={`hidden md:flex md:items-center md:justify-end md:text-right md:text-xs md:text-zinc-600 md:dark:text-zinc-300 ${gridCellPad}`}
+                >
+                  {formatYen(rowSubtotal(rowItem))}
+                </div>
+
                 {/* 操作: 詳細トグル / 行削除 */}
-                <div className="flex items-center gap-1 justify-self-end">
+                <div
+                  className={`flex items-center gap-1 justify-self-end md:justify-end ${gridCellPad}`}
+                >
                   <button
                     type="button"
                     onClick={() => toggleDetail(i)}
@@ -1966,8 +2123,8 @@ function ItemTableEditor({
                 </div>
               </div>
 
-              {/* 行の小計（右寄せ・控えめ）。合計は下のサマリーに集約。 */}
-              <div className="mt-0.5 pr-1 text-right text-[11px] text-zinc-500 dark:text-zinc-400">
+              {/* 行の小計（右寄せ・控えめ）。md 未満のみ表示（md 以上は上の小計列に出す）。 */}
+              <div className="mt-0.5 pr-1 text-right text-[11px] text-zinc-500 dark:text-zinc-400 md:hidden">
                 小計 {formatYen(rowSubtotal(rowItem))}
               </div>
 
@@ -2101,16 +2258,27 @@ function ItemTableEditor({
                 </SortableItemRow>
               );
             })}
-          </SortableContext>
-        </DndContext>
+            </SortableContext>
+          </DndContext>
+        </div>
       )}
-      <button
-        type="button"
-        onClick={add}
-        className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
-      >
-        ＋ 明細行を追加
-      </button>
+      {/* 行の追加: 空行の中身は従来の「＋ 明細行を追加」と同一。1行 / 5行 をまとめて足せる。 */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => addN(1)}
+          className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
+        >
+          ＋1行
+        </button>
+        <button
+          type="button"
+          onClick={() => addN(5)}
+          className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-2 text-sm text-zinc-700 transition-colors hover:border-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-500 dark:hover:bg-zinc-800"
+        >
+          ＋5行
+        </button>
+      </div>
     </div>
   );
 }
@@ -2149,7 +2317,7 @@ function SortableItemRow({
     <div
       ref={setNodeRef}
       style={style}
-      className={`rounded-md border border-zinc-200 p-2.5 dark:border-zinc-800 ${
+      className={`rounded-md border border-zinc-200 p-2.5 dark:border-zinc-800 md:rounded-none md:border-0 md:border-b md:border-zinc-200 md:p-2 md:last:border-b-0 md:dark:border-zinc-800 ${
         isDragging
           ? "bg-white shadow-md dark:bg-zinc-900"
           : zebra
