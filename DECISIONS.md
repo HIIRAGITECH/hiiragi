@@ -19,8 +19,12 @@
 - 技術: Next.js 16 + TypeScript + Supabase + Vercel
 - リポジトリ: GitHub `HIIRAGITECH/hiiragi`（private, main直コミット運用）
 - 本番URL: https://app.hiiragi-tech.app
-- 開発支援: Claude Code v2.1.x（Supabase MCP接続、dev/prod両方）
-- DB: dev / prod の2プロジェクト。本番スキーマ変更はマイグレーション or SQL Editor
+- 開発支援: Claude Code v2.1.x（Supabase MCP接続）
+- **DB運用（重要・2026-09 以降）**: **dev プロジェクトは Supabase 解約済み。今後は prod 単独運用**。
+  - 事前検証用の dev DB は無い＝**DBに依存する検証・スキーマ変更は本番一発勝負**になる。認証・RLS・RPC・
+    マイグレーション等「本番でしか試せない変更」は、使い捨てダミーデータでの本番1周確認を前提に慎重に進める。
+  - prod MCP は**読み取り専用**（SELECT/EXPLAIN は可・書き込み不可）。本番スキーマ変更は小野寺が SQL Editor で手動実行。
+  - 純粋な表示/CSS/フロント変更は `tsc`・`eslint`・`next build` の通過を実機検証の代わりとし、デプロイ後に本番で目視確認する。
 - 開発者: 1人（ソロfounder）
 - 主要テストユーザー: ヒデヨシテクニカルサプライ様
 
@@ -83,6 +87,24 @@
 ### 大きい工事（要設計・腰を据えて）
 - ⬜ **合計請求書＋入金管理の作り直し**：現状は「**いつ**入金したか（`paid_at`）」は記録するが「**いくら**」を記録せず全額入金扱い。部分入金の記録・未入金の繰り越し・**入金テーブル新設**が必要。データモデルから設計し直す大工事。
 - 🚧 **Stripe課金**：ブランチは**mainマージ済みと判明**（backup タグ `backup-before-stripe-merge` あり）。現状確認込みで着手する。残＝dev動作確認・liveキー・本番Webhook・本番price・billing金額調整（§2ワークストリーム参照）。
+
+### 将来対応（規模が育ってから・SQL記録済み）
+- ⬜ **orders の集計用インデックス追加（E案・2026-10-26 記録）**：**1テナントが数千〜万件規模になったら実施**。
+  現状は prod 全51行で planner が index を使わず seq scan（当月売上クエリ 0.224ms）＝**今は入れても効果ゼロ**。
+  売上集計/ダッシュボードの月次集計（`user_id` ＋ `sales_month`／`invoiced_at` で絞る `.or()` 2枝）が重くなってきたら、
+  本番の SQL Editor で以下を実行（prod MCP は読み取り専用のため手動）。`CONCURRENTLY` でテーブルロックを避ける。
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_user_sales_month_idx
+    ON public.orders (user_id, sales_month);
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_user_invoiced_at_idx
+    ON public.orders (user_id, invoiced_at);
+  -- 任意（請求済/入金済に絞る部分index）:
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS orders_user_billed_invoiced_idx
+    ON public.orders (user_id, invoiced_at)
+    WHERE invoice_status IN ('請求済','入金済');
+  ```
+  適用後は `EXPLAIN (ANALYZE)` で Index Scan に切り替わったか確認し、本節へ「適用済み」を追記する。
+  詳細な背景は §4 2026-10-26（売上集計の月移動改善）を参照。
 
 ### 小さめ・寝かせ中
 - ⬜ **社内品番をPDF/明細に出す**：`OrderItem.part_number`（フィールド追加）＋PDF列描画。二階建て化以降の継続残課題。
@@ -150,6 +172,55 @@
 ---
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
+
+### 2026-10-26 ── 売上集計の「月移動が遅い」改善（A+B+C 実施・D見送り・E将来用）・**本番反映済み**（コードのみ・DB無改修）
+
+> `/dashboard/sales` の前月/翌月切替が遅い件を調査し、**原因は DB ではなくアプリ/ネットワーク側**と特定。
+> 即効・低リスクの A+B+C を実施した。DB規模が極小のためインデックス追加(E)は現時点で効果ゼロ＝将来用に記録のみ。
+
+**調査で分かった事実（prod 実測・読み取り専用／dev は解約済みで prod のみ）**
+- orders は**全51行**（請求済46・sales_month設定5件・3テナント・最大テナント33行）。items(jsonb) は平均928B・最大2.3KB・
+  テーブル全体256kB。当月売上クエリの `EXPLAIN (ANALYZE)` は **Seq Scan・Execution Time 0.224ms**（planner は
+  この規模では index を使わず seq scan を選ぶ）。**＝DB・インデックス・items は犯人ではない**。
+- 既存 index: `orders_pkey (user_id,id)` / `orders_invoiced_at_idx` / `orders_is_archived_idx` / `orders_mypage_token_key`
+  （`sales_month` は未index）。`lib/sales/filter.ts` の `.or()` 2枝は未index列を含むが、51行では無関係。
+- **月切替のホットパス**（searchParams 変更＝同一ルート遷移なので layout は再実行されない）:
+  ① `proxy.ts`→`lib/supabase/proxy.ts`：`auth.getUser()`（Authへ往復）＋`subscriptions` 1行SELECT（DB往復）。
+  ② `sales/page.tsx`：`auth.getUser()`（またAuthへ往復・proxyと重複）＋`Promise.all([orders, categories])`（既に並列）。
+  → レンダリング前に**Supabaseへ直列で約3往復**＋`loading.tsx` が無く切替中は前画面のまま無反応に見えた。これが体感遅延の実体。
+- ダッシュボード(`/dashboard` KPI)も同構造（`Promise.all` 6本・items全件取得→JS集計）だが、同じく DB規模が小さく実害は認証往復とレンダリングが主。
+
+**A（実施）── `loading.tsx` スケルトン追加**
+- `app/dashboard/sales/loading.tsx` と `app/dashboard/loading.tsx` を新設（どちらも従来は無かった）。遷移の瞬間に骨格を
+  即表示し「押したら即反応」する体感にする。実コンテナ class（`wos-pagehead`/`wos-card`）と既存CSS変数のみ＝slate基調・
+  ダークモード維持。**Next.js 16 では動的ルートは loading.js がある場合だけ shell が prefetch 対象になる**ため、Bの前提にもなる。
+
+**B（実施）── 前月/翌月リンクの `prefetch={true}`**
+- Next.js 16 の `<Link prefetch>` 既定(null)は動的ルートを loading 境界までしか温めない。**`true` にすると「データ込みの
+  全ルート」を先読み**するため、前月/翌月の orders クエリまで背景取得され、クリック時のサーバー往復が消えて切替がほぼ瞬時になる。
+  `sales/page.tsx` の前月/翌月 `<Link>` に `prefetch={true}` を付与。クエリは純粋な読み取りで副作用なし・51行で背景取得も軽量。
+  **prefetch は本番のみ動作**（dev では体感変化なし）。
+
+**C（確認のみ・今夜は変更しない）── Vercel と Supabase のリージョン一致**
+- Supabase prod: `https://jnhhrdsfsgjquiyxydzv.supabase.co`（ref から region は判別不可）。
+- Vercel: リポジトリに `vercel.json` 無し・`.vercel` 設定も手元に無し＝**関数リージョンは Vercel ダッシュボード設定依存で、
+  コードからは確定できない**。認証往復が効くのはこの区間なので、**両者のリージョンが地理的に一致しているか要確認**
+  （理想は両方 Tokyo＝Supabase `ap-northeast-1` / Vercel `hnd1`。太平洋跨ぎだと1往復+150〜250ms×約3回で体感が悪化）。
+  確認場所: Vercel → Project → Settings → Functions → Region ／ Supabase → Project Settings → General → Region。
+  **不一致でも今回は報告のみ・変更しない**（リージョン移設は別途判断）。
+
+**D（見送り）── 認証往復の削減（`getUser()` 重複削減 / `getClaims()` ローカルJWT検証化）**
+- 実レイテンシを最も削れる案だが、**dev 環境が無くなった今、認証領域の変更は本番一発勝負**になるため今回は見送り。
+- 将来やる場合の検証手順案（1〜2行）: **使い捨てのテスト用テナントを本番に1つ用意**し、`getClaims()` 置換後に
+  (1)正常ログイン・(2)未ログイン→/loginリダイレクト・(3)trial切れ→/locked・(4)管理者バイパス の4系統を本番で1周確認してから既存ユーザーに展開する。
+
+**E（将来用・記録のみ）── インデックス追加**
+- 現状51行では planner が使わず**効果ゼロ**。**1テナントが数千〜万件規模になったら**実施する（§2.5「将来対応」にSQL記録）。
+
+**検証・反映**
+- `tsc --noEmit`／`eslint`（新規2＋変更1ファイル）／`next build`（Compiled successfully・静的36/36）通過。dev解約済みのため
+  prefetch/loading の体感はデプロイ後に本番で確認する（prefetch は本番のみ動作）。
+- ブランチ `perf/sales-month-nav` → `main` マージ＆push → Vercel 自動デプロイ。**DB/マイグレーションなし（コードのみ）**。
 
 ### 2026-10-26 ── 管理番号（受注ID）の見切れ・斜体風フォントを全画面で修正・**本番反映済み**（コードのみ・DB無改修）
 

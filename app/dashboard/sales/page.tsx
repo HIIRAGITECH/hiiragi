@@ -282,14 +282,20 @@ export default async function SalesPage({
           </div>
         </div>
         <div className="wos-actions">
+          {/* 隣接月は prefetch={true} で「データ込みの全ルート」を先読みする。
+              売上集計は動的ルートなので既定(null)では loading 境界までしか温まらないが、
+              true にすると前月/翌月の orders クエリまで背景取得され、クリック時の
+              サーバー往復が消えて切替がほぼ瞬時になる（本番のみ動作・クエリは純粋な読み取り）。 */}
           <Link
             href={`/dashboard/sales?year=${prev.year}&month=${prev.month}`}
+            prefetch={true}
             className="wos-btn-ghost wos-btn-sm"
           >
             ← 前月
           </Link>
           <Link
             href={`/dashboard/sales?year=${next.year}&month=${next.month}`}
+            prefetch={true}
             className="wos-btn-ghost wos-btn-sm"
           >
             翌月 →
