@@ -159,9 +159,9 @@ export default function PaymentsTable({ rows }: Props) {
                     <td className="wos-td">
                       <Link
                         href={`/dashboard/orders/${r.id}`}
-                        className="wos-serif-num hover:underline"
+                        className="wos-num text-[var(--color-accent)] hover:underline"
                       >
-                        {r.id.slice(0, 8)}
+                        {r.id}
                       </Link>
                     </td>
                     <td className="wos-td">

@@ -96,9 +96,9 @@ export default async function HistoryTab({
                   <td className="wos-td">
                     <Link
                       href={`/dashboard/orders/${o.id}`}
-                      className="wos-serif-num hover:underline"
+                      className="wos-num text-[var(--color-accent)] hover:underline"
                     >
-                      {o.id.slice(0, 8)}
+                      {o.id}
                     </Link>
                   </td>
                   <td className="wos-td num">{formatDate(o.reception_date)}</td>
