@@ -151,6 +151,42 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-10-26 ── 管理番号（受注ID）の見切れ・斜体風フォントを全画面で修正・**本番反映済み**（コードのみ・DB無改修）
+
+> 受注の管理番号「26MB-0001」（9文字）が複数画面で「26MB-000」と末尾1文字欠けて表示され、
+> さらに斜体風の特殊フォントに見えていた。欠けると **0001〜0009 が全て「26MB-000」に潰れて区別不能**で、
+> 全行同じ番号に見える実用上の障害だった。管理番号はこのアプリの主キー（`orders.id` が YYMB-0000 形式の
+> テキストPK）なので、1文字でも欠けると別受注と区別がつかない。**表示だけの修正・DB/保存/計算/PDF は無改修**。
+
+**原因（共通）**
+- 表示コードが `orders.id` を **UUID 前提の `id.slice(0, 8)`** で切っていた（過去 UUID だった頃の名残）。
+  9文字の管理番号を8文字に切ると末尾が欠け、連番 0001〜0009 がすべて「26MB-000」になる。
+- フォント `wos-serif-num`（`font-family: var(--font-serif)` ＋ `font-style: italic`）が斜体風の正体。
+  本来 ID 表示用に当てていたが、管理番号には不向き。
+
+**修正（受注管理番号の表示4箇所のみ）**
+- `slice(0, 8)` を除去し **常に全桁表示**（桁が増えて 26MB-0100 等になっても切れない）。
+- フォントを、受注一覧(`orders-table.tsx`)が既に使っている通常フォント **`wos-num`（tabular-nums・非斜体）
+  ＋ `text-[var(--color-accent)]`（リンク色）** に統一。斜体 serif をやめた。配色は既存CSS変数のため
+  **ダークモード対応は維持**・slate基調も不変。
+- 対象: `app/dashboard/sales/sales-interactive.tsx`（売上集計の受注明細）/ `app/dashboard/customers/[id]/history-tab.tsx`
+  （顧客詳細の整備履歴）/ `app/dashboard/payments/payments-table.tsx`（入金管理）/ `app/dashboard/orders/[id]/page.tsx`
+  （受注詳細ヘッダ「No. {id}」。元から全桁だが斜体 serif だったのを wos-num に統一）。
+
+**触っていない（スコープ外と判断）**
+- 受注一覧 `orders-table.tsx`（元から `wos-num`＋全桁＝正しい）・アーカイブ `archive-table.tsx`（`font-mono`＋全桁）・
+  ダッシュボード `page.tsx`（全桁・フォールバック表示）は **既に全桁表示で無問題**＝無改修。
+- **顧客コード（`customers.id` の `slice(0,8)` 短縮表示・customers 一覧/詳細ヘッダ）は対象外**。あれは UUID の
+  先頭8桁を人間向けラベルにした別物で、管理番号ではなく、連番潰れも起きない（先頭8桁が各顧客で異なる）。
+- マイページ・PDF・RPC・型・DB・在庫・Stripe は一切無改修。
+
+**検証・反映**
+- `tsc --noEmit`／`eslint`（変更4ファイル）／`next build`（Compiled successfully）通過。
+- **dev は Supabase 解約済みのため実データでの dev 目視は不可**。ただし変更は「slice除去＋className変更」のみで、
+  本番稼働中の受注一覧が同一パターン（`wos-num`＋accent＋全桁 `o.id`）で正常描画している実証済みの作りに揃えた。
+- ブランチ `fix/management-number-display` → `main` に **fast-forward マージ＆push**（`fc7e09e..a2d954c`）。
+  Vercel の GitHub 連携で本番（`https://app.hiiragi-tech.app`）へ自動デプロイ。**DB/マイグレーションなし（コードのみ）**。
+
 ### 2026-09-23 ── 受注明細を「スプレッドシート風グリッド＋作業内容セルの候補表示」に刷新（PC幅のみ・**DB/保存/計算/在庫/PDF は無改修**・実装のみ／ブランチ `feature/order-items-grid`／実機未検証）
 
 > 受注詳細の明細を、見た目だけスプレッドシート風の表（グリッド）にし、作業内容セルに打つと
