@@ -487,6 +487,21 @@ function sanitizeText(s: string | null | undefined): string {
   return s.replace(/[\x00-\x1f]+/g, " ");
 }
 
+// 備考など、改行を保持したい複数行テキスト用のサニタイズ。
+//   sanitizeText は \n も含めて制御文字を半角スペースに潰すため、備考の改行が
+//   消えて 1 行につながってしまう。この関数は改行(\n)だけ残し、それ以外の
+//   制御文字（TAB 0x09 含む）は従来どおり半角スペースへ置換する。
+//   react-pdf の <Text> は \n を改行として描画する。
+//   - \r\n / \r を \n に統一
+//   - \n 以外の制御文字 (0x00-0x09, 0x0b-0x1f) は半角スペースへ
+//   - ユーザーが入力した空行（連続する改行）はそのまま残す
+function sanitizeMultilineText(s: string | null | undefined): string {
+  if (!s) return "";
+  return s
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\x00-\x09\x0b-\x1f]+/g, " ");
+}
+
 interface ItemsSectionProps {
   title: string;
   items: OrderItem[];
@@ -1042,7 +1057,7 @@ export function InvoiceDocument({
           return (
             <View style={styles.notesBox}>
               <Text style={styles.notesHeading}>備考</Text>
-              <Text style={styles.notesBody}>{sanitizeText(noteText)}</Text>
+              <Text style={styles.notesBody}>{sanitizeMultilineText(noteText)}</Text>
             </View>
           );
         })()}
