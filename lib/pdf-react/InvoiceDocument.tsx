@@ -1054,11 +1054,30 @@ export function InvoiceDocument({
                 ? order.invoice_notes
                 : null;
           if (!noteText || noteText.trim() === "") return null;
+          // 見出し「備考」だけがページ末尾に取り残される問題への対策（A案）。
+          //   見出し＋本文の冒頭数行（LEAD_LINES）を wrap={false} の View で一塊にし、
+          //   そこに余白が足りなければ罫線・見出しごと次ページへ送る。残りの本文は
+          //   後続の Text に流し、長文はページを跨いで最後まで描画する（備考全体を
+          //   wrap={false} にはしない＝1ページ超の長文が欠けるのを防ぐ）。
+          //   ※ @react-pdf 4.5.1 では wrapping View への minPresenceAhead が
+          //     期待どおり効かなかったため、wrap={false} で包む方式を採用。
+          //   改行・空行の保持は sanitizeMultilineText の結果（\n）をそのまま使う。
+          const LEAD_LINES = 3;
+          const noteLines = sanitizeMultilineText(noteText).split("\n");
+          const leadText = noteLines.slice(0, LEAD_LINES).join("\n");
+          const restText = noteLines.slice(LEAD_LINES).join("\n");
           return (
-            <View style={styles.notesBox}>
-              <Text style={styles.notesHeading}>備考</Text>
-              <Text style={styles.notesBody}>{sanitizeMultilineText(noteText)}</Text>
-            </View>
+            <>
+              <View style={styles.notesBox} wrap={false}>
+                <Text style={styles.notesHeading}>備考</Text>
+                {leadText !== "" ? (
+                  <Text style={styles.notesBody}>{leadText}</Text>
+                ) : null}
+              </View>
+              {restText !== "" ? (
+                <Text style={styles.notesBody}>{restText}</Text>
+              ) : null}
+            </>
           );
         })()}
       </Page>
