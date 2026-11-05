@@ -173,6 +173,28 @@
 
 ## 4. 意思決定ログ（なぜそう決めたか・追記型）
 
+### 2026-11-05 ── 帳票PDFの備考欄で改行が消える問題を修正（表示のみ・低リスク）・**本番反映**（コードのみ・DB無改修）
+
+> 受注の備考（`estimate_notes` / `invoice_notes`）に改行を入れても、PDF（見積書・請求書・納品書）では
+> 改行が消えて横1行につながっていた。HTML印刷プレビュー（`printable-document.tsx`、`whitespace-pre-wrap`）は
+> 正しく改行されており、PDF側だけの問題だった。
+
+**原因**
+- `lib/pdf-react/InvoiceDocument.tsx` の `sanitizeText()` が `s.replace(/[\x00-\x1f]+/g, " ")` で
+  改行（`\n`=0x0A）・`\r` を含む全制御文字を半角スペースに潰していた。備考の描画もこれを通っていた。
+
+**修正（最小変更・InvoiceDocument.tsx の1ファイルのみ）**
+- 備考専用の `sanitizeMultilineText()` を新設：`\r\n`/`\r`→`\n` に統一、`\n` 以外の制御文字（TAB 0x09 含む
+  0x00-0x09・0x0b-0x1f）は従来どおり半角スペースへ、ユーザー入力の空行（連続改行）はそのまま保持。
+- 備考の描画1箇所（`<Text style={styles.notesBody}>`）だけ `sanitizeText`→`sanitizeMultilineText` に差し替え。
+  react-pdf の `<Text>` は `\n` を改行として描画するため、split して複数 `<Text>` を並べる方式は不要だった。
+
+**触っていないもの**
+- 既存の `sanitizeText()` と他9箇所の呼び出し（品名・顧客名・件名・領収書 `ReceiptDocument` 等）は一切変更なし。
+- DB・保存処理・入力欄・計算・明細・マイページ・`printable-document.tsx` は無改修。
+
+**検証**：`tsc --noEmit` / eslint（変更ファイル）/ `next build` 通過。commit `1ebf1e6`。
+
 ### 2026-10-26 ── 売上集計の「月移動が遅い」改善（A+B+C 実施・D見送り・E将来用）・**本番反映済み**（コードのみ・DB無改修）
 
 > `/dashboard/sales` の前月/翌月切替が遅い件を調査し、**原因は DB ではなくアプリ/ネットワーク側**と特定。
