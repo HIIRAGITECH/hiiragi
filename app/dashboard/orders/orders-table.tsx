@@ -14,6 +14,7 @@ import {
   type WorkStatus,
 } from "@/lib/types";
 import {
+  archiveOrderFormAction,
   deleteOrder,
   updateEstimateStatus,
   updateInvoiceStatus,
@@ -371,6 +372,15 @@ function BoardCard({
               {mypageBusy ? "発行中…" : "🔗 URL発行"}
             </button>
           ) : null}
+          {/* アーカイブ（詳細画面と同一アクション・文言。一覧から非表示になる）。
+              削除の直前に配置。サイズはカード内の他ボタンに合わせて xs。 */}
+          <DeleteButton
+            action={archiveOrderFormAction}
+            hidden={{ id: o.id }}
+            confirmMessage={`受注「${o.id}」をアーカイブしますか？（一覧から非表示になります）`}
+            label="アーカイブ"
+            className="wos-btn-ghost wos-btn-xs"
+          />
           <DeleteButton
             action={deleteOrder}
             hidden={{ id: o.id }}
